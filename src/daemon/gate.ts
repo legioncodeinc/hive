@@ -47,14 +47,38 @@ const LOGIN_ROUTE = "/login" as const;
 /** The only two gate-exempt SCREENS (g-AC-7 / g-AC-8): always served directly, never redirected. */
 export const GATE_EXEMPT_ROUTES = [BUZZING_ROUTE, LOGIN_ROUTE] as const;
 
-/** thehive's OWN liveness route + the bundled SPA asset routes — never a page navigation to gate. */
-const GATE_EXEMPT_INFRA_PATHS = new Set<string>(["/health", "/app.js", "/styles.css", "/honeycomb-memory-cluster.svg"]);
+/**
+ * thehive's OWN liveness route + the bundled SPA asset routes — never a page navigation to gate.
+ * `/health` is deliberately NOT in this set (see {@link isInfraPath}): PRD-005b claims that same
+ * literal path for the operator-facing `/health` page, so it needs content-negotiated handling
+ * rather than a blanket exemption.
+ */
+const GATE_EXEMPT_INFRA_PATHS = new Set<string>(["/app.js", "/styles.css", "/honeycomb-memory-cluster.svg"]);
 
 /** Path PREFIXES that are data-plane traffic (the BFF proxy, fonts), never a gated page route. */
 const GATE_EXEMPT_INFRA_PREFIXES = ["/api/", "/setup/", "/fonts/"] as const;
 
-/** True for thehive's own infra/asset/proxy surface — bypasses the gate entirely (see module doc). */
-function isInfraPath(pathname: string): boolean {
+/**
+ * thehive's own machine-liveness path. Ambiguous on purpose (PRD-005b): a health-probe/monitoring
+ * caller (hivedoctor's own `/health` probe, an ops tool) never sends `Accept: text/html`, while a
+ * browser navigating to the new `/health` OPERATOR page always does. `server.ts`'s `/health`
+ * handler makes the SAME distinction so the two behaviors stay in lockstep.
+ */
+const LIVENESS_PATH = "/health" as const;
+
+/** True iff `accept` prefers HTML — the signal that distinguishes a page navigation from a machine probe. */
+function prefersHtml(accept: string): boolean {
+  return accept.includes("text/html");
+}
+
+/**
+ * True for thehive's own infra/asset/proxy surface — bypasses the gate entirely (see module doc).
+ * `/health` is infra ONLY when the caller is not asking for HTML (a liveness probe); an
+ * HTML-accepting request to `/health` is treated as a normal page route so it gets the same
+ * buzzing/login precedence as every other SPA route (PRD-005b).
+ */
+function isInfraPath(pathname: string, accept: string): boolean {
+  if (pathname === LIVENESS_PATH) return !prefersHtml(accept);
   if (GATE_EXEMPT_INFRA_PATHS.has(pathname)) return true;
   return GATE_EXEMPT_INFRA_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
@@ -90,9 +114,10 @@ export function createPortalGate(options: CreatePortalGateOptions = {}): Middlew
 
   return async (c: Context, next: () => Promise<void>): Promise<Response | void> => {
     const pathname = new URL(c.req.url).pathname;
+    const accept = c.req.header("accept") ?? "";
 
     // thehive's own infra/asset/proxy surface: never a page navigation, never gated.
-    if (isInfraPath(pathname)) {
+    if (isInfraPath(pathname, accept)) {
       await next();
       return undefined;
     }

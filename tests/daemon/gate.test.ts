@@ -238,3 +238,30 @@ describe("PRD-003a portal landing gate — bypasses thehive's own infra", () => 
     expect(setupState.status).not.toBe(302);
   });
 });
+
+describe("PRD-005b — /health is content-negotiated between the liveness probe and the operator page", () => {
+  it("an HTML-accepting request to /health is treated as a normal gated page (redirected when unhealthy)", async () => {
+    const daemon = gatedDaemon({ fleetStatusFetch: UNHEALTHY, setupAuthFetch: LOGGED_OUT });
+    const response = await daemon.app.request("http://thehive.local/health", {
+      headers: { accept: "text/html" },
+      redirect: "manual"
+    });
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/buzzing");
+  });
+
+  it("a non-HTML request to /health (a liveness probe) is still gate-exempt even when unhealthy + logged out", async () => {
+    const daemon = gatedDaemon({ fleetStatusFetch: UNHEALTHY, setupAuthFetch: LOGGED_OUT });
+    const response = await daemon.app.request("http://thehive.local/health", { redirect: "manual" });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
+  });
+
+  it("an HTML-accepting request to /health when healthy+authed serves the SPA shell directly (no redirect)", async () => {
+    const daemon = gatedDaemon({ fleetStatusFetch: HEALTHY, setupAuthFetch: LOGGED_IN });
+    const response = await daemon.app.request("http://thehive.local/health", { headers: { accept: "text/html" } });
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('id="root"');
+  });
+});

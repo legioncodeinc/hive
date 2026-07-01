@@ -32,6 +32,7 @@ import React from "react";
 
 import { Button } from "./primitives.js";
 import { ConnectivityBanner } from "./panels.js";
+import { HEALTH_ROUTE, HealthRail } from "./health-rail.js";
 import { matchRoute, ROUTES, type RouteEntry } from "./registry.js";
 import { Sidebar } from "./sidebar.js";
 import { usePathRoute } from "./router.js";
@@ -206,6 +207,10 @@ export function Shell({ client, assetBase = "assets" }: ShellProps = {}): React.
 			/>
 
 			<div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+				{/* PRD-005a: the top health rail — present on EVERY in-app route (hr-AC-1), fed by the
+				    shared telemetry hook, independent of the daemon-liveness poll above. */}
+				<HealthRail onOpenHealth={() => navigate(HEALTH_ROUTE)} />
+
 				{/* Shell chrome bar — the global "Pollinate now" action (relocated from the old Header, D-5). */}
 				<div
 					style={{

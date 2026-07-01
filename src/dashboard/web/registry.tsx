@@ -32,6 +32,7 @@ import React from "react";
 import { DashboardPage } from "./pages/dashboard.js";
 import { GraphPage } from "./pages/graph.js";
 import { HarnessesPage, resolveHarnessSubItems } from "./pages/harnesses.js";
+import { HealthPage } from "./pages/health.js";
 import { LogsPage } from "./pages/logs.js";
 import { MemoriesPage } from "./pages/memories.js";
 import { ProjectsPage } from "./pages/projects.js";
@@ -162,6 +163,13 @@ const LogsIcon = (
 	</Icon>
 );
 
+/** Health — a pulse line (the fleet health page, PRD-005b/PRD-005c). */
+const HealthIcon = (
+	<Icon>
+		<path d="M3 12h4l2-7 4 14 2-7h6" />
+	</Icon>
+);
+
 /** ROI — a rising trend line over an axis (the Net-ROI ledger, PRD-060e). */
 const RoiIcon = (
 	<Icon>
@@ -210,6 +218,11 @@ export const ROUTES: readonly RouteEntry[] = [
 	{ route: "/graph", label: "Memory Graph", icon: GraphIcon, component: GraphPage },
 	{ route: "/sync", label: "Sync", icon: SyncIcon, component: SyncPage },
 	{ route: "/logs", label: "Logs", icon: LogsIcon, component: LogsPage },
+	// PRD-005b/PRD-005c: the persistent fleet health page (per-service metrics + Deep Lake stats +
+	// a live, verbosity-filtered log tail). Note: `/health` is ALSO thehive's own machine-liveness
+	// path (`server.ts`); content negotiation on the server (`accept: text/html`) keeps both
+	// working at the identical literal path (see `gate.ts`/`server.ts`/`pages/health.tsx` docs).
+	{ route: "/health", label: "Health", icon: HealthIcon, component: HealthPage },
 	// PRD-060e: the ROI page (the Net-ROI ledger — measured/modeled savings vs infra + pollination cost,
 	// with org/team/agent/project rollups). ONE registry entry is the whole wiring (037c contract): the
 	// sidebar renders the nav item and the outlet routes the path, no sidebar/router hand-edit.

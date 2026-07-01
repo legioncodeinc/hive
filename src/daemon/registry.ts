@@ -67,6 +67,60 @@ export function parseHivedoctorRegistry(raw: string): Partial<Record<DaemonName,
   return bases;
 }
 
+/**
+ * Parse the RAW list of registered service names from a hivedoctor registry file body (PRD-004a
+ * bz-AC-1/bz-AC-2). Unlike {@link parseHivedoctorRegistry} (which narrows to the two daemons
+ * thehive's BFF proxy forwards to, `honeycomb`/`hivenectar`), this returns EVERY registered name —
+ * including `thehive` itself or any future peer — so `/buzzing` and the health rail can render one
+ * tile/pill per service that hivedoctor says should exist, even one thehive's proxy never routes
+ * to. A corrupt/absent registry degrades to an empty list (never a throw), matching every other
+ * reader of this file.
+ */
+export function parseRegisteredServiceNames(raw: string): readonly string[] {
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+
+  const parsed = HivedoctorRegistrySchema.safeParse(parsedJson);
+  if (!parsed.success) return [];
+
+  // De-duplicate defensively (a hand-edited registry could repeat a name); preserve first-seen order.
+  const seen = new Set<string>();
+  const names: string[] = [];
+  for (const entry of parsed.data.daemons) {
+    if (seen.has(entry.name)) continue;
+    seen.add(entry.name);
+    names.push(entry.name);
+  }
+  return names;
+}
+
+/** Options for {@link resolveRegisteredServiceNames}. */
+export interface ResolveRegisteredServiceNamesOptions {
+  readonly registryPath?: string;
+  readonly readFile?: (path: string) => string;
+}
+
+/**
+ * Read the FULL list of registered service names from hivedoctor's registry file (PRD-004a
+ * bz-AC-1/bz-AC-2, PRD-005a hr-AC-1). A missing/unreadable/corrupt registry resolves to an empty
+ * list rather than throwing, so a cold box with no registry yet still serves `/buzzing` (it simply
+ * shows no tiles until the fleet-status/SSE feed enumerates services some other way).
+ */
+export function resolveRegisteredServiceNames(options: ResolveRegisteredServiceNamesOptions = {}): readonly string[] {
+  const registryPath = options.registryPath ?? HIVEDOCTOR_REGISTRY_PATH;
+  const readFile = options.readFile ?? ((path: string): string => readFileSync(path, "utf8"));
+
+  try {
+    return parseRegisteredServiceNames(readFile(registryPath));
+  } catch {
+    return [];
+  }
+}
+
 export function resolveDaemonBases(options: ResolveDaemonBasesOptions = {}): DaemonBases {
   const registryPath = options.registryPath ?? HIVEDOCTOR_REGISTRY_PATH;
   const readFile = options.readFile ?? ((path: string): string => readFileSync(path, "utf8"));

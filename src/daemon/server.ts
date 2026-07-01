@@ -11,10 +11,12 @@ import {
   THEHIVE_PORT,
   THEHIVE_VERSION
 } from "../shared/constants.js";
-import { mountDashboardAssets, mountDashboardShellFallback } from "./dashboard/host.js";
+import { mountDashboardAssets, mountDashboardShellFallback, renderShell } from "./dashboard/host.js";
 import { fetchFleetStatus, type FetchImpl } from "./fleet-status.js";
 import { createPortalGate } from "./gate.js";
 import { createApiProxy, type ProxyFetch } from "./proxy.js";
+import { resolveRegisteredServiceNames } from "./registry.js";
+import { createTelemetryStreamHandler, type TelemetryFetch } from "./telemetry-proxy.js";
 import type { SetupAuthFetchImpl } from "./setup-auth.js";
 
 export interface CreateThehiveOptions {
@@ -28,6 +30,10 @@ export interface CreateThehiveOptions {
   readonly proxyFetch?: ProxyFetch;
   /** The fetch used by the portal gate's auth check (`/setup/state`, defaults to the global `fetch`). */
   readonly setupAuthFetch?: SetupAuthFetchImpl;
+  /** Override hivedoctor's SSE events URL the telemetry relay connects to (defaults to the fixed loopback constant). */
+  readonly hivedoctorEventsUrl?: string;
+  /** The fetch used by the telemetry relay to reach hivedoctor's SSE stream (defaults to the global `fetch`). */
+  readonly telemetryStreamFetch?: TelemetryFetch;
 }
 
 export interface StartThehiveOptions extends CreateThehiveOptions {
@@ -91,18 +97,47 @@ export function createThehive(options: CreateThehiveOptions = {}): ThehiveInstan
   // (below) so they win.
   mountDashboardAssets(app);
 
-  app.get("/health", (c) =>
-    c.json({
+  // PRD-005b: `/health` is content-negotiated (the gate makes the same distinction, `gate.ts`
+  // `isInfraPath`). A machine probe (hivedoctor's own liveness check, monitoring) never asks for
+  // HTML and gets the existing cheap liveness JSON unchanged; a browser navigating to the new
+  // operator-facing `/health` page asks for HTML and gets the SAME SPA shell every other gated
+  // route renders (the bundled client resolves the `/health` registry page itself).
+  app.get("/health", (c) => {
+    const accept = c.req.header("accept") ?? "";
+    if (accept.includes("text/html")) {
+      c.header("cache-control", "no-cache");
+      return c.html(renderShell());
+    }
+    return c.json({
       status: "ok",
       uptimeMs: Math.max(0, now() - startedAt),
       version: THEHIVE_VERSION
-    })
-  );
+    });
+  });
 
   // thehive-owned data route: aggregates hivedoctor's supervisor status. Registered BEFORE the
   // catch-all proxy so it wins (Hono runs matching handlers in registration order).
   app.get("/api/fleet-status", async (c) =>
     c.json(await fetchFleetStatus(fleetStatusFetch, hivedoctorStatusUrl))
+  );
+
+  // PRD-004a/PRD-005a: the full list of hivedoctor-REGISTERED service names, even one thehive's
+  // BFF proxy never routes to (e.g. hivedoctor/thehive itself). Lets `/buzzing` and the health
+  // rail render one tile/pill per registered service before any telemetry has arrived at all
+  // (bz-AC-1/bz-AC-2, hr-AC-1), independent of whichever daemons `resolveDaemonBases` proxies for.
+  app.get("/api/registered-services", (c) =>
+    c.json({ names: resolveRegisteredServiceNames({ registryPath: options.registryPath }) })
+  );
+
+  // PRD-004/PRD-005: the same-origin relay of hivedoctor's fleet-telemetry SSE stream
+  // (`telemetry-proxy.ts`). Registered BEFORE the generic `/api/*` proxy so THIS specific route
+  // wins; the browser only ever opens `/api/telemetry/stream`, never hivedoctor's `:3852` directly.
+  app.get(
+    "/api/telemetry/stream",
+    createTelemetryStreamHandler({
+      hivedoctorEventsUrl: options.hivedoctorEventsUrl,
+      fetchImpl: options.telemetryStreamFetch
+    })
   );
 
   // Server-side federation (BFF): every other `/api/*` and `/setup/*` request is proxied over

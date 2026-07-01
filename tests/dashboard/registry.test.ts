@@ -17,6 +17,8 @@ describe("dashboard route registry", () => {
       "Memory Graph",
       "Sync",
       "Logs",
+      // PRD-005b/PRD-005c: the persistent fleet health page, slotted after Logs.
+      "Health",
       "ROI",
       "Settings"
     ]);
@@ -32,6 +34,7 @@ describe("dashboard route registry", () => {
       "/graph",
       "/sync",
       "/logs",
+      "/health",
       "/roi",
       "/settings"
     ]);

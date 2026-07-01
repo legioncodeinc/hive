@@ -25,7 +25,7 @@ import { createRoot } from "react-dom/client";
 
 import { Shell } from "./app.js";
 import { resolveBootScreen } from "./boot-route.js";
-import { ReadinessSplash } from "./readiness-splash.js";
+import { BuzzingScreen } from "./buzzing-screen.js";
 import { LoginScreen } from "./setup-gate.js";
 
 /** Mount the screen the server already authorized for `location.pathname`. Idempotent-safe per load. */
@@ -49,7 +49,7 @@ function mount(): void {
 
 	const element =
 		screen === "buzzing" ? (
-			<ReadinessSplash assetBase={assetBase} />
+			<BuzzingScreen assetBase={assetBase} />
 		) : screen === "login" ? (
 			<LoginScreen assetBase={assetBase} />
 		) : (

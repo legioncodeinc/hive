@@ -9,7 +9,8 @@ import {
 import type { ProxyFetch } from "../../src/daemon/proxy.js";
 import type { FetchImpl as FleetFetchImpl } from "../../src/daemon/fleet-status.js";
 import type { SetupAuthFetchImpl } from "../../src/daemon/setup-auth.js";
-import { THEHIVE_VERSION } from "../../src/shared/constants.js";
+import type { TelemetryFetch } from "../../src/daemon/telemetry-proxy.js";
+import { HIVEDOCTOR_EVENTS_URL, THEHIVE_VERSION } from "../../src/shared/constants.js";
 
 /** A fleet-status fetch that always reports honeycomb healthy (PRD-003a's gate then passes health). */
 const healthyFleetStatusFetch: FleetFetchImpl = async () =>
@@ -150,6 +151,77 @@ describe("thehive daemon server", () => {
       expect(serveFn).toHaveBeenCalledTimes(1);
       await started.stop();
     });
+  });
+
+  it("PRD-005b: /health serves the SPA shell for an HTML-accepting request (the operator page), not the liveness JSON", async () => {
+    const daemon = createThehive({
+      fleetStatusFetch: healthyFleetStatusFetch,
+      setupAuthFetch: authenticatedSetupAuthFetch
+    });
+    const response = await daemon.app.request("http://thehive.local/health", { headers: { accept: "text/html" } });
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("id=\"root\"");
+  });
+
+  it("PRD-005b: /health with an unhealthy fleet still redirects to /buzzing when HTML is requested (a normal gated page)", async () => {
+    const daemon = createThehive({
+      fleetStatusFetch: async () => new Response(JSON.stringify({ supervisor: "unreachable" }), { status: 502 }),
+      setupAuthFetch: authenticatedSetupAuthFetch
+    });
+    const response = await daemon.app.request("http://thehive.local/health", { headers: { accept: "text/html" }, redirect: "manual" });
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/buzzing");
+  });
+
+  it("a non-HTML /health request (a liveness probe) still gets the cheap JSON body, gate-exempt, even when unhealthy", async () => {
+    const daemon = createThehive({
+      fleetStatusFetch: async () => new Response(JSON.stringify({ supervisor: "unreachable" }), { status: 502 }),
+      setupAuthFetch: authenticatedSetupAuthFetch
+    });
+    const response = await daemon.app.request("http://thehive.local/health");
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.status).toBe("ok");
+  });
+
+  it("PRD-004a/PRD-005a: /api/registered-services returns the full registered-name list from the hivedoctor registry", async () => {
+    await withTempLockPaths(async (paths) => {
+      const registryPath = join(paths.lockFilePath, "..", "hivedoctor.daemons.json");
+      writeFileSync(
+        registryPath,
+        JSON.stringify({
+          daemons: [
+            { name: "honeycomb", healthUrl: "http://127.0.0.1:4850/health", pidPath: "/tmp/honeycomb.pid" },
+            { name: "hivenectar", healthUrl: "http://127.0.0.1:4854/health", pidPath: "/tmp/hivenectar.pid" },
+            { name: "thehive", healthUrl: "http://127.0.0.1:4853/health", pidPath: "/tmp/thehive.pid" }
+          ]
+        }),
+        "utf8"
+      );
+      const daemon = createThehive({ registryPath });
+      const response = await daemon.app.request("http://thehive.local/api/registered-services");
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ names: ["honeycomb", "hivenectar", "thehive"] });
+    });
+  });
+
+  it("PRD-004/PRD-005: /api/telemetry/stream relays hivedoctor's real SSE URL and never hits the generic daemon proxy", async () => {
+    const telemetrySeen: string[] = [];
+    const telemetryStreamFetch: TelemetryFetch = async (url) => {
+      telemetrySeen.push(url);
+      return new Response(new ReadableStream({ start: (c) => c.close() }), { status: 200 });
+    };
+    const proxyFetch = vi.fn(async () => new Response("{}", { status: 200 })) as unknown as ProxyFetch;
+
+    const daemon = createThehive({ telemetryStreamFetch, proxyFetch });
+    const response = await daemon.app.request("http://thehive.local/api/telemetry/stream");
+
+    expect(response.status).toBe(200);
+    expect(telemetrySeen).toEqual([HIVEDOCTOR_EVENTS_URL]);
+    // The browser's ONLY path is `/api/telemetry/stream`; asserting the generic proxy (which would
+    // forward to a workload daemon, not hivedoctor) never sees this request is the same-origin proof.
+    expect(proxyFetch).not.toHaveBeenCalled();
   });
 
   it("releases lock files if listen fails", () => {
