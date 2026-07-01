@@ -1,37 +1,44 @@
 /**
- * The pre-auth GUIDED-SETUP gate — PRD-050b (b-AC-3 / b-AC-6).
+ * The `/login` route's GUIDED-SETUP content — PRD-050b (b-AC-3 / b-AC-6) · PRD-003b (l-AC-1
+ * through l-AC-8, relocating this view from a pre-mount React gate to its own path).
  *
- * This is the dashboard's top-level phase switch. It polls `GET /setup/state` and renders ONE of two
- * states against the SAME running daemon (one daemon, two phases — never a second process):
+ * `/login` is served by thehive's server ONLY when the portal gate (`gate.ts`, PRD-003a) has
+ * already determined the operator is NOT logged in (or the operator landed here directly — `/login`
+ * is gate-exempt, l-AC-3). So this module no longer decides "pre-auth vs authenticated" itself —
+ * that decision is the server's. {@link LoginScreen} renders ONE of:
  *
- *   - PRE-AUTH (no valid credential): the {@link GuidedSetup} screen — a clear "let's connect your
- *     account" panel fronted by the **"First time setup"** button (b-AC-6). The button BEGINS the
- *     on-page device flow (`POST /setup/login`, 050c) and shows the returned `user_code` + the
- *     verification link; the daemon keeps polling → mint → persist in the background.
- *   - AUTHENTICATED (a valid credential loads): the full {@link Shell} (sidebar + routed pages).
+ *   - the plain first-time {@link GuidedSetup} screen — a clear "let's connect your account" panel
+ *     fronted by the **"First time setup"** button (b-AC-6). The button BEGINS the on-page device
+ *     flow (`POST /setup/login`, proxied per l-AC-1/l-AC-2) and shows the returned `user_code` +
+ *     the verification link; the daemon keeps polling → mint → persist in the background.
+ *   - {@link MigrationInterrupted} / {@link CoexistenceWarning} when `/setup/state` reports one of
+ *     those states (unchanged from the prior pre-auth gate; only the addressing moved).
  *
- * ── The live transition is a POLL, no restart (b-AC-3) ───────────────────────
- * While on the pre-auth screen the gate polls `setupState()` on an interval. The instant the login
- * flow writes the shared credential, the next poll reports `authenticated: true` and the gate swaps
- * to the authenticated `<Shell>` — same tab, same daemon, no `honeycomb daemon restart`. This reuses
- * the exact self-hydration the shell already does from live endpoints; the gate adds only the
- * phase switch.
+ * ── The live transition is a POLL, then a hard navigation (l-AC-7 / l-AC-8) ──
+ * While on `/login` this screen polls `setupState()` on an interval, exactly like the retired
+ * pre-mount gate did. The instant the login flow writes the shared credential, the next poll
+ * reports `authenticated: true`; instead of swapping to a client-rendered `<Shell>` (the old
+ * behavior), this screen does a HARD navigation (`window.location.assign("/")`) so thehive's
+ * server gate re-validates health+auth and serves the authoritative next screen. This keeps the
+ * gate — not this component — as the single source of truth for "where does an authenticated
+ * operator land" (ADR-0004), and correctly falls back to `/buzzing` instead of the dashboard if
+ * the fleet happens to be unhealthy at that exact moment.
  *
  * ── b-AC-6: the button is PRESENT in fresh-install, ABSENT once linked ───────
- * The "First time setup" button renders ONLY in the pre-auth branch. Once `authenticated` flips true
- * the whole {@link GuidedSetup} subtree (button included) unmounts and the authenticated dashboard
- * renders instead — so the button is structurally absent in the linked state, not merely hidden.
+ * The "First time setup" button renders ONLY in the pre-auth branch. Once `authenticated` flips
+ * true the whole {@link GuidedSetup} subtree (button included) unmounts as this screen navigates
+ * away — so the button is structurally absent in the linked state, not merely hidden.
  *
- * ── No token, no secret (parent AC-8) ────────────────────────────────────────
- * The gate reads only `/setup/state` (install metadata) and `/setup/login` (user_code + URIs). NO
- * token crosses either wire (the schemas have no token field by construction). The component holds
- * no credential and renders none.
+ * ── No token, no secret, no portal session (l-AC-5) ──────────────────────────
+ * This screen reads only `/setup/state` (install metadata) and `/setup/login` (user_code + URIs).
+ * NO token crosses either wire (the schemas have no token field by construction), and it creates,
+ * stores, or reads no portal-specific cookie or session — credential presence via `/setup/state` is
+ * the sole source of truth (ADR-0004's rejection of a portal session).
  */
 
 import React from "react";
 
 import { Button } from "./primitives.js";
-import { Shell, type ShellProps } from "./app.js";
 import {
 	createWireClient,
 	FRESH_SETUP_STATE,
@@ -66,11 +73,11 @@ export function hasUnmigratedPriorHivemind(state: SetupStateWire): boolean {
 	return state.priorTool.hivemind === "present" || state.credentials.hivemind;
 }
 
-/** Props for {@link SetupGate} — the injected wire client + the asset base (same contract as {@link Shell}). */
-export interface SetupGateProps {
+/** Props for {@link LoginScreen} — the injected wire client + the asset base. */
+export interface LoginScreenProps {
 	/** The wire client (injected by a unit test with a mocked fetch; defaults to the live one). */
 	readonly client?: WireClient;
-	/** The base path the host serves the logo/assets under (passed through to {@link Shell}). */
+	/** The base path the host serves the logo/assets under. */
 	readonly assetBase?: string;
 }
 
@@ -78,8 +85,8 @@ export interface SetupGateProps {
  * The guided-setup PRE-AUTH screen (b-AC-6). A single centered panel: the brand mark, a short
  * "connect your account" line, and the "First time setup" button that begins the on-page login. Once
  * the login grant arrives the panel shows the `user_code` + the verification link (the daemon polls →
- * persists in the background; the parent {@link SetupGate} polls `/setup/state` and swaps to the
- * dashboard when the credential lands). The migration variant (a detected prior Hivemind) is 050d.
+ * persists in the background; the parent {@link LoginScreen} polls `/setup/state` and hard-navigates
+ * to the dashboard when the credential lands). The migration variant (a detected prior Hivemind) is 050d.
  */
 export function GuidedSetup({
 	wire,
@@ -112,7 +119,7 @@ export function GuidedSetup({
 			return;
 		}
 		setGrant(result);
-		// Leave `busy` true: the page now waits for the background poll (in SetupGate) to flip to the
+		// Leave `busy` true: the page now waits for the background poll (in LoginScreen) to flip to the
 		// authenticated dashboard once the credential lands. The button stays disabled meanwhile.
 	}, [wire]);
 
@@ -161,7 +168,7 @@ export function GuidedSetup({
 				</>
 			) : (
 				// The grant arrived: show the user_code + the verification link. The daemon polls →
-				// persists in the background; SetupGate's poll flips to the dashboard when it lands.
+				// persists in the background; LoginScreen's poll hard-navigates to the dashboard when it lands.
 				<div data-testid="setup-grant" style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "center" }}>
 					<p style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", margin: 0 }}>
 						Enter this code to finish linking:
@@ -222,7 +229,7 @@ export function CoexistenceWarning({
 			onNeedsLogin();
 			return;
 		}
-		// `migrated` success: leave `busy` true — the parent SetupGate poll flips to the dashboard once
+		// `migrated` success: leave `busy` true — the parent LoginScreen poll hard-navigates once
 		// `/setup/state.authenticated` lands. A partial failure (`ok:false`) re-enables retry below.
 		if (!r.ok) {
 			setBusy(false);
@@ -388,37 +395,50 @@ export function MigrationInterrupted({
 }
 
 /**
- * The top-level phase gate (b-AC-3 / b-AC-6 / d-AC-1 / d-AC-7). Polls `/setup/state` and renders ONE of:
- *   - the authenticated {@link Shell} once a valid credential loads (the DERIVED source of truth);
+ * The `/login` route's top-level content (b-AC-3 / b-AC-6 / d-AC-1 / d-AC-7 / l-AC-1 / l-AC-7 /
+ * l-AC-8). Polls `/setup/state` and renders ONE of:
  *   - the {@link MigrationInterrupted} resume/rollback surface when a migration is mid-flight (d-AC-7);
  *   - the {@link CoexistenceWarning} wizard when a prior un-migrated Hivemind is detected (d-AC-1);
- *   - the plain first-time {@link GuidedSetup} otherwise.
- * The poll is the live pre-auth → authenticated transition — no restart, same tab.
+ *   - the plain first-time {@link GuidedSetup} otherwise (l-AC-1).
+ * Once `/setup/state.authenticated` flips true, this screen does a HARD navigation to `/` instead
+ * of rendering the dashboard itself (l-AC-7 / l-AC-8) — see the module doc for why that stays the
+ * server gate's decision, not this component's.
  *
- * The FIRST render shows the guided-setup state (the fresh-install-safe default) until the first poll
- * resolves, so a slow first read never flashes the authenticated chrome at an unlinked user.
+ * The FIRST render shows the guided-setup state (the fresh-install-safe default) until the first
+ * poll resolves, so a slow first read never flashes a stale state.
  */
-export function SetupGate({ client, assetBase = "assets" }: SetupGateProps = {}): React.JSX.Element {
+export function LoginScreen({ client, assetBase = "assets" }: LoginScreenProps = {}): React.JSX.Element {
 	const wire = React.useMemo<WireClient>(() => client ?? createWireClient(), [client]);
 	const [state, setState] = React.useState<SetupStateWire>(FRESH_SETUP_STATE);
 	// Once the migration's uninstall completes but needs the device flow (d-AC-4), force the login UI
 	// (GuidedSetup) even though a prior-Hivemind dir may still be reported — the user must finish linking.
 	const [forceLogin, setForceLogin] = React.useState(false);
+	// A synchronous guard so the navigation below fires exactly once even if this effect re-runs
+	// (e.g. React 18 StrictMode's double-invoke in development) before the browser actually leaves.
+	const navigatedRef = React.useRef(false);
 
 	React.useEffect(() => {
-		// Once authenticated the Shell owns its own polling, so this pre-auth poll STOPS. Continuing to
-		// poll here would let a single transient `/setup/state` error — `setupState()` falls back to
-		// FRESH_SETUP_STATE on a failed/non-JSON response — flip `authenticated` back to false and bounce
-		// a linked user out of the authenticated shell into Guided Setup.
-		if (state.authenticated) return;
+		if (state.authenticated) {
+			// l-AC-7 / l-AC-8: auth flipped true. A HARD navigation (not a client-side component swap)
+			// so thehive's server gate (gate.ts) re-validates health+auth for the new request and serves
+			// the authoritative next screen — `/` (the dashboard) if the fleet is still healthy, or
+			// `/buzzing` in the (rare) case it degraded in the interim. This is deliberately NOT a
+			// `usePathRoute().navigate` client-side swap: there is no mounted Shell here to swap into,
+			// and re-deriving "go to the dashboard" here would duplicate the gate's own decision.
+			if (!navigatedRef.current && typeof window !== "undefined") {
+				navigatedRef.current = true;
+				window.location.assign("/");
+			}
+			return;
+		}
 		let alive = true;
 		const tick = async (): Promise<void> => {
 			const next = await wire.setupState();
 			if (alive) setState(next);
 		};
 		void tick();
-		// Keep polling while pre-auth so the transition is live; we clear the interval on unmount and on
-		// the authenticated flip (the effect re-runs and early-returns above).
+		// Keep polling while pre-auth so the transition is live; cleared on unmount and on the
+		// authenticated flip (the effect re-runs and early-returns above).
 		const id = setInterval(() => void tick(), SETUP_POLL_MS);
 		return () => {
 			alive = false;
@@ -426,11 +446,10 @@ export function SetupGate({ client, assetBase = "assets" }: SetupGateProps = {})
 		};
 	}, [wire, state.authenticated]);
 
-	// AUTHENTICATED is the DERIVED source of truth (a valid credential loads) — NOT the onboarding
-	// phase. When true every guided-setup subtree unmounts and the dashboard renders.
+	// AUTHENTICATED: the navigation above is in flight. Render nothing further — the browser is
+	// about to leave this screen for the real dashboard request.
 	if (state.authenticated) {
-		const shellProps: ShellProps = { client: wire, assetBase };
-		return <Shell {...shellProps} />;
+		return <></>;
 	}
 	// d-AC-7: an interrupted migration ALWAYS wins — a half-migrated machine is never presented as a
 	// clean first-time/coexistence state. Resume/rollback until the marker reaches a terminal phase.

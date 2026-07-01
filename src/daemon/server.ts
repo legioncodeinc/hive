@@ -11,9 +11,11 @@ import {
   THEHIVE_PORT,
   THEHIVE_VERSION
 } from "../shared/constants.js";
-import { mountDashboardHost } from "./dashboard/host.js";
+import { mountDashboardAssets, mountDashboardShellFallback } from "./dashboard/host.js";
 import { fetchFleetStatus, type FetchImpl } from "./fleet-status.js";
+import { createPortalGate } from "./gate.js";
 import { createApiProxy, type ProxyFetch } from "./proxy.js";
+import type { SetupAuthFetchImpl } from "./setup-auth.js";
 
 export interface CreateThehiveOptions {
   readonly host?: string;
@@ -24,6 +26,8 @@ export interface CreateThehiveOptions {
   readonly hivedoctorStatusUrl?: string;
   /** The fetch used by the API proxy to reach workload daemons over loopback (defaults to the global `fetch`). */
   readonly proxyFetch?: ProxyFetch;
+  /** The fetch used by the portal gate's auth check (`/setup/state`, defaults to the global `fetch`). */
+  readonly setupAuthFetch?: SetupAuthFetchImpl;
 }
 
 export interface StartThehiveOptions extends CreateThehiveOptions {
@@ -65,7 +69,27 @@ export function createThehive(options: CreateThehiveOptions = {}): ThehiveInstan
   const startedAt = now();
 
   const app = new Hono();
-  mountDashboardHost(app);
+
+  const fleetStatusFetch = options.fleetStatusFetch ?? fetch;
+  const hivedoctorStatusUrl = options.hivedoctorStatusUrl ?? HIVEDOCTOR_STATUS_URL;
+
+  // PRD-003a: the server-side portal landing gate, registered FIRST so it runs ahead of every
+  // other route. It bypasses thehive's own infra/asset/proxy paths and the two exempt screens
+  // (`/buzzing`, `/login`) internally; for every other path it evaluates health-then-auth and
+  // either redirects or falls through via `next()` to the routes below.
+  app.use(
+    "*",
+    createPortalGate({
+      fleetStatusFetch,
+      hivedoctorStatusUrl,
+      setupAuthFetch: options.setupAuthFetch,
+      registryPath: options.registryPath
+    })
+  );
+
+  // The bundled SPA's static assets — specific, fixed paths registered before the shell catch-all
+  // (below) so they win.
+  mountDashboardAssets(app);
 
   app.get("/health", (c) =>
     c.json({
@@ -74,9 +98,6 @@ export function createThehive(options: CreateThehiveOptions = {}): ThehiveInstan
       version: THEHIVE_VERSION
     })
   );
-
-  const fleetStatusFetch = options.fleetStatusFetch ?? fetch;
-  const hivedoctorStatusUrl = options.hivedoctorStatusUrl ?? HIVEDOCTOR_STATUS_URL;
 
   // thehive-owned data route: aggregates hivedoctor's supervisor status. Registered BEFORE the
   // catch-all proxy so it wins (Hono runs matching handlers in registration order).
@@ -90,6 +111,11 @@ export function createThehive(options: CreateThehiveOptions = {}): ThehiveInstan
   const apiProxy = createApiProxy({ registryPath: options.registryPath, fetchImpl: options.proxyFetch });
   app.all("/api/*", apiProxy);
   app.all("/setup/*", apiProxy);
+
+  // PRD-003a: the SPA shell catch-all — MUST be registered LAST so every specific route above
+  // (assets, /health, /api/fleet-status, the BFF proxy) wins. Serves every gated page path the
+  // gate let through, plus `/buzzing` and `/login` themselves, plus any unknown deep link.
+  mountDashboardShellFallback(app);
 
   return {
     app,

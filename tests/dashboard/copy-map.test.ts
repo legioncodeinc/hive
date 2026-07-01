@@ -25,11 +25,11 @@ function countFiles(dir: string): number {
 }
 
 describe("dashboard copy-map", () => {
-  it("b-AC-5 migrated all honeycomb web/ files plus PRD-002b readiness modules", () => {
-    expect(countFiles(WEB_DIR)).toBe(29);
+  it("b-AC-5 migrated all honeycomb web/ files plus PRD-002b readiness modules and PRD-003c's boot-route", () => {
+    expect(countFiles(WEB_DIR)).toBe(30);
   });
 
-  it("b-AC-5 includes the shell + infra files (12) and the pages (12)", () => {
+  it("b-AC-5 includes the shell + infra files (13) and the pages (12)", () => {
     for (const file of [
       "registry.tsx",
       "router.tsx",
@@ -47,7 +47,8 @@ describe("dashboard copy-map", () => {
       "app.tsx",
       "main.tsx",
       "readiness-splash.tsx",
-      "setup-gate.tsx"
+      "setup-gate.tsx",
+      "boot-route.ts"
     ]) {
       expect(existsSync(join(WEB_DIR, file))).toBe(true);
     }

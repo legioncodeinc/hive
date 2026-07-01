@@ -12,7 +12,7 @@
  *      wrapping its content in `<PageFrame title="…">` and hydrating via `usePoll` / the shared
  *      `wire` (never `createWireClient` — the shell passes ONE down).
  *   2. Add ONE `RouteEntry` to {@link ROUTES} in nav order: `{ route, label, icon, component }`.
- *      The sidebar renders the nav item; the outlet routes the hash to the component. Done.
+ *      The sidebar renders the nav item; the outlet routes the path to the component. Done.
  *   3. A DYNAMIC group (per-installed-harness items under Harnesses, PRD-039) sets `dynamic:
  *      { resolve: (live) => SubItem[] }` — its CHILD items are computed from live install state at
  *      render, distinct from the seven static top-level routes. The registry DEFINES this contract;
@@ -46,12 +46,12 @@ import type { PageProps } from "./page-frame.js";
 
 /**
  * One dynamically-resolved sub-item under a registry entry — e.g. a per-installed-harness item
- * under Harnesses (PRD-039). Its `route` is the deep hash the sidebar navigates to; `label` is the
+ * under Harnesses (PRD-039). Its `route` is the deep path the sidebar navigates to; `label` is the
  * nav text. These are NOT top-level routes: they are CHILDREN of a static entry, computed at render
  * from live install state. The registry defines this shape; the live data is the consuming PRD's.
  */
 export interface SubItem {
-	/** The deep hash this sub-item navigates to (e.g. `/harnesses/claude-code`). */
+	/** The deep path this sub-item navigates to (e.g. `/harnesses/claude-code`). */
 	readonly route: string;
 	/** The nav label for this sub-item (e.g. `Claude Code`). */
 	readonly label: string;
@@ -74,14 +74,14 @@ export interface DynamicGroup {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * One registry entry (D-7). `route` is the hash key (path-like, e.g. `/graph`); `label` + `icon`
- * are the nav presentation; `component` is the page the outlet mounts (every page takes
- * {@link PageProps}); `dynamic` (optional) marks an entry whose CHILDREN are resolved from live
- * state — its presence is what distinguishes a STATIC top-level route from a DYNAMICALLY-LOADED
- * group (the parent's explicit static-vs-dynamic ask).
+ * One registry entry (D-7). `route` is the real, server-served path (PRD-003c, e.g. `/graph`);
+ * `label` + `icon` are the nav presentation; `component` is the page the outlet mounts (every page
+ * takes {@link PageProps}); `dynamic` (optional) marks an entry whose CHILDREN are resolved from
+ * live state — its presence is what distinguishes a STATIC top-level route from a
+ * DYNAMICALLY-LOADED group (the parent's explicit static-vs-dynamic ask).
  */
 export interface RouteEntry {
-	/** The hash route this entry owns (path-like; `/` is the default Dashboard route). */
+	/** The path this entry owns (`/` is the default Dashboard route). */
 	readonly route: string;
 	/** The nav label (sidebar text + per-route document title source, 037c OQ-2). */
 	readonly label: string;
@@ -190,14 +190,14 @@ const SettingsIcon = (
  *   Logs (`/logs`)          → PRD-043
  *   Settings (`/settings`)  → PRD-044
  */
-/** The Projects page hash route (PRD-059c) — exported so the first-run CTA can navigate to it (b-AC-4). */
+/** The Projects page route (PRD-059c) — exported so the first-run CTA can navigate to it (b-AC-4). */
 export const PROJECTS_ROUTE = "/projects" as const;
 
 export const ROUTES: readonly RouteEntry[] = [
 	{ route: "/", label: "Dashboard", icon: DashboardIcon, component: DashboardPage },
 	// PRD-059c: the Projects management page (bound-folder list + Add/Import/Unbind/Open). Slotted right
 	// after Dashboard — the home for "what is Honeycomb sourcing". One registry entry is the whole wiring
-	// (037c contract): the sidebar renders the nav item and the outlet routes the hash, no sidebar edit.
+	// (037c contract): the sidebar renders the nav item and the outlet routes the path, no sidebar edit.
 	{ route: PROJECTS_ROUTE, label: "Projects", icon: ProjectsIcon, component: ProjectsPage },
 	// PRD-039 (D-6): the `#/harnesses` route is the STATIC top-level entry; its per-harness sub-entries
 	// (`#/harnesses/<name>`) are the 037c DYNAMIC group, resolved at render from 039a's live harness
@@ -212,28 +212,28 @@ export const ROUTES: readonly RouteEntry[] = [
 	{ route: "/logs", label: "Logs", icon: LogsIcon, component: LogsPage },
 	// PRD-060e: the ROI page (the Net-ROI ledger — measured/modeled savings vs infra + pollination cost,
 	// with org/team/agent/project rollups). ONE registry entry is the whole wiring (037c contract): the
-	// sidebar renders the nav item and the outlet routes the hash, no sidebar/router hand-edit.
+	// sidebar renders the nav item and the outlet routes the path, no sidebar/router hand-edit.
 	{ route: "/roi", label: "ROI", icon: RoiIcon, component: RoiPage },
 	{ route: "/settings", label: "Settings", icon: SettingsIcon, component: SettingsPage },
 ];
 
-/** The Dashboard entry — the default every unknown hash falls back to (037c AC-3 / 037b AC-4). */
+/** The Dashboard entry — the default every unknown path falls back to (037c AC-3 / 037b AC-4). */
 export const DEFAULT_ROUTE: RouteEntry = ROUTES[0] as RouteEntry;
 
 /**
- * Resolve a hash route to its registry entry, defaulting to the Dashboard entry on no match (037c
- * AC-3, feeding 037b AC-4 "unknown route → Dashboard, no blank screen"). The match is exact on the
- * entry `route` — a deep sub-route (e.g. `/harnesses/claude-code` from a dynamic group) resolves to
- * its top-level parent by prefix so the correct page still mounts. `routes` is injectable so a test
- * can prove the plug-in seam with a throwaway entry (037c AC-6) without mutating the global list.
+ * Resolve a path to its registry entry, defaulting to the Dashboard entry on no match (037c AC-3,
+ * feeding 037b AC-4 "unknown route → Dashboard, no blank screen"). The match is exact on the entry
+ * `route` — a deep sub-route (e.g. `/harnesses/claude-code` from a dynamic group) resolves to its
+ * top-level parent by prefix so the correct page still mounts. `routes` is injectable so a test can
+ * prove the plug-in seam with a throwaway entry (037c AC-6) without mutating the global list.
  */
-export function matchRoute(hash: string, routes: readonly RouteEntry[] = ROUTES): RouteEntry {
-	// Exact match first (the common case: one of the seven top-level routes).
-	const exact = routes.find((r) => r.route === hash);
+export function matchRoute(pathname: string, routes: readonly RouteEntry[] = ROUTES): RouteEntry {
+	// Exact match first (the common case: one of the nine top-level routes).
+	const exact = routes.find((r) => r.route === pathname);
 	if (exact !== undefined) return exact;
 	// A deep sub-route resolves to its top-level parent (e.g. `/harnesses/x` → the Harnesses entry).
-	// Skip the root `/` here so it never greedily matches every hash; root is the explicit fallback.
-	const parent = routes.find((r) => r.route !== "/" && hash.startsWith(`${r.route}/`));
+	// Skip the root `/` here so it never greedily matches every path; root is the explicit fallback.
+	const parent = routes.find((r) => r.route !== "/" && pathname.startsWith(`${r.route}/`));
 	if (parent !== undefined) return parent;
 	// No match → the Dashboard entry (the registry's default; never a blank screen).
 	return routes.find((r) => r.route === "/") ?? (routes[0] as RouteEntry);

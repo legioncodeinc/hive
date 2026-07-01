@@ -11,18 +11,28 @@
  * NO `unpkg`/CDN React, NO in-browser `@babel/standalone`, NO `type="text/babel"`: the shell
  * references ONLY same-origin loopback assets the host serves, and carries NO token/secret.
  *
- * ── The five routes this host registers (thehive serves at the root) ──────────
- *   GET /                              → the index shell ({@link renderShell})
+ * ── The routes this host registers (thehive serves at the root) ───────────────
  *   GET /app.js                       → the esbuild bundle (React + ReactDOM + the app)
  *   GET /styles.css                   → the concatenated design-system CSS
  *   GET /honeycomb-memory-cluster.svg → the brand mark
  *   GET /fonts/:name                  → an allow-listed brand font
+ *   GET *                             → the index shell ({@link renderShell}), a CATCH-ALL
+ *
+ * PRD-003a split this into two entry points, {@link mountDashboardAssets} and
+ * {@link mountDashboardShellFallback}, because the shell is now served for EVERY path-based SPA
+ * route (`/`, `/projects`, ..., `/buzzing`, `/login`, and any client-only deep link), not just `/`.
+ * The shell route must therefore be a catch-all (`*`) registered LAST in `server.ts` — AFTER the
+ * asset routes below, `/health`, `/api/fleet-status`, and the `/api/*` `/setup/*` BFF proxy — so
+ * those more specific routes win (Hono composes matching handlers in registration order; the first
+ * one that returns a response without calling `next()` wins). {@link mountDashboardHost} keeps
+ * calling both in the safe order for standalone callers (e.g. a bare test `Hono()` with nothing
+ * else registered) where that ordering concern does not arise.
  */
 
 import type { Hono } from "hono";
 import { createWebAssets, type WebAssets } from "./web-assets.js";
 
-/** The route the viewable dashboard shell is served at (thehive serves at the root). */
+/** The default landing path (the dashboard) — served by the catch-all, like every other route. */
 export const DASHBOARD_HOST_PATH = "/" as const;
 
 /** The same-origin path the host serves the bundled app JS at. */
@@ -107,23 +117,15 @@ export function renderShell(): string {
 }
 
 /**
- * Attach the viewable dashboard host onto thehive's Hono app. Registers the shell route plus the
- * four static-asset routes (app JS, CSS, logo, fonts). Call ONCE while constructing the app. The
- * shell carries no secret/token; the asset routes serve only the DS CSS/logo/fonts + the bundle
- * (a not-yet-built bundle 404s rather than 500s).
+ * Attach the FOUR static-asset routes (app JS, CSS, logo, fonts) onto thehive's Hono app. These
+ * are specific, fixed paths — register them BEFORE {@link mountDashboardShellFallback}'s catch-all
+ * so they win. The asset routes serve no secret/token (a not-yet-built bundle 404s rather than
+ * 500s), and — per PRD-003a — they are also EXEMPT from the portal landing gate (`gate.ts`): the
+ * bundle must load even when the shell just redirected the browser to `/buzzing` or `/login`,
+ * since those exempt screens are served by the same SPA bundle.
  */
-export function mountDashboardHost(app: Hono, options: MountDashboardHostOptions = {}): void {
+export function mountDashboardAssets(app: Hono, options: MountDashboardHostOptions = {}): void {
 	const assets = options.assets ?? createWebAssets();
-
-	// GET / — the index shell (the app mounts into #root and self-hydrates). `no-cache` (revalidate
-	// every load): the shell + app.js + css filenames are NOT content-hashed, so an upgrade rebuilds
-	// them in place at the SAME URL. Without a revalidation directive the browser heuristically caches
-	// the bundle and keeps running a STALE app.js across a restart. `no-cache` forces a re-pull on
-	// each load (cheap over loopback), so a rebuilt dashboard is always the one that runs.
-	app.get(DASHBOARD_HOST_PATH, (c) => {
-		c.header("cache-control", "no-cache");
-		return c.html(renderShell());
-	});
 
 	// GET /app.js — the esbuild bundle (React + ReactDOM + the dashboard app).
 	app.get(DASHBOARD_APP_PATH, (c) => {
@@ -158,4 +160,35 @@ export function mountDashboardHost(app: Hono, options: MountDashboardHostOptions
 			"cache-control": "public, max-age=31536000, immutable",
 		});
 	});
+}
+
+/**
+ * Attach the SPA shell CATCH-ALL onto thehive's Hono app (PRD-003a g-AC-1 / g-AC-2). Register this
+ * LAST — after the asset routes above, `/health`, `/api/fleet-status`, and the `/api/*` `/setup/*`
+ * BFF proxy — so those specific routes win; `*` then serves the identical shell for every gated
+ * page path the portal gate (`gate.ts`) let through, PLUS the two gate-exempt screens (`/buzzing`,
+ * `/login`) and any unknown/client-only deep link. The bundled app self-hydrates by reading
+ * `location.pathname`, so one shell byte-for-byte serves every screen (D-1: no server templating).
+ */
+export function mountDashboardShellFallback(app: Hono): void {
+	// `no-cache` (revalidate every load): the shell + app.js + css filenames are NOT content-hashed,
+	// so an upgrade rebuilds them in place at the SAME URL. Without a revalidation directive the
+	// browser heuristically caches the bundle and keeps running a STALE app.js across a restart.
+	// `no-cache` forces a re-pull on each load (cheap over loopback), so a rebuilt dashboard runs.
+	app.get("*", (c) => {
+		c.header("cache-control", "no-cache");
+		return c.html(renderShell());
+	});
+}
+
+/**
+ * Attach the viewable dashboard host onto thehive's Hono app: the four static-asset routes plus
+ * the shell catch-all, in the safe order. Call this ONLY when nothing else needs to be registered
+ * in between (e.g. a standalone test `Hono()`); `server.ts` calls {@link mountDashboardAssets} and
+ * {@link mountDashboardShellFallback} separately so `/health`, `/api/fleet-status`, and the BFF
+ * proxy can be registered between them (see the module doc for why the ordering matters).
+ */
+export function mountDashboardHost(app: Hono, options: MountDashboardHostOptions = {}): void {
+	mountDashboardAssets(app, options);
+	mountDashboardShellFallback(app);
 }

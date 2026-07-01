@@ -1,9 +1,17 @@
 /**
- * Portal readiness splash — PRD-002b (rs-AC-1 through rs-AC-9).
+ * Portal readiness splash — PRD-002b (rs-AC-1 through rs-AC-9) · PRD-003c (m-AC-7, now the
+ * content the `/buzzing` route mounts, per `main.tsx`).
  *
- * Polls `GET /api/fleet-status` until `isFleetReady()` passes, then mounts {@link SetupGate} once.
- * Before the gate passes, SetupGate is not mounted at all, so its `/setup/state` poll cannot fire
- * on a cold boot and misread a not-yet-ready honeycomb as "First time setup."
+ * Polls `GET /api/fleet-status` until `isFleetReady()` passes, then mounts {@link LoginScreen}
+ * once. Before the gate passes, LoginScreen is not mounted at all, so its `/setup/state` poll
+ * cannot fire on a cold boot and misread a not-yet-ready honeycomb as "First time setup."
+ *
+ * PRD-003a's server-side gate is now the AUTHORITATIVE decision-maker for which URL an operator
+ * lands on (health, then auth, per `the-hive/src/daemon/gate.ts`) — `/buzzing` itself is
+ * gate-exempt, so this component's own ready→{@link LoginScreen} transition only matters for an
+ * operator who is SITTING on `/buzzing` while the fleet comes up (an interim convenience this PRD
+ * inherits from PRD-002b unchanged; PRD-004 will flesh out `/buzzing`'s full content and may revisit
+ * this transition).
  *
  * Visual polish pass (ux-ui-worker-bee, deferred by PRD-002b's non-goals): a calm bordered panel,
  * a honey-tinted halo behind the brand mark, a distinct recessed treatment for the "hivedoctor
@@ -19,7 +27,7 @@ import {
 	type FleetHealth,
 	type FleetStatusResponse,
 } from "../../shared/fleet-readiness.js";
-import { SetupGate } from "./setup-gate.js";
+import { LoginScreen } from "./setup-gate.js";
 
 export { isFleetReady as isReady } from "../../shared/fleet-readiness.js";
 export type { FleetStatusResponse } from "../../shared/fleet-readiness.js";
@@ -289,8 +297,8 @@ function FleetSplashGrid({
 }
 
 /**
- * Top-level readiness gate (rs-AC-1). Polls `/api/fleet-status` and mounts {@link SetupGate} only
- * once the fleet is ready. The gate is sticky (rs-AC-9): after SetupGate mounts, a later not-ready
+ * Top-level readiness gate (rs-AC-1). Polls `/api/fleet-status` and mounts {@link LoginScreen} only
+ * once the fleet is ready. The gate is sticky (rs-AC-9): after LoginScreen mounts, a later not-ready
  * poll does not unmount it.
  */
 export function ReadinessSplash({ assetBase, pollMs = 1500 }: ReadinessSplashProps): React.JSX.Element {
@@ -322,7 +330,7 @@ export function ReadinessSplash({ assetBase, pollMs = 1500 }: ReadinessSplashPro
 	}, [fleetGated, pollMs]);
 
 	if (fleetGated) {
-		return <SetupGate assetBase={assetBase} />;
+		return <LoginScreen assetBase={assetBase} />;
 	}
 
 	return <FleetSplashGrid status={status} assetBase={assetBase} />;

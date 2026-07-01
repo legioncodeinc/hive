@@ -1,75 +1,75 @@
 /**
- * The dashboard CLIENT-SIDE ROUTER — PRD-037b (the routing engine).
+ * The dashboard CLIENT-SIDE ROUTER — PRD-003c (m-AC-1 / m-AC-2, retiring the hash router).
  *
- * A tiny in-repo routing primitive: NO `react-router`, NO History API, NO new dependency
- * (D-1 / D-2). The dashboard is served as static assets by `src/daemon/runtime/dashboard/host.ts`,
- * which registers exactly FOUR GET routes (the shell, `app.js`, `styles.css`, the mark) and has
- * no catch-all. History-API (pushState) routing would put real paths in the URL
- * (`/dashboard/graph`); a refresh or deep link there would 404 at the daemon unless the host
- * served the shell for every `/dashboard/*` path — a new server route the parent PRD's non-goals
- * forbid. HASH routing puts the route in the fragment (`/dashboard#/graph`): the browser never
- * sends the fragment to the server, so the daemon always serves the same shell and the client
- * resolves the route from `location.hash`. Refresh-safe deep links, ZERO host changes (D-1).
+ * thehive's SERVER is now the routing authority (PRD-003a): it evaluates the health-then-auth
+ * gate on every request and serves the identical SPA shell for every real, path-based route
+ * (`the-hive/src/daemon/dashboard/host.ts`'s catch-all). This hook's job narrows to what a
+ * server-routed SPA needs client-side: read the ALREADY-AUTHORIZED path the server served
+ * (`location.pathname`), keep it in sync with History API navigation (back/forward, and this
+ * hook's own `navigate`), and re-render. It does NOT decide what the operator is ALLOWED to see —
+ * that decision was already made server-side before this bundle ever ran.
  *
- * The hook reads `location.hash`, subscribes to `hashchange` (cleaning up on unmount, mirroring
- * the poll-cleanup pattern in the old `app.tsx`), and exposes `{ route, navigate }`. `navigate`
- * is the SINGLE place that mutates `location.hash`, so the sidebar's `onNavigate` (037a) stays a
- * thin pass-through that never touches the hash itself (037a AC-4 keeps that testable).
+ * This RETIRES `useHashRoute` / `routeFromHash` (m-AC-1): routing no longer reads `location.hash`,
+ * and `navigate` calls `history.pushState` instead of assigning `location.hash`, so history entries
+ * are real paths, not fragments (m-AC-2). Still NO `react-router`, NO new dependency — the History
+ * API is a browser primitive, mirroring the hash hook's own no-new-dependency posture.
  */
 
 import React from "react";
 
 /**
- * Parse the current route string from `location.hash`. Strips a leading `#`, then normalizes:
- * an empty hash (or a bare `#`) becomes the default `/`. The returned value is the RAW route key
- * (path-like, e.g. `/graph`); resolving it to a registry entry (and the unknown→Dashboard
- * fallback, 037b AC-4) is `matchRoute`'s job in the registry, NOT this parser's — this keeps the
- * hook a pure reflection of the URL fragment and the fallback policy in one place (037c).
+ * Parse the current route string from `location.pathname`. Normalizes an empty path to the
+ * default `/`. The returned value is the RAW route key (e.g. `/graph`); resolving it to a
+ * registry entry (and the unknown→Dashboard fallback) is `matchRoute`'s job (`registry.tsx`), not
+ * this parser's — this keeps the hook a pure reflection of the URL, mirroring `routeFromHash`'s
+ * old contract one-for-one, just sourced from the path instead of the fragment.
  */
-export function routeFromHash(hash: string): string {
-	// `location.hash` includes the leading "#" (or is "" when absent). Strip it; default to "/".
-	const raw = hash.startsWith("#") ? hash.slice(1) : hash;
-	const trimmed = raw.trim();
+export function routeFromPath(pathname: string): string {
+	const trimmed = pathname.trim();
 	return trimmed === "" ? "/" : trimmed;
 }
 
-/** The hash-router contract the Shell consumes: the active route + a `navigate` helper. */
-export interface HashRoute {
-	/** The active route parsed from `location.hash` (path-like, e.g. `/` or `/graph`). */
+/** The path-router contract the Shell consumes: the active route + a `navigate` helper. */
+export interface PathRoute {
+	/** The active route parsed from `location.pathname` (e.g. `/` or `/graph`). */
 	readonly route: string;
-	/** Set `location.hash` to `r` (the `hashchange` listener then re-renders). The ONLY hash mutator. */
+	/** Push `r` onto the History API (the `popstate`/local-state sync then re-renders). The ONLY history mutator. */
 	readonly navigate: (r: string) => void;
 }
 
 /**
- * Read the active route from `location.hash` and re-render on `hashchange` (037b AC-1). Subscribes
- * in a `useEffect` and unsubscribes on unmount. `navigate(r)` assigns `location.hash = r`, which
- * fires `hashchange` and flows back through this same listener — so there is exactly one source of
- * truth (the URL) and one mutator (`navigate`). Deep-linking works for free: the initial state
- * reads whatever hash the page loaded with (037b AC-3), so a refresh on `/dashboard#/graph` mounts
- * the Graph route.
+ * Read the active route from `location.pathname` and re-render on `popstate` (m-AC-2: back/forward
+ * resolves the same screens). Subscribes in a `useEffect` and unsubscribes on unmount. `navigate(r)`
+ * pushes a new History entry via `history.pushState` — which does NOT itself fire `popstate` — so
+ * `navigate` updates the local route state directly too; this keeps exactly one source of truth
+ * (the URL) and one mutator (`navigate`), mirroring the retired hash hook's contract. Deep-linking
+ * works for free: the initial state reads whatever path the page loaded with (the server already
+ * validated it via the gate), so a refresh on `/graph` mounts the Graph route.
  */
-export function useHashRoute(): HashRoute {
+export function usePathRoute(): PathRoute {
 	const [route, setRoute] = React.useState<string>(() =>
 		// SSR/test-safe initial read: `window` exists in jsdom + the browser; guard defensively.
-		typeof window === "undefined" ? "/" : routeFromHash(window.location.hash),
+		typeof window === "undefined" ? "/" : routeFromPath(window.location.pathname),
 	);
 
 	React.useEffect(() => {
 		if (typeof window === "undefined") return;
-		const onHashChange = (): void => setRoute(routeFromHash(window.location.hash));
-		// Re-sync once on mount in case the hash changed between the initial render and the effect.
-		onHashChange();
-		window.addEventListener("hashchange", onHashChange);
-		return () => window.removeEventListener("hashchange", onHashChange);
+		const onPopState = (): void => setRoute(routeFromPath(window.location.pathname));
+		// Re-sync once on mount in case the path changed between the initial render and the effect.
+		onPopState();
+		window.addEventListener("popstate", onPopState);
+		return () => window.removeEventListener("popstate", onPopState);
 	}, []);
 
 	const navigate = React.useCallback((r: string): void => {
 		if (typeof window === "undefined") return;
-		// Mutate the hash; the `hashchange` listener above re-renders. The leading "#" is implicit
-		// when assigning a path-like value, but we normalize so `#/graph` is what lands in the URL.
-		const next = r.startsWith("#") ? r : `#${r}`;
-		window.location.hash = next;
+		const next = r.startsWith("/") ? r : `/${r}`;
+		// `pushState` does not fire `popstate`, so update local state directly here too (mirrors the
+		// retired hash hook's `navigate`, which relied on `hashchange` firing synchronously instead).
+		if (window.location.pathname !== next) {
+			window.history.pushState(null, "", next);
+		}
+		setRoute(next);
 	}, []);
 
 	return { route, navigate };

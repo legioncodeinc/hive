@@ -7,7 +7,27 @@ import {
   type StartThehiveOptions
 } from "../../src/daemon/server.js";
 import type { ProxyFetch } from "../../src/daemon/proxy.js";
+import type { FetchImpl as FleetFetchImpl } from "../../src/daemon/fleet-status.js";
+import type { SetupAuthFetchImpl } from "../../src/daemon/setup-auth.js";
 import { THEHIVE_VERSION } from "../../src/shared/constants.js";
+
+/** A fleet-status fetch that always reports honeycomb healthy (PRD-003a's gate then passes health). */
+const healthyFleetStatusFetch: FleetFetchImpl = async () =>
+  new Response(
+    JSON.stringify({
+      health: "ok",
+      asOf: "2026-07-01T12:00:00.000Z",
+      daemons: [{ name: "honeycomb", health: "ok", escalation: null }]
+    }),
+    { status: 200, headers: { "content-type": "application/json" } }
+  );
+
+/** A `/setup/state` fetch that always reports `authenticated: true` (the gate's auth step then passes). */
+const authenticatedSetupAuthFetch: SetupAuthFetchImpl = async () =>
+  new Response(JSON.stringify({ authenticated: true }), {
+    status: 200,
+    headers: { "content-type": "application/json" }
+  });
 
 async function withTempLockPaths(run: (paths: { lockFilePath: string; pidFilePath: string }) => Promise<void> | void): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "thehive-server-test-"));
@@ -39,8 +59,11 @@ describe("thehive daemon server", () => {
     });
   });
 
-  it("a-AC-3 serves the dashboard shell immediately", async () => {
-    const daemon = createThehive();
+  it("a-AC-3 serves the dashboard shell immediately when the portal gate passes (healthy + authenticated)", async () => {
+    const daemon = createThehive({
+      fleetStatusFetch: healthyFleetStatusFetch,
+      setupAuthFetch: authenticatedSetupAuthFetch
+    });
 
     const response = await daemon.app.request("http://thehive.local/");
     expect(response.status).toBe(200);
@@ -48,6 +71,17 @@ describe("thehive daemon server", () => {
     const html = await response.text();
     expect(html).toContain("id=\"root\"");
     expect(html).toContain("<script type=\"module\" src=\"/app.js\"></script>");
+  });
+
+  it("PRD-003a redirects `/` to /buzzing when the fleet is unhealthy (the gate, not the old unconditional shell)", async () => {
+    const daemon = createThehive({
+      fleetStatusFetch: async () => new Response(JSON.stringify({ supervisor: "unreachable" }), { status: 502 }),
+      setupAuthFetch: authenticatedSetupAuthFetch
+    });
+
+    const response = await daemon.app.request("http://thehive.local/", { redirect: "manual" });
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/buzzing");
   });
 
   it("c-AC-1 proxies /api/* to the owning daemon resolved from the hivedoctor registry", async () => {
