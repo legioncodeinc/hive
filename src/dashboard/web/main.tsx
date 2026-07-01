@@ -14,7 +14,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 
-import { SetupGate } from "./setup-gate.js";
+import { ReadinessSplash } from "./readiness-splash.js";
 
 /** Mount the live dashboard SHELL into the host's `#root` element. Idempotent-safe per load. */
 function mount(): void {
@@ -27,13 +27,12 @@ function mount(): void {
 	// taint flow by construction (CodeQL js/xss-through-dom) and fails safe to the default.
 	const rawAssetBase = root.getAttribute("data-asset-base") ?? "assets";
 	const assetBase = /^[A-Za-z0-9._/-]*$/.test(rawAssetBase) ? rawAssetBase : "assets";
-	// PRD-050b: render the <SetupGate> — the pre-auth phase switch. It polls `/setup/state` and
-	// renders the guided-setup wizard while unauthenticated, swapping to the multi-page <Shell>
-	// (sidebar + routed outlet) the instant a valid credential lands (b-AC-3 / b-AC-6) — no restart,
-	// same tab. Same #root + data-asset-base contract; the esbuild entry + host shell HTML are untouched.
+	// PRD-002b: render <ReadinessSplash> first — it polls `/api/fleet-status` and mounts <SetupGate>
+	// only once the fleet is ready, so SetupGate's `/setup/state` poll cannot fire on a cold boot.
+	// PRD-050b: SetupGate remains the pre-auth phase switch once mounted (b-AC-3 / b-AC-6).
 	createRoot(root).render(
 		<React.StrictMode>
-			<SetupGate assetBase={assetBase} />
+			<ReadinessSplash assetBase={assetBase} />
 		</React.StrictMode>,
 	);
 }
