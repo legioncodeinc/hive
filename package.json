@@ -4,6 +4,11 @@
   "description": "The Hive portal daemon",
   "license": "MIT",
   "type": "module",
+  "//publishConfig": "PRD-001c: minimum fix needed for a valid scoped-package publish, mirroring honeycomb/hivedoctor. `access: public` is required because scoped packages default to restricted; `provenance` pairs with release.yaml's `id-token: write` OIDC identity.",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "engines": {
     "node": ">=22"
   },
@@ -18,7 +23,8 @@
     "build": "tsc && node esbuild.config.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "start": "node dist/cli.js start"
+    "start": "node dist/cli.js start",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.6",
