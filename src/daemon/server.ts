@@ -13,7 +13,7 @@ import {
 } from "../shared/constants.js";
 import { mountDashboardHost } from "./dashboard/host.js";
 import { fetchFleetStatus, type FetchImpl } from "./fleet-status.js";
-import { resolveDaemonBases } from "./registry.js";
+import { createApiProxy, type ProxyFetch } from "./proxy.js";
 
 export interface CreateThehiveOptions {
   readonly host?: string;
@@ -22,6 +22,8 @@ export interface CreateThehiveOptions {
   readonly registryPath?: string;
   readonly fleetStatusFetch?: FetchImpl;
   readonly hivedoctorStatusUrl?: string;
+  /** The fetch used by the API proxy to reach workload daemons over loopback (defaults to the global `fetch`). */
+  readonly proxyFetch?: ProxyFetch;
 }
 
 export interface StartThehiveOptions extends CreateThehiveOptions {
@@ -73,14 +75,21 @@ export function createThehive(options: CreateThehiveOptions = {}): ThehiveInstan
     })
   );
 
-  app.get("/api/daemon-bases", (c) => c.json(resolveDaemonBases({ registryPath: options.registryPath })));
-
   const fleetStatusFetch = options.fleetStatusFetch ?? fetch;
   const hivedoctorStatusUrl = options.hivedoctorStatusUrl ?? HIVEDOCTOR_STATUS_URL;
 
+  // thehive-owned data route: aggregates hivedoctor's supervisor status. Registered BEFORE the
+  // catch-all proxy so it wins (Hono runs matching handlers in registration order).
   app.get("/api/fleet-status", async (c) =>
     c.json(await fetchFleetStatus(fleetStatusFetch, hivedoctorStatusUrl))
   );
+
+  // Server-side federation (BFF): every other `/api/*` and `/setup/*` request is proxied over
+  // loopback to the workload daemon that owns it (honeycomb or hivenectar), resolved from
+  // hivedoctor's registry. The browser only ever talks to thehive's own origin.
+  const apiProxy = createApiProxy({ registryPath: options.registryPath, fetchImpl: options.proxyFetch });
+  app.all("/api/*", apiProxy);
+  app.all("/setup/*", apiProxy);
 
   return {
     app,

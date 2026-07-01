@@ -9,8 +9,8 @@
  *
  * A short `pollMs` override plus real timers (no fake-timer/act interleaving) keeps each test fast
  * and simple. Global `fetch` is stubbed once per test: `/api/fleet-status` responses are drawn from
- * a queue the test controls; every other endpoint (`/api/daemon-bases`, `/setup/state`, ...) returns
- * a non-ok response, which `wire.ts`/`SetupGate` already fail-soft on (no crash, no token involved).
+ * a queue the test controls; every other endpoint (`/setup/state`, ...) returns a non-ok response,
+ * which `wire.ts`/`SetupGate` already fail-soft on (no crash, no token involved).
  */
 
 import { cleanup, render, screen, waitFor } from "@testing-library/react";

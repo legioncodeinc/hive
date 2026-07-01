@@ -6,6 +6,7 @@ import {
   startThehive,
   type StartThehiveOptions
 } from "../../src/daemon/server.js";
+import type { ProxyFetch } from "../../src/daemon/proxy.js";
 import { THEHIVE_VERSION } from "../../src/shared/constants.js";
 
 async function withTempLockPaths(run: (paths: { lockFilePath: string; pidFilePath: string }) => Promise<void> | void): Promise<void> {
@@ -49,7 +50,7 @@ describe("thehive daemon server", () => {
     expect(html).toContain("<script type=\"module\" src=\"/app.js\"></script>");
   });
 
-  it("c-AC-1 exposes daemon bases from the hivedoctor registry", async () => {
+  it("c-AC-1 proxies /api/* to the owning daemon resolved from the hivedoctor registry", async () => {
     await withTempLockPaths(async (paths) => {
       const registryPath = join(paths.lockFilePath, "..", "hivedoctor.daemons.json");
       writeFileSync(
@@ -62,15 +63,40 @@ describe("thehive daemon server", () => {
         }),
         "utf8"
       );
-      const daemon = createThehive({ registryPath });
+      const seen: string[] = [];
+      const proxyFetch: ProxyFetch = async (url) => {
+        seen.push(url);
+        return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+      };
+      const daemon = createThehive({ registryPath, proxyFetch });
 
-      const response = await daemon.app.request("http://thehive.local/api/daemon-bases");
-      expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({
-        honeycomb: "http://127.0.0.1:4850",
-        hivenectar: "http://127.0.0.1:4854"
-      });
+      const honeycombResponse = await daemon.app.request("http://thehive.local/api/memories?limit=10");
+      expect(honeycombResponse.status).toBe(200);
+
+      const hivenectarResponse = await daemon.app.request("http://thehive.local/api/source-graph/nodes?project=abc");
+      expect(hivenectarResponse.status).toBe(200);
+
+      expect(seen).toEqual([
+        "http://127.0.0.1:4850/api/memories?limit=10",
+        "http://127.0.0.1:4854/api/source-graph/nodes?project=abc"
+      ]);
     });
+  });
+
+  it("c-AC-6 serves /api/fleet-status itself rather than proxying it", async () => {
+    const proxyFetch = vi.fn(async () => new Response("{}", { status: 200 })) as unknown as ProxyFetch;
+    const daemon = createThehive({
+      proxyFetch,
+      // A throwing fleet fetch degrades to the fail-soft unreachable body (still HTTP 200) without a socket.
+      fleetStatusFetch: async () => {
+        throw new Error("no supervisor in test");
+      }
+    });
+
+    const response = await daemon.app.request("http://thehive.local/api/fleet-status");
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ supervisor: "unreachable" });
+    expect(proxyFetch).not.toHaveBeenCalled();
   });
 
   it("a-AC-7 keeps construction pure and binds only on startThehive", async () => {
