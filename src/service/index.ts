@@ -1,0 +1,220 @@
+import { execFile } from "node:child_process";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+
+import { installCommands, uninstallCommands, type ServiceCommand } from "./commands.js";
+import {
+  resolveServiceContext,
+  resolveServicePlan,
+  type ServiceEnvironment,
+  type ServicePlan
+} from "./platform.js";
+import { renderUnit } from "./templates.js";
+
+const SERVICE_COMMAND_TIMEOUT_MS = 15_000;
+
+export interface CommandResult {
+  readonly ok: boolean;
+  readonly code: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly detail?: string;
+}
+
+export interface CommandRunner {
+  run(command: string, args: readonly string[], options?: { readonly timeoutMs?: number }): Promise<CommandResult>;
+}
+
+export interface ServiceFs {
+  mkdirp(path: string): void;
+  writeFile(path: string, content: string): void;
+  removeFile(path: string): void;
+}
+
+export interface ServiceResult {
+  readonly ok: boolean;
+  readonly message: string;
+}
+
+export interface ServiceModule {
+  install(): Promise<ServiceResult>;
+  uninstall(): Promise<ServiceResult>;
+}
+
+export interface ServiceModuleDeps {
+  readonly execPath: string;
+  readonly runner?: CommandRunner;
+  readonly fs?: ServiceFs;
+  readonly uid?: number;
+  readonly environment?: ServiceEnvironment;
+}
+
+export function createExecFileRunner(): CommandRunner {
+  return {
+    run(command, args, options = {}): Promise<CommandResult> {
+      const timeout = options.timeoutMs ?? SERVICE_COMMAND_TIMEOUT_MS;
+      return new Promise((resolve) => {
+        execFile(command, [...args], { timeout }, (error, stdout, stderr) => {
+          if (error === null) {
+            resolve({ ok: true, code: 0, stdout, stderr });
+            return;
+          }
+
+          const codeValue = typeof error.code === "number" ? error.code : null;
+          resolve({
+            ok: false,
+            code: codeValue,
+            stdout,
+            stderr,
+            detail: error.message
+          });
+        });
+      });
+    }
+  };
+}
+
+export function createNodeServiceFs(): ServiceFs {
+  return {
+    mkdirp(path: string): void {
+      mkdirSync(path, { recursive: true });
+    },
+    writeFile(path: string, content: string): void {
+      writeFileSync(path, content, "utf8");
+    },
+    removeFile(path: string): void {
+      rmSync(path, { force: true });
+    }
+  };
+}
+
+function liveUid(): number {
+  try {
+    const getuid = (process as NodeJS.Process & { getuid?: () => number }).getuid;
+    return typeof getuid === "function" ? getuid() : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function stagedWindowsTaskPath(home: string): string {
+  return `${home}/.honeycomb/thehive/thehive-task.xml`;
+}
+
+function scopePhrase(plan: ServicePlan): string {
+  switch (plan.manager) {
+    case "launchd":
+      return "launchd";
+    case "systemd":
+      return "systemd";
+    case "schtasks":
+      return "schtasks";
+  }
+}
+
+async function runAll(
+  runner: CommandRunner,
+  commands: readonly ServiceCommand[]
+): Promise<{ readonly allOk: boolean; readonly firstFailure: ServiceCommand | null }> {
+  let firstFailure: ServiceCommand | null = null;
+  for (const command of commands) {
+    const result = await runner.run(command.command, command.args, { timeoutMs: SERVICE_COMMAND_TIMEOUT_MS });
+    if (!result.ok && firstFailure === null) {
+      firstFailure = command;
+    }
+  }
+  return { allOk: firstFailure === null, firstFailure };
+}
+
+function withResolvedUnitPath(plan: ServicePlan): ServicePlan {
+  if (plan.manager !== "schtasks" || plan.unitPath !== "") return plan;
+  return {
+    ...plan,
+    unitPath: stagedWindowsTaskPath(plan.home)
+  };
+}
+
+export function createServiceModule(deps: ServiceModuleDeps): ServiceModule {
+  const runner = deps.runner ?? createExecFileRunner();
+  const fs = deps.fs ?? createNodeServiceFs();
+  const uid = deps.uid ?? liveUid();
+  const environment = deps.environment ?? resolveServiceContext(deps.execPath);
+
+  function plan(): ServicePlan {
+    return resolveServicePlan(environment);
+  }
+
+  return {
+    async install(): Promise<ServiceResult> {
+      let resolvedPlan: ServicePlan;
+      try {
+        resolvedPlan = withResolvedUnitPath(plan());
+      } catch (error) {
+        return {
+          ok: false,
+          message: `Could not register thehive service: ${error instanceof Error ? error.message : "unknown error"}.`
+        };
+      }
+
+      const needsUnitFile = resolvedPlan.unitPath !== "" || resolvedPlan.manager === "schtasks";
+      if (needsUnitFile) {
+        try {
+          fs.mkdirp(dirname(resolvedPlan.unitPath));
+          fs.writeFile(resolvedPlan.unitPath, renderUnit(resolvedPlan));
+        } catch (error) {
+          return {
+            ok: false,
+            message: `Could not write thehive unit file at ${resolvedPlan.unitPath}: ${error instanceof Error ? error.message : "unknown error"}.`
+          };
+        }
+      }
+
+      const { allOk, firstFailure } = await runAll(runner, installCommands(resolvedPlan, uid));
+      if (!allOk) {
+        return {
+          ok: false,
+          message: `Registered thehive unit but a service-manager command failed (${firstFailure?.command ?? "unknown"}).`
+        };
+      }
+
+      return {
+        ok: true,
+        message: `thehive registered as a ${scopePhrase(resolvedPlan)} service and started. It will restart on crash and start on boot/login.`
+      };
+    },
+
+    async uninstall(): Promise<ServiceResult> {
+      let resolvedPlan: ServicePlan;
+      try {
+        resolvedPlan = withResolvedUnitPath(plan());
+      } catch (error) {
+        return {
+          ok: false,
+          message: `Could not unregister thehive service: ${error instanceof Error ? error.message : "unknown error"}.`
+        };
+      }
+
+      const { allOk, firstFailure } = await runAll(runner, uninstallCommands(resolvedPlan, uid));
+      try {
+        if (resolvedPlan.unitPath !== "") fs.removeFile(resolvedPlan.unitPath);
+      } catch {
+        // A stale unit file should not block uninstall feedback.
+      }
+
+      if (!allOk) {
+        return {
+          ok: false,
+          message: `Removed thehive unit file; a deregister command (${firstFailure?.command ?? "unknown"}) reported an error.`
+        };
+      }
+
+      return {
+        ok: true,
+        message: `thehive service unregistered (${scopePhrase(resolvedPlan)}). It will not start on next boot/login.`
+      };
+    }
+  };
+}
+
+export { resolveServiceContext, resolveServicePlan } from "./platform.js";
+export type { ServiceEnvironment, ServicePlan } from "./platform.js";
