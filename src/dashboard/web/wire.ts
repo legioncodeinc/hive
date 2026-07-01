@@ -25,13 +25,6 @@
 import { z } from "zod";
 
 import { EMPTY_ROI_TREND, EMPTY_ROI_VIEW, type RoiTrendView, type RoiView } from "../contracts.js";
-import {
-  buildFederatedUrl,
-  isLoopbackBaseUrl,
-  normalizeDaemonBases,
-  type DaemonBases,
-  type DaemonName,
-} from "../../shared/daemon-routing.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Endpoint paths (single source — the host serves these under the daemon origin).
@@ -1301,71 +1294,13 @@ export interface WireClientOptions {
 	readonly origin?: string;
 	/** The fetch implementation (defaults to the global `fetch`). */
 	readonly fetchImpl?: FetchLike;
-  /** Test seam for bypassing `/api/daemon-bases`; production loads this from thehive. */
-  readonly daemonBases?: Partial<Record<DaemonName, string>>;
 }
 
-export const DAEMON_BASES_ENDPOINT = "/api/daemon-bases" as const;
-
-// The server-side `/api/daemon-bases` route already rejects a non-loopback registry entry
-// (`src/daemon/registry.ts`), but the browser must not extend trust to whatever origin a
-// response claims either: a non-loopback base here degrades to the documented default rather
-// than being forwarded into `buildFederatedUrl`, so a compromised/duplicated thehive process
-// (or any response not actually from it) can never redirect captured session/memory request
-// bodies to an attacker-controlled origin.
-export const DaemonBasesSchema = z.object({
-  honeycomb: z.string().url().refine(isLoopbackBaseUrl).catch("http://127.0.0.1:3850"),
-  hivenectar: z.string().url().refine(isLoopbackBaseUrl).catch("http://127.0.0.1:3854")
-});
-
-function prependOrigin(origin: string, path: string): string {
-  if (origin === "") return path;
-  return `${origin.endsWith("/") ? origin.slice(0, -1) : origin}${path}`;
-}
-
-async function loadDaemonBases(fetchImpl: FetchLike, origin: string): Promise<DaemonBases> {
-  try {
-    const res = await fetchImpl(prependOrigin(origin, DAEMON_BASES_ENDPOINT), { headers: { accept: "application/json" } });
-    if (!res.ok) return normalizeDaemonBases();
-    const body: unknown = await res.json();
-    const parsed = DaemonBasesSchema.safeParse(body);
-    return normalizeDaemonBases(parsed.success ? parsed.data : {});
-  } catch {
-    // A missing thehive bootstrap route must not crash the dashboard. Documented defaults still fail soft per daemon.
-    return normalizeDaemonBases();
-  }
-}
-
-function endpointPathFromUrl(inputUrl: string): string | null {
-  const path = inputUrl.startsWith("/")
-    ? inputUrl
-    : (() => {
-        try {
-          const parsed = new URL(inputUrl);
-          return `${parsed.pathname}${parsed.search}`;
-        } catch {
-          return "";
-        }
-      })();
-  if (path === "" || path === DAEMON_BASES_ENDPOINT) return null;
-  if (path === "/health" || path.startsWith("/api/") || path.startsWith("/setup/")) return path;
-  return null;
-}
-
-function requestUrl(input: Parameters<FetchLike>[0]): string {
-  if (typeof input === "string") return input;
-  if (input instanceof URL) return input.toString();
-  return input.url;
-}
-
-function createFederatedFetch(fetchImpl: FetchLike, basesPromise: Promise<DaemonBases>): FetchLike {
-  return (async (input: Parameters<FetchLike>[0], init?: Parameters<FetchLike>[1]) => {
-    const endpointPath = endpointPathFromUrl(requestUrl(input));
-    if (endpointPath === null) return fetchImpl(input, init);
-    const bases = await basesPromise;
-    return fetchImpl(buildFederatedUrl(endpointPath, bases), init);
-  }) as FetchLike;
-}
+// Federation is SERVER-SIDE (the-hive ADR-0002): the browser talks only to thehive's own origin
+// and thehive proxies each `/api/*` and `/setup/*` request over loopback to the owning workload
+// daemon. This client therefore fetches same-origin exactly like honeycomb's original dashboard
+// wire; the daemon-base routing and the loopback-trust gate now live on the thehive server
+// (`src/daemon/proxy.ts` + `src/daemon/registry.ts`), not in the browser.
 
 /**
  * GET + zod-parse a JSON endpoint, returning the parsed value or `null` on any failure. `extraHeaders`
@@ -1928,12 +1863,8 @@ export function buildHistoryQueryString(filters: LogsHistoryFilters): string {
  */
 export function createWireClient(options: WireClientOptions = {}): WireClient {
 	const origin = options.origin ?? "";
-	const rawFetch = options.fetchImpl ?? fetch;
-	const basesPromise =
-		options.daemonBases !== undefined ? Promise.resolve(normalizeDaemonBases(options.daemonBases)) : loadDaemonBases(rawFetch, origin);
-	const fetchImpl = createFederatedFetch(rawFetch, basesPromise);
+	const fetchImpl = options.fetchImpl ?? fetch;
 	const url = (path: string): string => `${origin}${path}`;
-	const federatedUrl = async (path: string): Promise<string> => buildFederatedUrl(path, await basesPromise);
 
 	return {
 		async kpis(projectId?: string): Promise<KpisWire> {
@@ -2105,22 +2036,20 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 			const ES = (globalThis as { EventSource?: typeof EventSource }).EventSource;
 			if (ES === undefined) return () => {};
 			let source: EventSource | null = null;
-			let cancelled = false;
 			const handler = (ev: MessageEvent): void => {
 				const record = parseLogRecordEvent(ev.data);
 				if (record !== null) onRecord(record);
 			};
-			void federatedUrl(ENDPOINTS.logsStream)
-				.then((streamUrl) => {
-					if (cancelled) return;
-					source = new ES(streamUrl);
-					source.addEventListener("log", handler as EventListener);
-				})
-				.catch(() => {
-					// If daemon-base discovery or EventSource construction fails, the stream is simply unavailable.
-				});
+			try {
+				// Same-origin: EventSource hits thehive's own `/api/logs/stream`, which the server-side
+				// proxy forwards to the owning daemon's SSE tail. `event: "log"` frames are parsed through
+				// the SAME zod schema as the snapshot, so a malformed frame is dropped (never thrown).
+				source = new ES(url(ENDPOINTS.logsStream));
+				source.addEventListener("log", handler as EventListener);
+			} catch {
+				// If EventSource construction fails, the stream is simply unavailable; the page keeps its snapshot.
+			}
 			return () => {
-				cancelled = true;
 				try {
 					source?.removeEventListener("log", handler as EventListener);
 					source?.close();

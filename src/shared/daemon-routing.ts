@@ -21,10 +21,10 @@ export function normalizeBaseUrl(baseUrl: string): string {
 /**
  * The only hostnames a daemon base is trusted to resolve to. thehive aggregates every workload
  * daemon over loopback HTTP by construction (`DAEMON_HOST`/`THEHIVE_HOST` are always
- * `127.0.0.1`); a registry entry or `/api/daemon-bases` payload naming any other host is
- * rejected rather than trusted, so a tampered `hivedoctor.daemons.json` (or a compromised
- * daemon registration) cannot redirect the federated `wire` client — and the session/memory
- * data it carries in request bodies — to an attacker-controlled origin.
+ * `127.0.0.1`); a registry entry naming any other host is rejected rather than trusted, so a
+ * tampered `hivedoctor.daemons.json` (or a compromised daemon registration) cannot redirect the
+ * server-side proxy (`src/daemon/proxy.ts`) — and the session/memory data it carries in request
+ * bodies — to an attacker-controlled origin.
  */
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
@@ -42,9 +42,4 @@ export function normalizeDaemonBases(bases: Partial<Record<DaemonName, string>> 
     honeycomb: normalizeBaseUrl(bases.honeycomb ?? DEFAULT_DAEMON_BASES.honeycomb),
     hivenectar: normalizeBaseUrl(bases.hivenectar ?? DEFAULT_DAEMON_BASES.hivenectar)
   };
-}
-
-export function buildFederatedUrl(endpointPath: string, bases: Partial<Record<DaemonName, string>> = {}): string {
-  const owner = resolveEndpointOwner(endpointPath);
-  return `${normalizeDaemonBases(bases)[owner]}${endpointPath}`;
 }

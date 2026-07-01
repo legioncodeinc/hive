@@ -32,9 +32,9 @@ export function baseUrlFromHealthUrl(healthUrl: string): string | null {
     const url = new URL(healthUrl);
     // Reject any registry entry naming a non-loopback host BEFORE it can become a daemon base:
     // every workload daemon binds loopback only, so a `healthUrl` pointing elsewhere is either a
-    // corrupt registry or a tampered one, and must never reach `/api/daemon-bases` (the federated
-    // `wire` client would otherwise forward request bodies — including captured session/memory
-    // content — to that origin).
+    // corrupt registry or a tampered one, and must never become a base the server-side proxy
+    // (`src/daemon/proxy.ts`) would forward request bodies (including captured session/memory
+    // content) to.
     if (!isLoopbackBaseUrl(url.origin)) return null;
     const pathname = url.pathname.endsWith("/health") ? url.pathname.slice(0, -"/health".length) : url.pathname;
     const normalizedPath = pathname === "/" ? "" : pathname.replace(/\/$/, "");

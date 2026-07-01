@@ -17,7 +17,7 @@ The scope is the 36 files under `honeycomb/src/dashboard/**` (verified on disk).
 
 ## Non-Goals
 
-- The federated `wire` internals (the one modified file whose logic changes most). Its routing + fail-soft behavior is [`prd-001c`](./prd-001c-api-aggregation-wire.md); this sub-PRD only marks `wire.ts` as "copy with modification."
+- The `wire` federation internals (the one modified file whose logic changes most). Its same-origin fetch + thehive's server-side proxy are [`prd-001c`](./prd-001c-api-aggregation-wire.md); this sub-PRD only marks `wire.ts` as "copy with modification."
 - The thehive process/host that serves the copied bundle. That is [`prd-001a`](./prd-001a-thehive-process-and-bootstrap.md) (the net-new host row below points at it).
 - honeycomb's non-web ViewBlock/TUI dashboard, which stays in honeycomb untouched.
 
@@ -74,7 +74,7 @@ The 28 `web/` files that migrate to thehive (24 verbatim + 4 modified) are the s
 | `honeycomb/src/dashboard/web/pages/lifecycle-panel.tsx` | lifecycle panel used by the overview |
 | `honeycomb/src/dashboard/web/pages/coming-soon.tsx` | placeholder for unbuilt routes |
 
-These are origin-agnostic: they import only `PageProps` + the shared `wire` and never bind a same-origin URL themselves, so they render unchanged under thehive's federated `wire`.
+These are origin-agnostic: they import only `PageProps` + the shared `wire` and never bind a daemon URL themselves, so they render unchanged under thehive's same-origin `wire` (thehive's server proxies the data to the owning daemon).
 
 ---
 
@@ -82,9 +82,9 @@ These are origin-agnostic: they import only `PageProps` + the shared `wire` and 
 
 | File | Why it changes |
 |---|---|
-| `honeycomb/src/dashboard/web/wire.ts` | The single load-bearing modification. honeycomb's `wire` targets one same-origin daemon; thehive's copy routes each endpoint to the **owning** daemon via hivedoctor's registry, fail-soft per daemon. The endpoint constants (`ENDPOINTS`, `honeycomb/src/dashboard/web/wire.ts:34-40`) and the per-endpoint zod schemas are reused; the fetch base changes from same-origin to per-daemon. Full design in [`prd-001c`](./prd-001c-api-aggregation-wire.md). |
-| `honeycomb/src/dashboard/web/app.tsx` | The app root wires the shell, scope context, and the `wire` instance. thehive injects its federated `wire` here instead of honeycomb's same-origin client. |
-| `honeycomb/src/dashboard/web/main.tsx` | The browser entrypoint. Asset base and mount point adjust for thehive's host, and it hands the federated `wire` to `app.tsx`. |
+| `honeycomb/src/dashboard/web/wire.ts` | The single load-bearing modification. honeycomb's `wire` targets one same-origin daemon; thehive's copy stays same-origin to thehive, and thehive's SERVER proxies each endpoint to the **owning** daemon via hivedoctor's registry, fail-soft per daemon. The endpoint constants (`ENDPOINTS`) and the per-endpoint zod schemas are reused unchanged. Full design in [`prd-001c`](./prd-001c-api-aggregation-wire.md) / [`ADR-0002`](../../../knowledge/private/architecture/ADR-0002-server-side-bff-proxy-for-dashboard-federation.md). |
+| `honeycomb/src/dashboard/web/app.tsx` | The app root wires the shell, scope context, and the `wire` instance. thehive injects its same-origin `wire` here (server-side federation lives in thehive's proxy, not the client). |
+| `honeycomb/src/dashboard/web/main.tsx` | The browser entrypoint. Asset base and mount point adjust for thehive's host, and it hands the same-origin `wire` to `app.tsx`. |
 | `honeycomb/src/dashboard/web/setup-gate.tsx` | The first-run/setup gate. Its "is the daemon set up" check moves from a single-daemon assumption to thehive's multi-daemon posture (a daemon still "starting" is not a hard block on the shell). |
 
 ---
@@ -174,7 +174,7 @@ This ordering keeps a dashboard available at every step. Reversing it (delete fi
 
 - [`ADR-0001-retire-honeycomb-dashboard-and-copy-and-own-into-thehive`](../../../knowledge/private/architecture/ADR-0001-retire-honeycomb-dashboard-and-copy-and-own-into-thehive.md) - the retirement + copy-and-own decision this map implements.
 - [`prd-001a-thehive-process-and-bootstrap.md`](./prd-001a-thehive-process-and-bootstrap.md) - the net-new host that serves the copied bundle.
-- [`prd-001c-api-aggregation-wire.md`](./prd-001c-api-aggregation-wire.md) - the one load-bearing modification (`wire.ts` federation).
+- [`prd-001c-api-aggregation-wire.md`](./prd-001c-api-aggregation-wire.md) - the one load-bearing modification (`wire.ts` same-origin fetch + thehive's server-side proxy).
 - `honeycomb/src/dashboard/web/registry.tsx:196-240` - the route registry copied verbatim.
-- `honeycomb/src/dashboard/web/wire.ts:27, 34-40` - the ROI-type import + endpoint constants the federated `wire` reuses.
+- `honeycomb/src/dashboard/web/wire.ts:27, 34-40` - the ROI-type import + endpoint constants the same-origin `wire` reuses.
 - `honeycomb/src/daemon/runtime/server.ts:73-108, 319-341` - the `/api/*` groups, the `/` mount (retired), and `/health` (kept).

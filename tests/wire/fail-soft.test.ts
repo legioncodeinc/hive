@@ -1,5 +1,4 @@
 import {
-  DAEMON_BASES_ENDPOINT,
   EMPTY_KPIS,
   ENDPOINTS,
   createWireClient,
@@ -19,14 +18,14 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-describe("federated wire fail-soft behavior", () => {
-  it("c-AC-1 loads daemon bases once and fetches honeycomb-owned endpoints from honeycomb", async () => {
+// The browser wire is same-origin (the-hive ADR-0002): every endpoint is fetched from thehive's
+// own origin, and thehive's server-side proxy federates it to the owning daemon. The fail-soft
+// posture (a failed/malformed response degrades to the empty state, never a throw) is unchanged.
+describe("wire same-origin fetch + fail-soft behavior", () => {
+  it("c-AC-1 fetches endpoints from thehive's own origin (no client-side daemon base)", async () => {
     const fetchImpl = vi.fn(async (input: Parameters<FetchLike>[0]) => {
       const url = requestUrl(input);
-      if (url === DAEMON_BASES_ENDPOINT) {
-        return jsonResponse({ honeycomb: "http://127.0.0.1:4850", hivenectar: "http://127.0.0.1:4854" });
-      }
-      if (url === "http://127.0.0.1:4850/api/diagnostics/settings") {
+      if (url === ENDPOINTS.settings) {
         return jsonResponse({ orgId: "org", orgName: "Org", workspace: "workspace", settings: { mode: "ok" } });
       }
       return jsonResponse({}, 404);
@@ -40,18 +39,14 @@ describe("federated wire fail-soft behavior", () => {
       settings: { mode: "ok" }
     });
 
-    expect(fetchImpl).toHaveBeenCalledWith(DAEMON_BASES_ENDPOINT, { headers: { accept: "application/json" } });
-    expect(fetchImpl).toHaveBeenCalledWith("http://127.0.0.1:4850/api/diagnostics/settings", expect.any(Object));
+    expect(fetchImpl).toHaveBeenCalledWith(ENDPOINTS.settings, expect.any(Object));
   });
 
   it("c-AC-3 keeps the wire usable after one endpoint fetch fails", async () => {
     const fetchImpl = vi.fn(async (input: Parameters<FetchLike>[0]) => {
       const url = requestUrl(input);
-      if (url === DAEMON_BASES_ENDPOINT) {
-        return jsonResponse({ honeycomb: "http://127.0.0.1:4850", hivenectar: "http://127.0.0.1:4854" });
-      }
-      if (url === "http://127.0.0.1:4850/api/diagnostics/kpis") throw new Error("honeycomb kpis down");
-      if (url === "http://127.0.0.1:4850/api/diagnostics/settings") {
+      if (url === ENDPOINTS.kpis) throw new Error("kpis down");
+      if (url === ENDPOINTS.settings) {
         return jsonResponse({ orgId: "org", orgName: "Org", workspace: "workspace", settings: {} });
       }
       return jsonResponse({}, 404);
@@ -66,8 +61,7 @@ describe("federated wire fail-soft behavior", () => {
   it("c-AC-4 degrades malformed JSON through existing safe empty states", async () => {
     const fetchImpl = vi.fn(async (input: Parameters<FetchLike>[0]) => {
       const url = requestUrl(input);
-      if (url === DAEMON_BASES_ENDPOINT) return jsonResponse({ honeycomb: "http://127.0.0.1:4850" });
-      if (url === `http://127.0.0.1:4850${ENDPOINTS.sessions}`) return new Response("not-json", { status: 200 });
+      if (url === ENDPOINTS.sessions) return new Response("not-json", { status: 200 });
       return jsonResponse({}, 404);
     }) as unknown as FetchLike;
 
