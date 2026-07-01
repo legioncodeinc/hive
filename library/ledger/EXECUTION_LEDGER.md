@@ -49,6 +49,22 @@ Greenfield implementation in `the-hive` (bare repo). Honeycomb cutover (retire `
 
 ---
 
+## PRD-002 tracking: Portal Readiness Splash
+
+PRD-002 (index + 002a/002b/002c) was authored into `library/requirements/in-work/prd-002-portal-readiness-splash/` per the pinned note [`portal-readiness-splash.md`](../knowledge/private/frontend/portal-readiness-splash.md) (Option B locked). **Implemented** on branch `feature/prd-002-portal-readiness-splash` (uncommitted working tree, based on `feature/prd-001-thehive-portal-daemon`): the `GET /api/fleet-status` proxy, `isFleetReady()`, `ReadinessSplash`, the `main.tsx` tree-order change, and a dedup refactor (`src/shared/fleet-readiness.ts` shared by the server and browser). `security-worker-bee` ran and remediated one Medium (SSRF redirect-follow on the hivedoctor fetch); `quality-worker-bee` ran after and verified all 19 sub-PRD ACs. This corrects the prior "documentation-only, no smoker run has started" note below, which was stale as of this implementation pass.
+
+| ID | Source | Criterion (exact) | Owner | Status |
+|---|---|---|---|---|
+| fs-AC-1..10 | 002a | `GET /api/fleet-status` loopback-only proxy, fail-soft, `isFleetReady()`, tamper-safety | typescript-node-worker-bee | VERIFIED (10/10; see QA report) |
+| rs-AC-1..9 | 002b | `ReadinessSplash` wraps `SetupGate`, polls, per-daemon grid, sticky gate | react-worker-bee | VERIFIED (9/9; see QA report) |
+| ac-AC-1..8 | 002c | Consolidated acceptance sketch + the locked "no exception for degraded" rule | typescript-node-worker-bee | VERIFIED (traced via fs-AC-*/rs-AC-* evidence; see QA report) |
+
+**Dependency note (hivedoctor `daemons[]`):** the pinned note and `prd-002-portal-readiness-splash-index.md`'s "Dependency status" section describe this module as blocked on hivenectar `prd-004b` extending `GET :3852/status.json` with a `daemons[]` array. As of this QA pass, that extension is implemented in the sibling `hivedoctor` worktree (`src/status-page/server.ts` `StatusJson.daemons`, `src/compose/index.ts`) on branch `feature/prd-004a-004b-multi-daemon-status`, but it is **uncommitted there too** (not yet merged to hivedoctor's own `main`), so the dependency is authored-and-compatible, not yet shipped. `quality-worker-bee` verified the-hive's `HivedoctorStatusSchema` (`src/daemon/fleet-status.ts:29-33`) is a compatible strict-subset consumer of hivedoctor's actual `StatusJson` shape (field names, enum values, and per-daemon `escalation` all align); see the QA report's cross-repo contract-alignment section. The two branches should ship together; neither is blocked on new work in the other.
+
+Report: `qa/qa-report-prd-002-portal-readiness-splash.md`.
+
+---
+
 ## Wave plan
 
 ```mermaid
@@ -147,3 +163,9 @@ flowchart TD
   - 0 Critical findings. 2 Warnings: (1) the dashboard shell's `daemonUp` connectivity gate (`app.tsx`) checks honeycomb's `/health` only, not per-daemon — data-layer fail-soft (c-AC-1..4) is correct, but the UI-shell gate will incorrectly blank a future hivenectar-owned page; (2) m-AC-5 (independent release train) has the architectural separation but no CI/CD automation yet, correctly left `OPEN` rather than flipped. 2 Suggestions (stale honeycomb `CONVENTIONS.md` reference to the removed `mountDashboardHost` seam; a two-daemon isolation test gap to close once a hivenectar page ships).
   - Corrected a ledger-accuracy drift: m-AC-3 had been left `IN PROGRESS` despite its underlying b-AC-1/b-AC-2 being `DONE` and fully tested; flipped to `VERIFIED` on evidence.
   - Verdict: PASS with Warnings. Shippable. Report: `the-hive/library/requirements/in-work/prd-001-thehive-portal-daemon/qa/qa-report-prd-001-thehive-portal-daemon.md`.
+
+## PRD-002 run log
+
+- Implementation: DONE (branch `feature/prd-002-portal-readiness-splash`, based on `feature/prd-001-thehive-portal-daemon`; uncommitted working tree). Added `src/shared/fleet-readiness.ts` (shared `isFleetReady()`/`V1_REQUIRED_PEERS`, browser-safe), `src/daemon/fleet-status.ts` (`GET /api/fleet-status` fetch/parse/fail-soft), `src/dashboard/web/readiness-splash.tsx` (`ReadinessSplash`), and rewired `src/dashboard/web/main.tsx` to render `<ReadinessSplash>` in place of the direct `<SetupGate>` mount. Deleted a duplicate `src/dashboard/web/fleet-readiness.ts` in favor of the shared module.
+- Close-out A: DONE (`security-worker-bee`). Found + fixed 1 Medium: the hivedoctor status fetch used native `fetch`'s default `redirect: "follow"`, so a rogue/compromised loopback listener on `:3852` could 3xx-redirect off loopback, defeating `isLoopbackBaseUrl()`'s defense-in-depth (fs-AC-9). Fixed by pinning `redirect: "error"`; covered by two new tests. All other reviewed surfaces (loopback pinning, response-body normalization/fs-AC-10, zod boundary, splash gating, bundle purity) clean. Report: `qa/security-report.md`.
+- Close-out B: DONE (`quality-worker-bee`). Verified fs-AC-1..10 (10/10) and rs-AC-1..9 (9/9) with direct code + test evidence; confirmed the cold-boot bug fix (the splash genuinely blocks `SetupGate`'s mount, so `/setup/state` cannot fire before the fleet gate passes); confirmed the-hive's `HivedoctorStatusSchema` is a compatible consumer of hivedoctor's actual `StatusJson` shape (no cross-repo mismatch). Found and fixed two Warnings in place: (1) `prd-002c`'s test plan called for rendered-component tests (rs-AC-2/3/5/6/7/9) that the original suite explicitly deferred (node environment, no DOM libs); added `jsdom` + `@testing-library/react` as devDependencies and a new `tests/dashboard/readiness-splash-render.test.tsx` closing the gap; (2) this ledger's PRD-002 tracking section was stale ("documentation-only, no smoker run has started") against the actual implemented-and-remediated state; corrected above. `npm run typecheck && npm test && npm run build` green (15 files / 72 tests). 0 Critical findings. Verdict: PASS. Report: `qa/qa-report-prd-002-portal-readiness-splash.md`.

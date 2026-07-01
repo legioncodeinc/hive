@@ -25,8 +25,8 @@ function countFiles(dir: string): number {
 }
 
 describe("dashboard copy-map", () => {
-  it("b-AC-5 migrated all 28 honeycomb web/ files", () => {
-    expect(countFiles(WEB_DIR)).toBe(28);
+  it("b-AC-5 migrated all honeycomb web/ files plus PRD-002b readiness modules", () => {
+    expect(countFiles(WEB_DIR)).toBe(29);
   });
 
   it("b-AC-5 includes the shell + infra files (12) and the pages (12)", () => {
@@ -46,6 +46,7 @@ describe("dashboard copy-map", () => {
       "wire.ts",
       "app.tsx",
       "main.tsx",
+      "readiness-splash.tsx",
       "setup-gate.tsx"
     ]) {
       expect(existsSync(join(WEB_DIR, file))).toBe(true);
@@ -72,5 +73,6 @@ describe("dashboard copy-map", () => {
     expect(existsSync(join(SRC, "dashboard", "contracts.ts"))).toBe(true);
     expect(existsSync(join(SRC, "shared", "memory-types.ts"))).toBe(true);
     expect(existsSync(join(SRC, "shared", "lifecycle-flags.ts"))).toBe(true);
+    expect(existsSync(join(SRC, "shared", "fleet-readiness.ts"))).toBe(true);
   });
 });

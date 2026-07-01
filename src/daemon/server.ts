@@ -6,11 +6,13 @@ import {
   type LockPaths
 } from "../lock.js";
 import {
+  HIVEDOCTOR_STATUS_URL,
   THEHIVE_HOST,
   THEHIVE_PORT,
   THEHIVE_VERSION
 } from "../shared/constants.js";
 import { mountDashboardHost } from "./dashboard/host.js";
+import { fetchFleetStatus, type FetchImpl } from "./fleet-status.js";
 import { resolveDaemonBases } from "./registry.js";
 
 export interface CreateThehiveOptions {
@@ -18,6 +20,8 @@ export interface CreateThehiveOptions {
   readonly port?: number;
   readonly now?: () => number;
   readonly registryPath?: string;
+  readonly fleetStatusFetch?: FetchImpl;
+  readonly hivedoctorStatusUrl?: string;
 }
 
 export interface StartThehiveOptions extends CreateThehiveOptions {
@@ -70,6 +74,13 @@ export function createThehive(options: CreateThehiveOptions = {}): ThehiveInstan
   );
 
   app.get("/api/daemon-bases", (c) => c.json(resolveDaemonBases({ registryPath: options.registryPath })));
+
+  const fleetStatusFetch = options.fleetStatusFetch ?? fetch;
+  const hivedoctorStatusUrl = options.hivedoctorStatusUrl ?? HIVEDOCTOR_STATUS_URL;
+
+  app.get("/api/fleet-status", async (c) =>
+    c.json(await fetchFleetStatus(fleetStatusFetch, hivedoctorStatusUrl))
+  );
 
   return {
     app,
