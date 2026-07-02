@@ -15,6 +15,7 @@ describe("dashboard route registry", () => {
       "Harnesses",
       "Memories",
       "Memory Graph",
+      "Hive Graph",
       "Sync",
       "Logs",
       // PRD-005b/PRD-005c: the persistent fleet health page, slotted after Logs.
@@ -32,6 +33,7 @@ describe("dashboard route registry", () => {
       "/harnesses",
       "/memories",
       "/graph",
+      "/hive-graph",
       "/sync",
       "/logs",
       "/health",
@@ -46,6 +48,16 @@ describe("dashboard route registry", () => {
     }
     // The shell injects ONE wire down to every page (pages never build their own); the factory exists.
     expect(typeof createWireClient).toBe("function");
+  });
+
+  it("015-AC-1 a-AC-2 matchRoute resolves /hive-graph exactly", () => {
+    expect(matchRoute("/hive-graph").route).toBe("/hive-graph");
+    expect(matchRoute("/hive-graph").label).toBe("Hive Graph");
+  });
+
+  it("015-AC-7 /graph remains Memory Graph only (no hive-graph on /graph)", () => {
+    expect(matchRoute("/graph").route).toBe("/graph");
+    expect(matchRoute("/graph").label).toBe("Memory Graph");
   });
 
   it("defaults an unknown hash to the Dashboard entry (no blank screen)", () => {

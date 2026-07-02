@@ -25,6 +25,7 @@
 import { z } from "zod";
 
 import { EMPTY_ROI_TREND, EMPTY_ROI_VIEW, type RoiTrendView, type RoiView } from "../contracts.js";
+import { projectionToGraphWire, type PortableProjectionWire, type ProjectionDerivedEntry, type ProjectionFileEntry } from "./hive-graph-projection.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Endpoint paths (single source — the host serves these under the daemon origin).
@@ -42,6 +43,11 @@ export const ENDPOINTS = Object.freeze({
 	// end-to-end and writes the LOCAL snapshot; a subsequent `GET /api/graph` returns it immediately
 	// (local file, no eventual-consistency wait). On the RBAC-protected `/api/graph` group.
 	graphBuild: "/api/graph/build",
+	// PRD-015 — nectar hive-graph surface (proxied to nectar on 127.0.0.1:3854 via hive ADR-0002).
+	hiveGraphSearch: "/api/hive-graph/search",
+	hiveGraphStatus: "/api/hive-graph/status",
+	hiveGraphProjection: "/api/hive-graph/projection",
+	hiveGraphBuild: "/api/hive-graph/build",
 	// PRD-041b — the memory-graph view-model (the knowledge graph of memories/entities). Served off
 	// the diagnostics group (`/api/diagnostics/memory-graph`), mirroring `/api/graph`. Returns the SAME
 	// `GraphView` shape so the existing `GraphCanvas` renders it unchanged; `built:false` until PRD-008
@@ -149,6 +155,11 @@ export const PROJECT_HEADER = "x-honeycomb-project" as const;
 /** Build the per-request project header, or an empty object when no project is selected. */
 export function projectHeader(projectId: string | undefined): Record<string, string> {
 	return projectId !== undefined && projectId !== "" ? { [PROJECT_HEADER]: projectId } : {};
+}
+
+/** Nectar scopes hive-graph reads with `?project=` (PRD-008); honeycomb reads use {@link projectHeader}. */
+export function hiveGraphProjectQuery(projectId: string | undefined): string {
+	return projectId !== undefined && projectId !== "" ? `?project=${encodeURIComponent(projectId)}` : "";
 }
 
 /** PRD-040a — the default first-page size the Memories list requests (the daemon clamps to 500). */
@@ -788,6 +799,127 @@ export type BuildGraphAck = z.infer<typeof BuildGraphAckSchema>;
  * malformed (never a throw into React). The page keeps its empty state + shows the inline error line.
  */
 export const FAILED_BUILD_GRAPH_ACK: BuildGraphAck = Object.freeze({ built: false, nodeCount: 0, edgeCount: 0, fileCount: 0 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRD-015 — nectar hive-graph wire shapes (search / status / projection / build).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One hive-graph search hit (PRD-012 / `HiveGraphHit`). */
+export const HiveGraphHitSchema = z.object({
+	source: z.literal("nectar").catch("nectar" as const),
+	id: z.string().catch(""),
+	path: z.string().catch(""),
+	title: z.string().catch(""),
+	body: z.string().catch(""),
+	concepts: z.string().catch(""),
+	content_hash: z.string().catch(""),
+});
+export type HiveGraphHitWire = z.infer<typeof HiveGraphHitSchema>;
+
+export const HiveGraphSearchResultSchema = z.object({
+	hits: z.array(HiveGraphHitSchema).catch([]),
+	sources: z.array(z.literal("nectar")).catch([]),
+	degraded: z.boolean().catch(true),
+});
+export type HiveGraphSearchWire = z.infer<typeof HiveGraphSearchResultSchema>;
+
+/** The six-value `describe_status` breakdown (PRD-008c). */
+export const DescribeStatusCountsSchema = z.object({
+	pending: z.number().catch(0),
+	described: z.number().catch(0),
+	failed: z.number().catch(0),
+	"skipped-too-large": z.number().catch(0),
+	"skipped-binary": z.number().catch(0),
+	"skipped-deleted": z.number().catch(0),
+});
+export type DescribeStatusCountsWire = z.infer<typeof DescribeStatusCountsSchema>;
+
+export const HiveGraphStatusSchema = z.object({
+	queueDepth: z.number().catch(0),
+	describeStatus: DescribeStatusCountsSchema.catch({
+		pending: 0,
+		described: 0,
+		failed: 0,
+		"skipped-too-large": 0,
+		"skipped-binary": 0,
+		"skipped-deleted": 0,
+	}),
+	costSpentUsd: z.number().catch(0),
+	degraded: z.boolean().catch(true),
+});
+export type HiveGraphStatusWire = z.infer<typeof HiveGraphStatusSchema>;
+
+export const EMPTY_HIVE_GRAPH_STATUS: HiveGraphStatusWire = Object.freeze({
+	queueDepth: 0,
+	describeStatus: {
+		pending: 0,
+		described: 0,
+		failed: 0,
+		"skipped-too-large": 0,
+		"skipped-binary": 0,
+		"skipped-deleted": 0,
+	},
+	costSpentUsd: 0,
+	degraded: true,
+});
+
+const ProjectionFileEntrySchema = z.object({
+	content_hash: z.string().catch(""),
+	path: z.string().catch(""),
+	title: z.string().catch(""),
+	description: z.string().catch(""),
+	concepts: z.array(z.string()).catch([]),
+	describe_model: z.string().catch(""),
+	described_at: z.string().catch(""),
+});
+
+const ProjectionDerivedEntrySchema = z.object({
+	from_nectar: z.string().catch(""),
+	fork_content_hash: z.string().catch(""),
+});
+
+export const PortableProjectionSchema = z.object({
+	version: z.number().catch(0),
+	generated_at: z.string().catch(""),
+	generator: z.string().catch(""),
+	project: z
+		.object({
+			org_id: z.string().catch(""),
+			workspace_id: z.string().catch(""),
+			project_id: z.string().catch(""),
+		})
+		.catch({ org_id: "", workspace_id: "", project_id: "" }),
+	files: z.record(z.string(), ProjectionFileEntrySchema).catch({}),
+	derived: z.record(z.string(), ProjectionDerivedEntrySchema).catch({}),
+});
+
+/** The `/api/hive-graph/build` ack the page surfaces honestly (501 / 409 / success / failure). */
+export type HiveGraphBuildState = "accepted" | "already_running" | "unavailable" | "failed";
+
+export interface HiveGraphBuildAck {
+	readonly state: HiveGraphBuildState;
+	readonly message: string;
+}
+
+export const FAILED_HIVE_GRAPH_BUILD_ACK: HiveGraphBuildAck = Object.freeze({
+	state: "failed",
+	message: "Build failed",
+});
+
+export interface HiveGraphFileGraphWire {
+	readonly graph: GraphWire;
+	readonly files: Readonly<Record<string, ProjectionFileEntry>>;
+	readonly derived: Readonly<Record<string, ProjectionDerivedEntry>>;
+	readonly unreachable: boolean;
+}
+
+export interface HiveGraphStatusResultWire extends HiveGraphStatusWire {
+	readonly unreachable: boolean;
+}
+
+export interface HiveGraphSearchResultWire extends HiveGraphSearchWire {
+	readonly unreachable: boolean;
+}
 
 /**
  * The generous client-side timeout (ms) for `buildGraph()`. The build parses the WHOLE repo with
@@ -1612,6 +1744,27 @@ export interface WireClient {
 	 * honest inline error + keeps the CLI hint).
 	 */
 	buildGraph(): Promise<BuildGraphAck>;
+	/**
+	 * PRD-015b — read the file graph by fetching nectar's projection (`GET /api/hive-graph/projection`)
+	 * and transforming it into {@link GraphWire} client-side (decision #39). A failure degrades to
+	 * {@link EMPTY_GRAPH} with `unreachable: true` so the page renders an honest unavailable state.
+	 */
+	hiveGraphFileGraph(projectId?: string): Promise<HiveGraphFileGraphWire>;
+	/**
+	 * PRD-015c — manual hive-graph search (`POST /api/hive-graph/search`, PRD-012 semantics). Mirrors
+	 * {@link recall}'s `{ hits, degraded }` posture; adds `unreachable` when nectar is down.
+	 */
+	hiveGraphSearch(query: string, projectId?: string): Promise<HiveGraphSearchResultWire>;
+	/**
+	 * PRD-015c — pipeline status (`GET /api/hive-graph/status`): queue depth, describe_status counts,
+	 * and cumulative cost. Polls via the page's `usePoll` lifecycle.
+	 */
+	hiveGraphStatus(projectId?: string): Promise<HiveGraphStatusResultWire>;
+	/**
+	 * PRD-015c — trigger a brood/build (`POST /api/hive-graph/build`). Surfaces 501 unavailable,
+	 * 409 already_running, and success honestly — never throws into React.
+	 */
+	hiveGraphBuild(): Promise<HiveGraphBuildAck>;
 	/** PRD-032c — read the vault `setting` class + the provider→model catalog (`GET /api/settings`). */
 	vaultSettings(): Promise<VaultSettingsWire>;
 	/**
@@ -2148,6 +2301,87 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 			} catch {
 				// A timeout/abort, network error, or non-JSON body → the honest failure ack.
 				return FAILED_BUILD_GRAPH_ACK;
+			} finally {
+				clearTimeout(timer);
+			}
+		},
+		async hiveGraphFileGraph(projectId?: string): Promise<HiveGraphFileGraphWire> {
+			try {
+				const qs = hiveGraphProjectQuery(projectId);
+				const res = await fetchImpl(url(`${ENDPOINTS.hiveGraphProjection}${qs}`), {
+					headers: { accept: "application/json", ...DASHBOARD_SESSION_HEADERS },
+				});
+				if (!res.ok) return { graph: EMPTY_GRAPH, files: {}, derived: {}, unreachable: true };
+				const parsed = PortableProjectionSchema.safeParse(await res.json());
+				if (!parsed.success) return { graph: EMPTY_GRAPH, files: {}, derived: {}, unreachable: true };
+				return {
+					graph: projectionToGraphWire(parsed.data as PortableProjectionWire),
+					files: parsed.data.files,
+					derived: parsed.data.derived,
+					unreachable: false,
+				};
+			} catch {
+				return { graph: EMPTY_GRAPH, files: {}, derived: {}, unreachable: true };
+			}
+		},
+		async hiveGraphSearch(query: string, projectId?: string): Promise<HiveGraphSearchResultWire> {
+			try {
+				const qs = hiveGraphProjectQuery(projectId);
+				const res = await fetchImpl(url(`${ENDPOINTS.hiveGraphSearch}${qs}`), {
+					method: "POST",
+					headers: { "content-type": "application/json", accept: "application/json", ...DASHBOARD_SESSION_HEADERS },
+					body: JSON.stringify({ query }),
+				});
+				if (!res.ok) return { hits: [], sources: [], degraded: true, unreachable: true };
+				const parsed = HiveGraphSearchResultSchema.safeParse(await res.json());
+				if (!parsed.success) return { hits: [], sources: [], degraded: true, unreachable: true };
+				return { ...parsed.data, unreachable: false };
+			} catch {
+				return { hits: [], sources: [], degraded: true, unreachable: true };
+			}
+		},
+		async hiveGraphStatus(projectId?: string): Promise<HiveGraphStatusResultWire> {
+			try {
+				const qs = hiveGraphProjectQuery(projectId);
+				const res = await fetchImpl(url(`${ENDPOINTS.hiveGraphStatus}${qs}`), {
+					headers: { accept: "application/json", ...DASHBOARD_SESSION_HEADERS },
+				});
+				if (!res.ok) return { ...EMPTY_HIVE_GRAPH_STATUS, unreachable: true };
+				const parsed = HiveGraphStatusSchema.safeParse(await res.json());
+				if (!parsed.success) return { ...EMPTY_HIVE_GRAPH_STATUS, unreachable: true };
+				return { ...parsed.data, unreachable: false };
+			} catch {
+				return { ...EMPTY_HIVE_GRAPH_STATUS, unreachable: true };
+			}
+		},
+		async hiveGraphBuild(): Promise<HiveGraphBuildAck> {
+			const ac = new AbortController();
+			const timer = setTimeout(() => ac.abort(), BUILD_GRAPH_TIMEOUT_MS);
+			try {
+				const res = await fetchImpl(url(ENDPOINTS.hiveGraphBuild), {
+					method: "POST",
+					headers: { accept: "application/json", "content-type": "application/json", ...DASHBOARD_SESSION_HEADERS },
+					body: JSON.stringify({}),
+					signal: ac.signal,
+				});
+				const body: unknown = await res.json().catch(() => ({}));
+				const rec = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+				if (res.status === 501 && rec["error"] === "build_unavailable") {
+					const reason = typeof rec["reason"] === "string" ? rec["reason"] : "Build unavailable on this daemon";
+					return { state: "unavailable", message: reason };
+				}
+				if (res.status === 409 && rec["status"] === "already_running") {
+					const message = typeof rec["message"] === "string" ? rec["message"] : "A brood is already in progress";
+					return { state: "already_running", message };
+				}
+				if (res.ok) return { state: "accepted", message: "Build triggered" };
+				if (rec["error"] === "build_failed") {
+					const reason = typeof rec["reason"] === "string" ? rec["reason"] : "Build failed";
+					return { state: "failed", message: reason };
+				}
+				return FAILED_HIVE_GRAPH_BUILD_ACK;
+			} catch {
+				return FAILED_HIVE_GRAPH_BUILD_ACK;
 			} finally {
 				clearTimeout(timer);
 			}

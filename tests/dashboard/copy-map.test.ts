@@ -26,7 +26,7 @@ function countFiles(dir: string): number {
 
 describe("dashboard copy-map", () => {
   it("b-AC-5 migrated all honeycomb web/ files plus PRD-002b/004/005 readiness+health modules and PRD-003c's boot-route", () => {
-    expect(countFiles(WEB_DIR)).toBe(34);
+    expect(countFiles(WEB_DIR)).toBe(36);
   });
 
   it("b-AC-5 includes the shell + infra files (21) and the pages (13)", () => {
@@ -44,6 +44,7 @@ describe("dashboard copy-map", () => {
       "build-graph-button.tsx",
       "graph-layout.ts",
       "wire.ts",
+      "hive-graph-projection.ts",
       "app.tsx",
       "main.tsx",
       // PRD-004a: the `/buzzing` screen succeeds PRD-002b's `readiness-splash.tsx` (retired).
@@ -65,6 +66,7 @@ describe("dashboard copy-map", () => {
       "harnesses.tsx",
       "memories.tsx",
       "graph.tsx",
+      "hive-graph.tsx",
       "sync.tsx",
       "logs.tsx",
       // PRD-005b/PRD-005c: the persistent fleet health page.
