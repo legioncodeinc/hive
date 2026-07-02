@@ -22,8 +22,17 @@ import type { Context } from "hono";
 import { HIVEDOCTOR_EVENTS_URL } from "../shared/constants.js";
 import { isLoopbackBaseUrl } from "../shared/daemon-routing.js";
 
-/** The injectable fetch surface reaching hivedoctor's status page (the global `fetch` in prod, a mock in tests). */
-export type TelemetryFetch = (input: string, init?: { readonly signal?: AbortSignal }) => Promise<Response>;
+/**
+ * The injectable fetch surface reaching hivedoctor's status page (the global `fetch` in prod, a
+ * mock in tests). `redirect` is part of the surface so the relay can pin `redirect: "error"`
+ * (matching `proxy.ts`/`fleet-status.ts`): native fetch follows 30x by default, and
+ * `isLoopbackBaseUrl()` only validates the FIRST hop, so an unpinned redirect could take the
+ * relay off-loopback and defeat the SSRF guard.
+ */
+export type TelemetryFetch = (
+	input: string,
+	init?: { readonly signal?: AbortSignal; readonly redirect?: "error" | "follow" | "manual" },
+) => Promise<Response>;
 
 /** Options for {@link createTelemetryStreamHandler}. */
 export interface CreateTelemetryStreamOptions {
@@ -58,7 +67,7 @@ export function createTelemetryStreamHandler(options: CreateTelemetryStreamOptio
 		if (!isLoopbackBaseUrl(hivedoctorEventsUrl)) return unreachableStreamResponse();
 
 		try {
-			const upstream = await fetchImpl(hivedoctorEventsUrl, { signal: c.req.raw.signal });
+			const upstream = await fetchImpl(hivedoctorEventsUrl, { signal: c.req.raw.signal, redirect: "error" });
 			if (!upstream.ok || upstream.body === null) return unreachableStreamResponse();
 
 			return new Response(upstream.body, {

@@ -112,6 +112,52 @@ describe("applyRestFallback (bz-AC-5, hr-AC-4, hm-AC-10)", () => {
 		const state = applyRestFallback(createInitialTelemetryState(), { supervisor: "unreachable", daemons: [] }, NOW);
 		expect(toFleetTelemetryView(state, NOW).source).toBe("rest");
 	});
+
+	it("treats the response as a SNAPSHOT: a daemon omitted from a later response loses its stale signal", () => {
+		const firstStatus: FleetStatusResponse = {
+			supervisor: "reachable",
+			health: "ok",
+			asOf: "2026-07-01T12:00:00.000Z",
+			daemons: [
+				{ name: "honeycomb", health: "ok", escalation: null },
+				{ name: "hivenectar", health: "ok", escalation: null },
+			],
+		};
+		const afterFirst = applyRestFallback(createInitialTelemetryState(), firstStatus, NOW - 60_000);
+		expect(toFleetTelemetryView(afterFirst, NOW).services.find((s) => s.name === "hivenectar")?.state).toBe("active");
+
+		// hivenectar disappears from the projection entirely (e.g. deregistered or dropped by
+		// hivedoctor). Its NAME must survive (never omitted from the view), but its runtime signal
+		// must not: it falls back to the registered-but-silent derivation instead of staying active.
+		const secondStatus: FleetStatusResponse = {
+			supervisor: "reachable",
+			health: "ok",
+			asOf: "2026-07-01T12:01:00.000Z",
+			daemons: [{ name: "honeycomb", health: "ok", escalation: null }],
+		};
+		const afterSecond = applyRestFallback(afterFirst, secondStatus, NOW);
+		const view = toFleetTelemetryView(afterSecond, NOW);
+		const hivenectar = view.services.find((s) => s.name === "hivenectar");
+		expect(hivenectar).toBeDefined();
+		expect(hivenectar?.state).toBe("starting");
+		expect(hivenectar?.health).toBeNull();
+		expect(view.services.find((s) => s.name === "honeycomb")?.state).toBe("active");
+	});
+
+	it("snapshot rebuild still preserves warming bookkeeping for daemons PRESENT in the response", () => {
+		const status: FleetStatusResponse = {
+			supervisor: "reachable",
+			health: "ok",
+			asOf: "2026-07-01T12:00:00.000Z",
+			daemons: [{ name: "honeycomb", health: "ok", escalation: null }],
+		};
+		// First observed healthy at NOW - 5s: still inside the warming grace window...
+		const afterFirst = applyRestFallback(createInitialTelemetryState(), status, NOW - 5_000);
+		expect(toFleetTelemetryView(afterFirst, NOW - 5_000).services[0]?.state).toBe("warming");
+		// ...and a later snapshot must carry `firstActiveAt` forward (not restart the window).
+		const afterSecond = applyRestFallback(afterFirst, status, NOW);
+		expect(toFleetTelemetryView(afterSecond, NOW + 6_000).services[0]?.state).toBe("active");
+	});
 });
 
 describe("appendLogs — bounded ring buffer (lg-AC-6/lg-AC-8)", () => {

@@ -168,6 +168,11 @@ export function applySseEvent(state: TelemetryState, event: FleetTelemetryEvent,
  * projection carries no metrics/Deep Lake/lastSeen, so existing per-service metrics/Deep Lake
  * readings are RETAINED (hm-AC-10's "last known metrics") — only the derived health-driving
  * signal is refreshed.
+ *
+ * The response is a SNAPSHOT, not a patch: `services` is rebuilt from `status.daemons` alone, so
+ * a daemon missing from a later response loses its stale `signal`/`firstActiveAt` and falls back
+ * to the registered-but-silent derivation (`starting`) instead of staying `active`/`degraded`
+ * forever. Its NAME is still retained via `registeredNames`, so the row never disappears.
  */
 export function applyRestFallback(state: TelemetryState, status: FleetStatusResponse, now: number): TelemetryState {
 	if (status.supervisor !== "reachable") {
@@ -177,12 +182,12 @@ export function applyRestFallback(state: TelemetryState, status: FleetStatusResp
 	}
 
 	let names = state.registeredNames;
-	const services = new Map(state.services);
+	const services = new Map<string, ServiceRuntime>();
 
 	for (const daemon of status.daemons) {
 		names = withKnownName(names, daemon.name);
 		const signal = fromFleetDaemonStatus(daemon);
-		const previous = services.get(daemon.name);
+		const previous = state.services.get(daemon.name);
 		services.set(daemon.name, {
 			signal,
 			metrics: previous?.metrics ?? {},
@@ -238,6 +243,16 @@ export interface UseFleetTelemetryOptions {
 export function useFleetTelemetry(options: UseFleetTelemetryOptions = {}): FleetTelemetryView {
 	const restPollMs = options.restPollMs ?? DEFAULT_REST_POLL_MS;
 	const [state, setState] = React.useState<TelemetryState>(() => createInitialTelemetryState());
+	const [now, setNow] = React.useState(() => Date.now());
+
+	// `deriveServiceState` is time-dependent (the warming grace window, the stale-`lastSeen`
+	// override), so the view must recompute on a clock tick too, not only on incoming data:
+	// a quiet-but-open SSE stream would otherwise freeze a service in `warming`, or never age a
+	// stale `lastSeen` into `error`, until some unrelated state update happened to re-render.
+	React.useEffect(() => {
+		const id = setInterval(() => setNow(Date.now()), 1000);
+		return () => clearInterval(id);
+	}, []);
 
 	// bz-AC-1/bz-AC-2/hr-AC-1: enumerate the FULL registered-service set once on mount, so a tile
 	// exists for a registered-but-silent service even before its first telemetry tick.
@@ -335,7 +350,7 @@ export function useFleetTelemetry(options: UseFleetTelemetryOptions = {}): Fleet
 		};
 	}, [restPollMs]);
 
-	return React.useMemo(() => toFleetTelemetryView(state, Date.now()), [state]);
+	return React.useMemo(() => toFleetTelemetryView(state, now), [state, now]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -87,6 +87,31 @@ describe("BuzzingScreen", () => {
 		await waitFor(() => expect(onReady).toHaveBeenCalled());
 	});
 
+	it("never stacks overlapping readiness polls while a /api/fleet-status request is still in flight", async () => {
+		let fleetStatusCalls = 0;
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = requestUrl(input);
+				if (url.includes("/api/registered-services")) return jsonResponse({ names: registeredNames });
+				if (url.includes("/api/fleet-status")) {
+					fleetStatusCalls += 1;
+					// A hung daemon: the request never resolves. The interval keeps firing well past
+					// pollMs, so without the in-flight guard this would stack a call per tick.
+					return new Promise<Response>(() => {});
+				}
+				return jsonResponse({}, false);
+			}),
+		);
+
+		render(<BuzzingScreen assetBase="assets" pollMs={10} onReady={() => {}} />);
+		await new Promise((resolve) => setTimeout(resolve, 100));
+
+		// Exactly one from this screen's dismissal poll plus one from useFleetTelemetry's own
+		// fallback poll (its default interval is far longer than this window).
+		expect(fleetStatusCalls).toBeLessThanOrEqual(2);
+	});
+
 	it("bz-AC-10: stays mounted (no dismissal call) while the fleet is not yet ready", async () => {
 		fleetStatusResponse = {
 			supervisor: "reachable",

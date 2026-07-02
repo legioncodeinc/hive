@@ -19,6 +19,23 @@ import { useFleetTelemetry, type ServiceView } from "./use-fleet-telemetry.js";
 /** The `/health` page's route (PRD-005b), so the rail can link an operator straight to detail. */
 export const HEALTH_ROUTE = "/health" as const;
 
+/**
+ * Standard visually-hidden style: real text content for assistive tech (the rail is an aria-live
+ * region, so the STATE must live in the accessible text, not only in `title`/the aria-hidden icon),
+ * invisible to sighted operators who already get the icon + color.
+ */
+const VISUALLY_HIDDEN_STYLE: React.CSSProperties = {
+	position: "absolute",
+	width: 1,
+	height: 1,
+	padding: 0,
+	margin: -1,
+	overflow: "hidden",
+	clip: "rect(0, 0, 0, 0)",
+	whiteSpace: "nowrap",
+	border: 0,
+};
+
 /** One rail pill: the shared state icon + the service name, colored by state (never color-only, svg-AC-2). */
 function ServicePill({ service }: { readonly service: ServiceView }): React.JSX.Element {
 	const label = `${service.name}: ${SERVICE_STATE_LABEL[service.state]}`;
@@ -42,7 +59,10 @@ function ServicePill({ service }: { readonly service: ServiceView }): React.JSX.
 			<span style={{ color: SERVICE_STATE_COLOR[service.state], display: "inline-flex", width: 14, height: 14 }} aria-hidden="true">
 				<ServiceStateIcon state={service.state} />
 			</span>
-			<span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{service.name}</span>
+			<span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
+				{service.name}
+				<span style={VISUALLY_HIDDEN_STYLE}>: {SERVICE_STATE_LABEL[service.state]}</span>
+			</span>
 		</span>
 	);
 }

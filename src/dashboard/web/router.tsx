@@ -29,6 +29,14 @@ export function routeFromPath(pathname: string): string {
 	return trimmed === "" ? "/" : trimmed;
 }
 
+/**
+ * The custom window event `navigate` broadcasts after `pushState`. `pushState` fires no browser
+ * event of its own, and several components mount their OWN `usePathRoute()` instance (the Shell in
+ * `app.tsx`, `HarnessesPage`), so without a broadcast only the instance whose `navigate` ran would
+ * re-render and every other subscriber's `route` would go stale until a real `popstate`.
+ */
+export const ROUTE_CHANGE_EVENT = "thehive:pathchange" as const;
+
 /** The path-router contract the Shell consumes: the active route + a `navigate` helper. */
 export interface PathRoute {
 	/** The active route parsed from `location.pathname` (e.g. `/` or `/graph`). */
@@ -54,22 +62,27 @@ export function usePathRoute(): PathRoute {
 
 	React.useEffect(() => {
 		if (typeof window === "undefined") return;
-		const onPopState = (): void => setRoute(routeFromPath(window.location.pathname));
+		const sync = (): void => setRoute(routeFromPath(window.location.pathname));
 		// Re-sync once on mount in case the path changed between the initial render and the effect.
-		onPopState();
-		window.addEventListener("popstate", onPopState);
-		return () => window.removeEventListener("popstate", onPopState);
+		sync();
+		window.addEventListener("popstate", sync);
+		window.addEventListener(ROUTE_CHANGE_EVENT, sync);
+		return () => {
+			window.removeEventListener("popstate", sync);
+			window.removeEventListener(ROUTE_CHANGE_EVENT, sync);
+		};
 	}, []);
 
 	const navigate = React.useCallback((r: string): void => {
 		if (typeof window === "undefined") return;
 		const next = r.startsWith("/") ? r : `/${r}`;
-		// `pushState` does not fire `popstate`, so update local state directly here too (mirrors the
-		// retired hash hook's `navigate`, which relied on `hashchange` firing synchronously instead).
+		// `pushState` does not fire `popstate`, so broadcast the change instead: EVERY mounted
+		// `usePathRoute()` instance (not just this one) re-syncs from `location.pathname`, keeping
+		// the URL the single source of truth across all subscribers.
 		if (window.location.pathname !== next) {
 			window.history.pushState(null, "", next);
 		}
-		setRoute(next);
+		window.dispatchEvent(new Event(ROUTE_CHANGE_EVENT));
 	}, []);
 
 	return { route, navigate };

@@ -21,12 +21,23 @@ const SetupStateAuthSchema = z.object({
 });
 
 /** Minimal init surface for the auth fetch (mirrors `fleet-status.ts`'s `FleetFetchInit`). */
-export type SetupAuthFetchInit = { readonly redirect?: "error" | "follow" | "manual" };
+export type SetupAuthFetchInit = {
+  readonly redirect?: "error" | "follow" | "manual";
+  /** Ties the upstream `/setup/state` fetch to the caller's lifecycle (e.g. the incoming request). */
+  readonly signal?: AbortSignal;
+};
 export type SetupAuthFetchImpl = (input: string, init?: SetupAuthFetchInit) => Promise<Response>;
 
 export interface FetchSetupAuthenticatedOptions {
   /** Override the hivedoctor registry file path the honeycomb base is resolved from. */
   readonly registryPath?: string;
+  /**
+   * Abort signal forwarded to the underlying fetch, so a disconnected client (the gate passes
+   * `c.req.raw.signal`) never leaves a hung `/setup/state` request pinned upstream. An abort
+   * surfaces as a rejected fetch and therefore resolves `false`, the same fail-closed posture
+   * as every other failure mode here.
+   */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -46,7 +57,7 @@ export async function fetchSetupAuthenticated(
   if (!isLoopbackBaseUrl(base)) return false;
 
   try {
-    const response = await fetchImpl(`${base}/setup/state`, { redirect: "error" });
+    const response = await fetchImpl(`${base}/setup/state`, { redirect: "error", signal: options.signal });
     if (!response.ok) return false;
 
     let parsedJson: unknown;

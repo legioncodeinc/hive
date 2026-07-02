@@ -140,7 +140,9 @@ export function createPortalGate(options: CreatePortalGateOptions = {}): Middlew
 
     // g-AC-4 / l-AC-4 / l-AC-6: auth second. A fetch failure/timeout resolves to `false` inside
     // `fetchSetupAuthenticated`, so a transient proxy fault falls to `/login`, never the dashboard.
-    const authenticated = await fetchSetupAuthenticated(setupAuthFetch, { registryPath });
+    // The incoming request's abort signal is threaded through so a client disconnect aborts the
+    // upstream `/setup/state` fetch instead of pinning it (an abort also reads as fail-closed).
+    const authenticated = await fetchSetupAuthenticated(setupAuthFetch, { registryPath, signal: c.req.raw.signal });
     if (!authenticated) {
       return c.redirect(LOGIN_ROUTE, 302);
     }

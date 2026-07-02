@@ -85,4 +85,14 @@ describe("createTelemetryStreamHandler", () => {
 		await appWith(fetchImpl).request("http://thehive.local/api/telemetry/stream");
 		expect(receivedSignal).toBeDefined();
 	});
+
+	it('pins redirect: "error" on the upstream fetch so a 30x can never take the relay off-loopback (SSRF guard)', async () => {
+		let receivedRedirect: string | undefined;
+		const fetchImpl: TelemetryFetch = async (_url, init) => {
+			receivedRedirect = init?.redirect;
+			return sseStreamResponse([]);
+		};
+		await appWith(fetchImpl).request("http://thehive.local/api/telemetry/stream");
+		expect(receivedRedirect).toBe("error");
+	});
 });

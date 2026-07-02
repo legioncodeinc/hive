@@ -103,7 +103,12 @@ export function BuzzingScreen({ assetBase, pollMs = 1500, onReady }: BuzzingScre
 	React.useEffect(() => {
 		if (ready) return;
 		let alive = true;
+		// One readiness request at a time: a slow/hung daemon must never stack overlapping polls
+		// (this screen already shares the endpoint with useFleetTelemetry's own fallback poll).
+		let inFlight = false;
 		const tick = async (): Promise<void> => {
+			if (inFlight) return;
+			inFlight = true;
 			try {
 				const response = await fetch("/api/fleet-status");
 				const next = (await response.json()) as FleetStatusResponse;
@@ -111,6 +116,8 @@ export function BuzzingScreen({ assetBase, pollMs = 1500, onReady }: BuzzingScre
 				if (isFleetReady(next)) setReady(true);
 			} catch {
 				// Keep the screen visible; the next poll retries.
+			} finally {
+				inFlight = false;
 			}
 		};
 		void tick();

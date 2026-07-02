@@ -53,6 +53,15 @@ describe("HealthRail", () => {
 		expect(screen.getByTestId("health-rail-pill-hivenectar").getAttribute("data-state")).toBe("degraded");
 	});
 
+	it("exposes each pill's STATE in its accessible text, not only in `title`/the aria-hidden icon", async () => {
+		render(<HealthRail />);
+		await waitFor(() => expect(screen.getByTestId("health-rail-pill-hivenectar")).toBeTruthy());
+		// The live region announces text content; a screen reader must hear "hivenectar: degraded",
+		// never a bare "hivenectar" with the state trapped in a tooltip or a hidden icon.
+		expect(screen.getByTestId("health-rail-pill-hivenectar").textContent).toContain("degraded");
+		expect(screen.getByTestId("health-rail-pill-honeycomb").textContent).toMatch(/honeycomb: (warming|active)/);
+	});
+
 	it("hr-AC-4: a degraded service does not remove the rail or the other pill (never disappears)", async () => {
 		render(<HealthRail />);
 		await waitFor(() => expect(screen.getByTestId("health-rail")).toBeTruthy());

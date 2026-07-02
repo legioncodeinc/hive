@@ -92,6 +92,20 @@ describe("PRD-003a portal landing gate — precedence", () => {
     expect(response.headers.get("location")).toBe("/login");
   });
 
+  it("threads the incoming request's abort signal into the /setup/state auth fetch (no pinned upstream request)", async () => {
+    let receivedSignal: AbortSignal | undefined;
+    const capturingAuthFetch: SetupAuthFetchImpl = async (_input, init) => {
+      receivedSignal = init?.signal;
+      return new Response(JSON.stringify({ authenticated: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    };
+    const daemon = gatedDaemon({ fleetStatusFetch: HEALTHY, setupAuthFetch: capturingAuthFetch });
+    await requestPath(daemon, "/");
+    expect(receivedSignal).toBeInstanceOf(AbortSignal);
+  });
+
   it("g-AC-5 serves `/` (the dashboard) directly when healthy + authenticated, no redirect", async () => {
     const daemon = gatedDaemon({ fleetStatusFetch: HEALTHY, setupAuthFetch: LOGGED_IN });
     const response = await requestPath(daemon, "/");

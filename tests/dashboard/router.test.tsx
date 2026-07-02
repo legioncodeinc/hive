@@ -45,6 +45,23 @@ describe("usePathRoute", () => {
 		expect(window.location.hash).toBe("");
 	});
 
+	it("broadcasts `navigate` to EVERY mounted usePathRoute() instance, not just the navigating one", () => {
+		// Both the Shell (app.tsx) and HarnessesPage mount their own instance; without the
+		// route-change broadcast, navigating from one would leave the other's `route` stale
+		// until a real browser `popstate`.
+		window.history.replaceState(null, "", "/");
+		const first = renderHook(() => usePathRoute());
+		const second = renderHook(() => usePathRoute());
+
+		act(() => {
+			second.result.current.navigate("/harnesses");
+		});
+
+		expect(window.location.pathname).toBe("/harnesses");
+		expect(second.result.current.route).toBe("/harnesses");
+		expect(first.result.current.route).toBe("/harnesses");
+	});
+
 	it("m-AC-2 resolves the same screen on browser back/forward (real History entries + `popstate`)", () => {
 		window.history.replaceState(null, "", "/");
 		const { result } = renderHook(() => usePathRoute());
