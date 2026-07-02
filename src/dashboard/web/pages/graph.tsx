@@ -56,7 +56,7 @@ const MAX_ZOOM = 4;
 const ZOOM_STEP = 1.15;
 
 /** The pan/zoom view transform over the SVG viewBox: a scale + an (x,y) translate of the base box. */
-interface ViewTransform {
+export interface ViewTransform {
 	readonly scale: number;
 	readonly tx: number;
 	readonly ty: number;
@@ -123,7 +123,7 @@ export function findNode(graph: GraphWire, query: string): string | null {
 }
 
 /** Center the view on a node position: pick a `tx`/`ty` that frames `p` in the middle of the visible box. */
-function centerOn(p: Point, scale: number): ViewTransform {
+export function centerOn(p: Point, scale: number): ViewTransform {
 	const w = GRAPH_VIEW.width / scale;
 	const h = GRAPH_VIEW.height / scale;
 	return { scale, tx: p.x - w / 2, ty: p.y - h / 2 };
@@ -615,4 +615,4 @@ export function GraphPage({ wire }: PageProps): React.JSX.Element {
 }
 
 /** Re-export the pure neighbor helper the page's detail panel relies on (test convenience). */
-export { neighborsOf };
+export { neighborsOf, GraphCanvasFull, KindToggle, ToolButton, IDENTITY_TRANSFORM, GRAPH_VIEW, MIN_ZOOM, MAX_ZOOM, ZOOM_STEP };

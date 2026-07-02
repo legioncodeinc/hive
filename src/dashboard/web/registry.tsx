@@ -31,6 +31,7 @@ import React from "react";
 
 import { DashboardPage } from "./pages/dashboard.js";
 import { GraphPage } from "./pages/graph.js";
+import { HiveGraphPage } from "./pages/hive-graph.js";
 import { HarnessesPage, resolveHarnessSubItems } from "./pages/harnesses.js";
 import { HealthPage } from "./pages/health.js";
 import { LogsPage } from "./pages/logs.js";
@@ -147,6 +148,15 @@ const GraphIcon = (
 	</Icon>
 );
 
+/** Hive Graph — file nectars + derived_from provenance (PRD-015). */
+const HiveGraphIcon = (
+	<Icon>
+		<path d="M6 4h8a2 2 0 0 1 2 2v12H4V6a2 2 0 0 1 2-2z" />
+		<path d="M8 8h6M8 12h4" />
+		<path d="M14 4v4h4" />
+	</Icon>
+);
+
 /** Sync — a circular refresh (skill propagation). */
 const SyncIcon = (
 	<Icon>
@@ -216,6 +226,9 @@ export const ROUTES: readonly RouteEntry[] = [
 	// useful); this page now shows ONLY the memory/knowledge graph. The daemon still builds the codebase
 	// graph in the background (assemble.ts auto-build) for the stale-ref/lifecycle diagnostic.
 	{ route: "/graph", label: "Memory Graph", icon: GraphIcon, component: GraphPage },
+	// PRD-015: the Hive Graph page (file nectars + derived_from provenance). ONE registry entry is the
+	// whole wiring (037c contract): a separate route from Memory Graph — not a third graph on `/graph`.
+	{ route: "/hive-graph", label: "Hive Graph", icon: HiveGraphIcon, component: HiveGraphPage },
 	{ route: "/sync", label: "Sync", icon: SyncIcon, component: SyncPage },
 	{ route: "/logs", label: "Logs", icon: LogsIcon, component: LogsPage },
 	// PRD-005b/PRD-005c: the persistent fleet health page (per-service metrics + Deep Lake stats +
