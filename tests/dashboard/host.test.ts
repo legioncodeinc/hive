@@ -1,15 +1,38 @@
 /**
- * PRD-001b — thehive serves the migrated dashboard SHELL at the root: GET `/` returns a complete
- * HTML page with the `#root` mount point and a `<script>` to the bundled `/app.js`.
+ * PRD-001b — thehive serves the migrated dashboard SHELL: GET a gated path returns a complete
+ * HTML page with the `#root` mount point and a `<script>` to the bundled `/app.js`. PRD-003a's
+ * portal gate now sits in front of `/`, so these two tests inject a healthy + authenticated fake
+ * so the gate passes and the shell round-trip they exercise stays meaningful.
  */
 
 import { createThehive } from "../../src/daemon/server.js";
 import { mountDashboardHost } from "../../src/daemon/dashboard/host.js";
+import type { FetchImpl as FleetFetchImpl } from "../../src/daemon/fleet-status.js";
+import type { SetupAuthFetchImpl } from "../../src/daemon/setup-auth.js";
 import { Hono } from "hono";
 
+const healthyFleetStatusFetch: FleetFetchImpl = async () =>
+  new Response(
+    JSON.stringify({
+      health: "ok",
+      asOf: "2026-07-01T12:00:00.000Z",
+      daemons: [{ name: "honeycomb", health: "ok", escalation: null }]
+    }),
+    { status: 200, headers: { "content-type": "application/json" } }
+  );
+
+const authenticatedSetupAuthFetch: SetupAuthFetchImpl = async () =>
+  new Response(JSON.stringify({ authenticated: true }), {
+    status: 200,
+    headers: { "content-type": "application/json" }
+  });
+
 describe("dashboard host shell", () => {
-  it("GET / returns HTML with #root and the app.js script", async () => {
-    const daemon = createThehive();
+  it("GET / returns HTML with #root and the app.js script (gate passes: healthy + authenticated)", async () => {
+    const daemon = createThehive({
+      fleetStatusFetch: healthyFleetStatusFetch,
+      setupAuthFetch: authenticatedSetupAuthFetch
+    });
 
     const response = await daemon.app.request("http://thehive.local/");
     expect(response.status).toBe(200);
@@ -22,7 +45,10 @@ describe("dashboard host shell", () => {
   });
 
   it("serves the shell with an empty asset base (mark served at the root)", async () => {
-    const daemon = createThehive();
+    const daemon = createThehive({
+      fleetStatusFetch: healthyFleetStatusFetch,
+      setupAuthFetch: authenticatedSetupAuthFetch
+    });
     const html = await (await daemon.app.request("http://thehive.local/")).text();
     expect(html).toContain('data-asset-base=""');
     expect(html).toContain('href="/honeycomb-memory-cluster.svg"');

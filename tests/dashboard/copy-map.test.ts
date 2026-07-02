@@ -25,11 +25,11 @@ function countFiles(dir: string): number {
 }
 
 describe("dashboard copy-map", () => {
-  it("b-AC-5 migrated all honeycomb web/ files plus PRD-002b readiness modules", () => {
-    expect(countFiles(WEB_DIR)).toBe(29);
+  it("b-AC-5 migrated all honeycomb web/ files plus PRD-002b/004/005 readiness+health modules and PRD-003c's boot-route", () => {
+    expect(countFiles(WEB_DIR)).toBe(34);
   });
 
-  it("b-AC-5 includes the shell + infra files (12) and the pages (12)", () => {
+  it("b-AC-5 includes the shell + infra files (21) and the pages (13)", () => {
     for (const file of [
       "registry.tsx",
       "router.tsx",
@@ -46,8 +46,16 @@ describe("dashboard copy-map", () => {
       "wire.ts",
       "app.tsx",
       "main.tsx",
-      "readiness-splash.tsx",
-      "setup-gate.tsx"
+      // PRD-004a: the `/buzzing` screen succeeds PRD-002b's `readiness-splash.tsx` (retired).
+      "buzzing-screen.tsx",
+      // PRD-004b: the shared bee-state SVG set + state→icon mapping.
+      "service-icons.tsx",
+      // PRD-004/PRD-005: the one shared SSE-first/REST-fallback telemetry hook.
+      "use-fleet-telemetry.ts",
+      // PRD-005a: the always-present top health rail.
+      "health-rail.tsx",
+      "setup-gate.tsx",
+      "boot-route.ts"
     ]) {
       expect(existsSync(join(WEB_DIR, file))).toBe(true);
     }
@@ -59,6 +67,8 @@ describe("dashboard copy-map", () => {
       "graph.tsx",
       "sync.tsx",
       "logs.tsx",
+      // PRD-005b/PRD-005c: the persistent fleet health page.
+      "health.tsx",
       "roi.tsx",
       "roi-chart.tsx",
       "settings.tsx",

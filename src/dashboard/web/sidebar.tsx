@@ -3,9 +3,9 @@
  *
  * A pure presentational + nav component: it READS the route registry (037c) for its items and the
  * active route (037b) for its highlight, and EMITS navigation intent via `onNavigate(route)`. It
- * does NOT mutate `location.hash` itself — that is 037b's `navigate` (037a AC-4 keeps the sidebar a
- * thin, testable pass-through). It introduces NO new design system: every visual value is an
- * existing `var(--…)` token already served in `/dashboard/styles.css` (037a AC-7, D-3).
+ * does NOT mutate `location.pathname` itself — that is PRD-003c's `navigate` (037a AC-4 keeps the
+ * sidebar a thin, testable pass-through). It introduces NO new design system: every visual value is
+ * an existing `var(--…)` token already served in `/dashboard/styles.css` (037a AC-7, D-3).
  *
  * Layout (D-3 / D-4):
  *   - Top: the honeycomb mark + `honeycomb` wordmark + the org/workspace mono sub-line — the exact
@@ -38,7 +38,7 @@ export const SIDEBAR_RAIL_WIDTH = 56 as const;
 export interface SidebarProps {
 	/** The registry nav entries (037c) — rendered as nav items in order. */
 	readonly entries: readonly RouteEntry[];
-	/** The active route (037b's `useHashRoute().route`) — drives the single active highlight. */
+	/** The active route (PRD-003c's `usePathRoute().route`) — drives the single active highlight. */
 	readonly activeRoute: string;
 	/** Navigation intent — called with an item's `route`; the SHELL maps it to 037b's `navigate`. */
 	readonly onNavigate: (route: string) => void;

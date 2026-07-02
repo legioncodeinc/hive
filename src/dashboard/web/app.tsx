@@ -10,8 +10,8 @@
  * What the shell OWNS (hoisted up from the old page, D-5):
  *   - The SHARED wire client (built ONCE, passed to every page via PageProps — pages never
  *     `createWireClient` themselves).
- *   - The hash router (037b `useHashRoute`) → `{ route, navigate }`. The sidebar's `onNavigate` is a
- *     thin pass-through to `navigate` (037a never touches `location.hash`).
+ *   - The path router (PRD-003c `usePathRoute`) → `{ route, navigate }`. The sidebar's `onNavigate`
+ *     is a thin pass-through to `navigate` (037a never touches `location.pathname` directly).
  *   - The `/health` LIVENESS poll + `daemonUp`. When the daemon is unreachable the CONTENT region
  *     swaps for the `ConnectivityBanner` while the SIDEBAR stays mounted (D-5); on Retry/reconnect the
  *     active page restores and re-hydrates. The per-subsystem health STRIP stays page content (it
@@ -22,18 +22,20 @@
  *   - The collapsed/responsive state (037a AC-6): a manual toggle plus an auto-collapse under the
  *     host's `@media (max-width:900px)` breakpoint.
  *
- * No new daemon route, no new dependency: routing is 100% client-side hash; the host (`host.ts`) is
- * untouched and still serves ONE bundle at `/dashboard/app.js`. Security posture inherited unchanged
- * (local-mode-only, XSS-safe, no token/secret in the shell/route/registry/pill — D-9).
+ * PRD-003c: routing is now path-based (History API), with thehive's server (`gate.ts`, `host.ts`)
+ * as the landing-decision authority — the client router only reflects the path the server already
+ * authorized. Still no new dependency. Security posture inherited unchanged (local-mode-only,
+ * XSS-safe, no token/secret in the shell/route/registry/pill — D-9).
  */
 
 import React from "react";
 
 import { Button } from "./primitives.js";
 import { ConnectivityBanner } from "./panels.js";
+import { HEALTH_ROUTE, HealthRail } from "./health-rail.js";
 import { matchRoute, ROUTES, type RouteEntry } from "./registry.js";
 import { Sidebar } from "./sidebar.js";
-import { useHashRoute } from "./router.js";
+import { usePathRoute } from "./router.js";
 import { PAGE_MAX_WIDTH, usePoll, type PageProps } from "./page-frame.js";
 import { FirstRunBindCTA } from "./needs-project.js";
 import { ScopeProvider, useScopeSwitcher } from "./scope-context.js";
@@ -93,7 +95,7 @@ function Outlet({ route, pageProps, navigate }: { route: string; pageProps: Page
  */
 export function Shell({ client, assetBase = "assets" }: ShellProps = {}): React.JSX.Element {
 	const wire = React.useMemo<WireClient>(() => client ?? createWireClient(), [client]);
-	const { route, navigate } = useHashRoute();
+	const { route, navigate } = usePathRoute();
 
 	// ── shell-owned state ──
 	const [daemonUp, setDaemonUp] = React.useState(true);
@@ -205,6 +207,10 @@ export function Shell({ client, assetBase = "assets" }: ShellProps = {}): React.
 			/>
 
 			<div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+				{/* PRD-005a: the top health rail — present on EVERY in-app route (hr-AC-1), fed by the
+				    shared telemetry hook, independent of the daemon-liveness poll above. */}
+				<HealthRail onOpenHealth={() => navigate(HEALTH_ROUTE)} />
+
 				{/* Shell chrome bar — the global "Pollinate now" action (relocated from the old Header, D-5). */}
 				<div
 					style={{

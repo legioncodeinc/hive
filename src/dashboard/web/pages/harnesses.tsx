@@ -26,7 +26,7 @@ import { Badge, Kpi } from "../primitives.js";
 import { AGENT_DOT, AGENT_DOT_FALLBACK, LiveLog, Panel } from "../panels.js";
 import type { PageProps } from "../page-frame.js";
 import { PageFrame, usePoll } from "../page-frame.js";
-import { useHashRoute } from "../router.js";
+import { usePathRoute } from "../router.js";
 import { formatLogLine, type HarnessCapabilitiesWire, type HarnessStatusWire, type LogRecordWire } from "../wire.js";
 
 /** How often the overview/detail re-hydrate the 039a status (ms) — light refresh, stopped on unmount. */
@@ -374,12 +374,12 @@ function HarnessDetail({
 
 /**
  * The Harnesses page (039b/039c). Hydrates the six `HarnessStatus`es from the shared wire (039a — the
- * single backbone) and renders the OVERVIEW for `#/harnesses` or the DETAIL for `#/harnesses/<name>`,
- * deciding off the active hash route. The detail page additionally polls the existing `/api/logs`
- * records and filters them to the harness for its live stream (no second log pipe — D-4 / c-OQ-1).
+ * single backbone) and renders the OVERVIEW for `/harnesses` or the DETAIL for `/harnesses/<name>`,
+ * deciding off the active path route (PRD-003c). The detail page additionally polls the existing
+ * `/api/logs` records and filters them to the harness for its live stream (no second log pipe — D-4 / c-OQ-1).
  */
 export function HarnessesPage({ wire }: PageProps): React.JSX.Element {
-	const { route, navigate } = useHashRoute();
+	const { route, navigate } = usePathRoute();
 	const detailName = harnessNameFromRoute(route);
 
 	const [harnesses, setHarnesses] = React.useState<readonly HarnessStatusWire[]>([]);

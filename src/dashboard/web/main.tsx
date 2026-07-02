@@ -1,11 +1,20 @@
 /**
- * The dashboard web-app ENTRY — PRD-024 Wave 2 (AC-1, D-1) · PRD-037b (renders the multi-page Shell).
+ * The dashboard web-app ENTRY — PRD-024 Wave 2 (AC-1, D-1) · PRD-037b (renders the multi-page Shell)
+ * · PRD-003c (m-AC-6 / m-AC-7 / m-AC-8, the server-gated boot).
  *
  * This is the esbuild bundle entry. esbuild compiles the JSX at BUILD time and bundles
  * React + ReactDOM in (no CDN React, no `@babel/standalone`, no `type="text/babel"` — the
  * three things the UI kit's `index.html` did that D-1 forbids). The host serves the produced
  * bundle as a single static `<script>`; this module finds `#root` (created by the host shell HTML)
- * and renders the live {@link Shell} (sidebar + routed outlet) into it.
+ * and mounts the screen the SERVER already authorized for the current path.
+ *
+ * PRD-003a moved the landing decision (fleet health, then auth) onto thehive's server gate
+ * (`the-hive/src/daemon/gate.ts`): every request either gets redirected to `/buzzing` or `/login`
+ * before the shell ever renders, or is served the shell for the path it actually requested. This
+ * RETIRES the nested `<ReadinessSplash>` → `<SetupGate>` pre-mount gate that used to make that
+ * decision client-side (m-AC-6): this module now does a single, path-keyed lookup
+ * ({@link resolveBootScreen}) and mounts exactly one top-level screen — no polling-driven swap, no
+ * risk of flashing the wrong screen before a client gate resolves.
  *
  * The host stamps the asset base path onto `#root` as `data-asset-base` so the app knows
  * where the host serves the DS logo (loopback, no secret in the attribute).
@@ -14,9 +23,12 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 
-import { ReadinessSplash } from "./readiness-splash.js";
+import { Shell } from "./app.js";
+import { resolveBootScreen } from "./boot-route.js";
+import { BuzzingScreen } from "./buzzing-screen.js";
+import { LoginScreen } from "./setup-gate.js";
 
-/** Mount the live dashboard SHELL into the host's `#root` element. Idempotent-safe per load. */
+/** Mount the screen the server already authorized for `location.pathname`. Idempotent-safe per load. */
 function mount(): void {
 	const root = document.getElementById("root");
 	if (root === null) return;
@@ -27,14 +39,24 @@ function mount(): void {
 	// taint flow by construction (CodeQL js/xss-through-dom) and fails safe to the default.
 	const rawAssetBase = root.getAttribute("data-asset-base") ?? "assets";
 	const assetBase = /^[A-Za-z0-9._/-]*$/.test(rawAssetBase) ? rawAssetBase : "assets";
-	// PRD-002b: render <ReadinessSplash> first — it polls `/api/fleet-status` and mounts <SetupGate>
-	// only once the fleet is ready, so SetupGate's `/setup/state` poll cannot fire on a cold boot.
-	// PRD-050b: SetupGate remains the pre-auth phase switch once mounted (b-AC-3 / b-AC-6).
-	createRoot(root).render(
-		<React.StrictMode>
-			<ReadinessSplash assetBase={assetBase} />
-		</React.StrictMode>,
-	);
+
+	// PRD-003c (m-AC-6/7/8): the boot decision is a PURE lookup from the already-server-authorized
+	// path, not a re-derivation of health/auth. `/buzzing` and `/login` are the two gate-exempt
+	// screens; every other path mounts the authenticated Shell (its own path router then resolves
+	// the specific registry page — PRD-003c m-AC-1 through m-AC-5).
+	const pathname = typeof window === "undefined" ? "/" : window.location.pathname;
+	const screen = resolveBootScreen(pathname);
+
+	const element =
+		screen === "buzzing" ? (
+			<BuzzingScreen assetBase={assetBase} />
+		) : screen === "login" ? (
+			<LoginScreen assetBase={assetBase} />
+		) : (
+			<Shell assetBase={assetBase} />
+		);
+
+	createRoot(root).render(<React.StrictMode>{element}</React.StrictMode>);
 }
 
 mount();
