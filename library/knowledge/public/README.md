@@ -23,6 +23,12 @@ human_description: |
 
 Customer-facing documentation. Anything in this folder may eventually be published.
 
+## Document index
+
+| Doc | What it covers |
+|---|---|
+| [overview/overview.md](overview/overview.md) | What hive is: the one dashboard for your whole Apiary install at `localhost:3853` |
+
 ## Approved sub-folders
 
 | Folder | Contents |
