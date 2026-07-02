@@ -1,5 +1,5 @@
 /**
- * PRD-001b b-AC-5 — the copy-map is complete: all 28 honeycomb `web/` files migrated into thehive,
+ * PRD-001b b-AC-5 — the copy-map is complete: all 28 honeycomb `web/` files migrated into hive,
  * plus the partial `contracts.ts` and the two shared modules the pages import.
  */
 

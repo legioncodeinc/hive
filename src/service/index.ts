@@ -99,7 +99,7 @@ function liveUid(): number {
 }
 
 function stagedWindowsTaskPath(home: string): string {
-  return `${home}/.honeycomb/thehive/thehive-task.xml`;
+  return `${home}/.honeycomb/hive/hive-task.xml`;
 }
 
 function scopePhrase(plan: ServicePlan): string {
@@ -153,11 +153,11 @@ export function createServiceModule(deps: ServiceModuleDeps): ServiceModule {
       } catch (error) {
         return {
           ok: false,
-          message: `Could not register thehive service: ${error instanceof Error ? error.message : "unknown error"}.`
+          message: `Could not register hive service: ${error instanceof Error ? error.message : "unknown error"}.`
         };
       }
 
-      // Decision #32 migration: best-effort deregister the legacy `thehive` unit and
+      // Decision #32 migration: best-effort deregister the legacy `hive` unit and
       // remove its unit file, so a re-run never leaves two units racing over one daemon.
       // Expected to fail harmlessly when no legacy unit exists; never blocks the install.
       await runAll(runner, legacyUninstallCommands(resolvedPlan, uid));
@@ -176,7 +176,7 @@ export function createServiceModule(deps: ServiceModuleDeps): ServiceModule {
         } catch (error) {
           return {
             ok: false,
-            message: `Could not write thehive unit file at ${resolvedPlan.unitPath}: ${error instanceof Error ? error.message : "unknown error"}.`
+            message: `Could not write hive unit file at ${resolvedPlan.unitPath}: ${error instanceof Error ? error.message : "unknown error"}.`
           };
         }
       }
@@ -185,13 +185,13 @@ export function createServiceModule(deps: ServiceModuleDeps): ServiceModule {
       if (!allOk) {
         return {
           ok: false,
-          message: `Registered thehive unit but a service-manager command failed (${firstFailure?.command ?? "unknown"}).`
+          message: `Registered hive unit but a service-manager command failed (${firstFailure?.command ?? "unknown"}).`
         };
       }
 
       return {
         ok: true,
-        message: `thehive registered as a ${scopePhrase(resolvedPlan)} service and started. It will restart on crash and start on boot/login.`
+        message: `hive registered as a ${scopePhrase(resolvedPlan)} service and started. It will restart on crash and start on boot/login.`
       };
     },
 
@@ -202,7 +202,7 @@ export function createServiceModule(deps: ServiceModuleDeps): ServiceModule {
       } catch (error) {
         return {
           ok: false,
-          message: `Could not unregister thehive service: ${error instanceof Error ? error.message : "unknown error"}.`
+          message: `Could not unregister hive service: ${error instanceof Error ? error.message : "unknown error"}.`
         };
       }
 
@@ -216,13 +216,13 @@ export function createServiceModule(deps: ServiceModuleDeps): ServiceModule {
       if (!allOk) {
         return {
           ok: false,
-          message: `Removed thehive unit file; a deregister command (${firstFailure?.command ?? "unknown"}) reported an error.`
+          message: `Removed hive unit file; a deregister command (${firstFailure?.command ?? "unknown"}) reported an error.`
         };
       }
 
       return {
         ok: true,
-        message: `thehive service unregistered (${scopePhrase(resolvedPlan)}). It will not start on next boot/login.`
+        message: `hive service unregistered (${scopePhrase(resolvedPlan)}). It will not start on next boot/login.`
       };
     }
   };

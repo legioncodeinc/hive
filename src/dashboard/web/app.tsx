@@ -22,7 +22,7 @@
  *   - The collapsed/responsive state (037a AC-6): a manual toggle plus an auto-collapse under the
  *     host's `@media (max-width:900px)` breakpoint.
  *
- * PRD-003c: routing is now path-based (History API), with thehive's server (`gate.ts`, `host.ts`)
+ * PRD-003c: routing is now path-based (History API), with hive's server (`gate.ts`, `host.ts`)
  * as the landing-decision authority — the client router only reflects the path the server already
  * authorized. Still no new dependency. Security posture inherited unchanged (local-mode-only,
  * XSS-safe, no token/secret in the shell/route/registry/pill — D-9).

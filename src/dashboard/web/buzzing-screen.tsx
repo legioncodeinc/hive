@@ -1,5 +1,5 @@
 /**
- * The `/buzzing` READINESS screen — the-hive PRD-004a. The addressable successor to PRD-002's
+ * The `/buzzing` READINESS screen — hive PRD-004a. The addressable successor to PRD-002's
  * `ReadinessSplash` (retired by this PRD, per PRD-004's "Overlap and supersession": "the
  * `ReadinessSplash` becomes `/buzzing`"), now rendering the real per-service tile grid ADR-0004
  * calls for instead of a coarse per-daemon list.
@@ -60,7 +60,7 @@ function ServiceTile({ service }: { readonly service: ServiceView }): React.JSX.
 	);
 }
 
-/** The distinct "no service enumerated yet" indicator (mirrors the old hivedoctor-unreachable state). */
+/** The distinct "no service enumerated yet" indicator (mirrors the old doctor-unreachable state). */
 function AwaitingRegistrationIndicator(): React.JSX.Element {
 	return (
 		<div
@@ -79,11 +79,11 @@ function AwaitingRegistrationIndicator(): React.JSX.Element {
 		>
 			<span
 				role="img"
-				aria-label="hivedoctor supervisor: unreachable"
+				aria-label="doctor supervisor: unreachable"
 				style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--text-tertiary)", animation: "hc-readiness-pulse var(--dur-pollinate) var(--ease-in-out) infinite alternate" }}
 			/>
 			<p style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", margin: 0, lineHeight: 1.5, textAlign: "center" }}>
-				Waiting on hivedoctor. No services are registered yet.
+				Waiting on doctor. No services are registered yet.
 			</p>
 		</div>
 	);

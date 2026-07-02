@@ -15,8 +15,8 @@ async function withRegistry(
   entries: readonly RegistryEntry[],
   run: (registryPath: string) => Promise<void>
 ): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "thehive-proxy-test-"));
-  const registryPath = join(dir, "hivedoctor.daemons.json");
+  const dir = mkdtempSync(join(tmpdir(), "hive-proxy-test-"));
+  const registryPath = join(dir, "doctor.daemons.json");
   writeFileSync(registryPath, JSON.stringify({ daemons: entries }), "utf8");
   try {
     await run(registryPath);
@@ -26,7 +26,7 @@ async function withRegistry(
 }
 
 const HONEYCOMB: RegistryEntry = { name: "honeycomb", healthUrl: "http://127.0.0.1:4850/health", pidPath: "/tmp/hc.pid" };
-const HIVENECTAR: RegistryEntry = { name: "hivenectar", healthUrl: "http://127.0.0.1:4854/health", pidPath: "/tmp/hn.pid" };
+const NECTAR: RegistryEntry = { name: "nectar", healthUrl: "http://127.0.0.1:4854/health", pidPath: "/tmp/hn.pid" };
 
 function appWith(registryPath: string, fetchImpl: ProxyFetch): Hono {
   const app = new Hono();
@@ -36,16 +36,16 @@ function appWith(registryPath: string, fetchImpl: ProxyFetch): Hono {
   return app;
 }
 
-describe("thehive server-side API proxy", () => {
+describe("hive server-side API proxy", () => {
   it("forwards a honeycomb-owned request to honeycomb over loopback with method, body, and headers", async () => {
-    await withRegistry([HONEYCOMB, HIVENECTAR], async (registryPath) => {
+    await withRegistry([HONEYCOMB, NECTAR], async (registryPath) => {
       const calls: Array<{ url: string; init: RequestInit }> = [];
       const fetchImpl: ProxyFetch = async (url, init) => {
         calls.push({ url, init });
         return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
       };
 
-      const res = await appWith(registryPath, fetchImpl).request("http://thehive.local/api/memories/recall?limit=5", {
+      const res = await appWith(registryPath, fetchImpl).request("http://hive.local/api/memories/recall?limit=5", {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -62,7 +62,7 @@ describe("thehive server-side API proxy", () => {
       expect(calls[0].init.redirect).toBe("error");
 
       const forwarded = new Headers(calls[0].init.headers);
-      // Pass-through: session + auth headers reach the workload daemon verbatim (thehive holds no secret).
+      // Pass-through: session + auth headers reach the workload daemon verbatim (hive holds no secret).
       expect(forwarded.get("authorization")).toBe("Bearer token-123");
       expect(forwarded.get("x-honeycomb-session")).toBe("dashboard-web");
       // `host` is stripped so fetch sets it from the target origin.
@@ -73,40 +73,40 @@ describe("thehive server-side API proxy", () => {
     });
   });
 
-  it("routes /api/source-graph/* to hivenectar", async () => {
-    await withRegistry([HONEYCOMB, HIVENECTAR], async (registryPath) => {
+  it("routes /api/hive-graph/* to nectar", async () => {
+    await withRegistry([HONEYCOMB, NECTAR], async (registryPath) => {
       const seen: string[] = [];
       const fetchImpl: ProxyFetch = async (url) => {
         seen.push(url);
         return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
       };
 
-      await appWith(registryPath, fetchImpl).request("http://thehive.local/api/source-graph/nodes?project=abc");
-      expect(seen).toEqual(["http://127.0.0.1:4854/api/source-graph/nodes?project=abc"]);
+      await appWith(registryPath, fetchImpl).request("http://hive.local/api/hive-graph/nodes?project=abc");
+      expect(seen).toEqual(["http://127.0.0.1:4854/api/hive-graph/nodes?project=abc"]);
     });
   });
 
   it("streams the upstream status and body back to the caller", async () => {
-    await withRegistry([HONEYCOMB, HIVENECTAR], async (registryPath) => {
+    await withRegistry([HONEYCOMB, NECTAR], async (registryPath) => {
       const fetchImpl: ProxyFetch = async () =>
         new Response(JSON.stringify({ items: [1, 2, 3] }), {
           status: 201,
           headers: { "content-type": "application/json" }
         });
 
-      const res = await appWith(registryPath, fetchImpl).request("http://thehive.local/api/memories");
+      const res = await appWith(registryPath, fetchImpl).request("http://hive.local/api/memories");
       expect(res.status).toBe(201);
       await expect(res.json()).resolves.toEqual({ items: [1, 2, 3] });
     });
   });
 
   it("fails soft with a 502 when the upstream daemon is unreachable", async () => {
-    await withRegistry([HONEYCOMB, HIVENECTAR], async (registryPath) => {
+    await withRegistry([HONEYCOMB, NECTAR], async (registryPath) => {
       const fetchImpl: ProxyFetch = async () => {
         throw new Error("ECONNREFUSED");
       };
 
-      const res = await appWith(registryPath, fetchImpl).request("http://thehive.local/api/memories");
+      const res = await appWith(registryPath, fetchImpl).request("http://hive.local/api/memories");
       expect(res.status).toBe(502);
       await expect(res.json()).resolves.toEqual({ error: "unreachable", daemon: "honeycomb" });
     });
@@ -122,7 +122,7 @@ describe("thehive server-side API proxy", () => {
           return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
         };
 
-        await appWith(registryPath, fetchImpl).request("http://thehive.local/api/memories");
+        await appWith(registryPath, fetchImpl).request("http://hive.local/api/memories");
         // The tampered non-loopback entry is dropped; resolution falls back to the loopback default,
         // so the proxy targets 127.0.0.1:3850 and never reaches evil.example.com.
         expect(seen).toEqual(["http://127.0.0.1:3850/api/memories"]);

@@ -5,7 +5,7 @@ import { z } from "zod";
 import { HONEYCOMB_HOME_DIR } from "../shared/constants.js";
 import { isLoopbackBaseUrl, normalizeDaemonBases, type DaemonBases, type DaemonName } from "../shared/daemon-routing.js";
 
-export const HIVEDOCTOR_REGISTRY_PATH = join(HONEYCOMB_HOME_DIR, "hivedoctor.daemons.json");
+export const DOCTOR_REGISTRY_PATH = join(HONEYCOMB_HOME_DIR, "doctor.daemons.json");
 
 const RegistryEntrySchema = z.object({
   name: z.string().min(1),
@@ -13,7 +13,7 @@ const RegistryEntrySchema = z.object({
   pidPath: z.string().min(1)
 });
 
-const HivedoctorRegistrySchema = z.object({
+const DoctorRegistrySchema = z.object({
   daemons: z.array(RegistryEntrySchema).catch([])
 });
 
@@ -23,7 +23,7 @@ export interface ResolveDaemonBasesOptions {
 }
 
 function daemonName(name: string): DaemonName | null {
-  if (name === "honeycomb" || name === "hivenectar") return name;
+  if (name === "honeycomb" || name === "nectar") return name;
   return null;
 }
 
@@ -45,16 +45,16 @@ export function baseUrlFromHealthUrl(healthUrl: string): string | null {
   }
 }
 
-export function parseHivedoctorRegistry(raw: string): Partial<Record<DaemonName, string>> {
+export function parseDoctorRegistry(raw: string): Partial<Record<DaemonName, string>> {
   let parsedJson: unknown;
   try {
     parsedJson = JSON.parse(raw);
   } catch {
-    // A corrupt registry must not prevent thehive from serving. Defaults remain available.
+    // A corrupt registry must not prevent hive from serving. Defaults remain available.
     return {};
   }
 
-  const parsed = HivedoctorRegistrySchema.safeParse(parsedJson);
+  const parsed = DoctorRegistrySchema.safeParse(parsedJson);
   if (!parsed.success) return {};
 
   const bases: Partial<Record<DaemonName, string>> = {};
@@ -68,11 +68,11 @@ export function parseHivedoctorRegistry(raw: string): Partial<Record<DaemonName,
 }
 
 /**
- * Parse the RAW list of registered service names from a hivedoctor registry file body (PRD-004a
- * bz-AC-1/bz-AC-2). Unlike {@link parseHivedoctorRegistry} (which narrows to the two daemons
- * thehive's BFF proxy forwards to, `honeycomb`/`hivenectar`), this returns EVERY registered name —
- * including `thehive` itself or any future peer — so `/buzzing` and the health rail can render one
- * tile/pill per service that hivedoctor says should exist, even one thehive's proxy never routes
+ * Parse the RAW list of registered service names from a doctor registry file body (PRD-004a
+ * bz-AC-1/bz-AC-2). Unlike {@link parseDoctorRegistry} (which narrows to the two daemons
+ * hive's BFF proxy forwards to, `honeycomb`/`nectar`), this returns EVERY registered name —
+ * including `hive` itself or any future peer — so `/buzzing` and the health rail can render one
+ * tile/pill per service that doctor says should exist, even one hive's proxy never routes
  * to. A corrupt/absent registry degrades to an empty list (never a throw), matching every other
  * reader of this file.
  */
@@ -84,7 +84,7 @@ export function parseRegisteredServiceNames(raw: string): readonly string[] {
     return [];
   }
 
-  const parsed = HivedoctorRegistrySchema.safeParse(parsedJson);
+  const parsed = DoctorRegistrySchema.safeParse(parsedJson);
   if (!parsed.success) return [];
 
   // De-duplicate defensively (a hand-edited registry could repeat a name); preserve first-seen order.
@@ -105,13 +105,13 @@ export interface ResolveRegisteredServiceNamesOptions {
 }
 
 /**
- * Read the FULL list of registered service names from hivedoctor's registry file (PRD-004a
+ * Read the FULL list of registered service names from doctor's registry file (PRD-004a
  * bz-AC-1/bz-AC-2, PRD-005a hr-AC-1). A missing/unreadable/corrupt registry resolves to an empty
  * list rather than throwing, so a cold box with no registry yet still serves `/buzzing` (it simply
  * shows no tiles until the fleet-status/SSE feed enumerates services some other way).
  */
 export function resolveRegisteredServiceNames(options: ResolveRegisteredServiceNamesOptions = {}): readonly string[] {
-  const registryPath = options.registryPath ?? HIVEDOCTOR_REGISTRY_PATH;
+  const registryPath = options.registryPath ?? DOCTOR_REGISTRY_PATH;
   const readFile = options.readFile ?? ((path: string): string => readFileSync(path, "utf8"));
 
   try {
@@ -122,11 +122,11 @@ export function resolveRegisteredServiceNames(options: ResolveRegisteredServiceN
 }
 
 export function resolveDaemonBases(options: ResolveDaemonBasesOptions = {}): DaemonBases {
-  const registryPath = options.registryPath ?? HIVEDOCTOR_REGISTRY_PATH;
+  const registryPath = options.registryPath ?? DOCTOR_REGISTRY_PATH;
   const readFile = options.readFile ?? ((path: string): string => readFileSync(path, "utf8"));
 
   try {
-    return normalizeDaemonBases(parseHivedoctorRegistry(readFile(registryPath)));
+    return normalizeDaemonBases(parseDoctorRegistry(readFile(registryPath)));
   } catch {
     // Missing or unreadable registry means no daemon has registered yet. Use documented loopback defaults.
     return normalizeDaemonBases();

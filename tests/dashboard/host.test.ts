@@ -1,11 +1,11 @@
 /**
- * PRD-001b — thehive serves the migrated dashboard SHELL: GET a gated path returns a complete
+ * PRD-001b — hive serves the migrated dashboard SHELL: GET a gated path returns a complete
  * HTML page with the `#root` mount point and a `<script>` to the bundled `/app.js`. PRD-003a's
  * portal gate now sits in front of `/`, so these two tests inject a healthy + authenticated fake
  * so the gate passes and the shell round-trip they exercise stays meaningful.
  */
 
-import { createThehive } from "../../src/daemon/server.js";
+import { createHive } from "../../src/daemon/server.js";
 import { mountDashboardHost } from "../../src/daemon/dashboard/host.js";
 import type { FetchImpl as FleetFetchImpl } from "../../src/daemon/fleet-status.js";
 import type { SetupAuthFetchImpl } from "../../src/daemon/setup-auth.js";
@@ -29,12 +29,12 @@ const authenticatedSetupAuthFetch: SetupAuthFetchImpl = async () =>
 
 describe("dashboard host shell", () => {
   it("GET / returns HTML with #root and the app.js script (gate passes: healthy + authenticated)", async () => {
-    const daemon = createThehive({
+    const daemon = createHive({
       fleetStatusFetch: healthyFleetStatusFetch,
       setupAuthFetch: authenticatedSetupAuthFetch
     });
 
-    const response = await daemon.app.request("http://thehive.local/");
+    const response = await daemon.app.request("http://hive.local/");
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type") ?? "").toContain("text/html");
 
@@ -45,11 +45,11 @@ describe("dashboard host shell", () => {
   });
 
   it("serves the shell with an empty asset base (mark served at the root)", async () => {
-    const daemon = createThehive({
+    const daemon = createHive({
       fleetStatusFetch: healthyFleetStatusFetch,
       setupAuthFetch: authenticatedSetupAuthFetch
     });
-    const html = await (await daemon.app.request("http://thehive.local/")).text();
+    const html = await (await daemon.app.request("http://hive.local/")).text();
     expect(html).toContain('data-asset-base=""');
     expect(html).toContain('href="/honeycomb-memory-cluster.svg"');
   });
@@ -66,7 +66,7 @@ describe("dashboard host shell", () => {
       }
     });
 
-    const response = await app.request("http://thehive.local/app.js");
+    const response = await app.request("http://hive.local/app.js");
     expect(response.status).toBe(404);
   });
 });

@@ -1,12 +1,12 @@
 /**
- * Bee-loader status STATE model + derivation — the-hive PRD-004b (state contract) / PRD-004c
+ * Bee-loader status STATE model + derivation — hive PRD-004b (state contract) / PRD-004c
  * (derivation). Locked state set (PRD-004 index): `error`, `degraded`, `starting`, `warming`,
  * `active`. This is the SINGLE shared derivation `/buzzing` (PRD-004a) and the health rail
  * (PRD-005a) both resolve through, so a service means the same thing on both surfaces (svg-AC-4).
  *
  * The derivation is a PURE function of a normalized {@link ServiceSignal} plus a small amount of
- * externally-tracked timing context (`now`, `firstActiveAt`) — never a re-derivation of hivedoctor's
- * own health classification, and never reaching out to hivedoctor itself. Both the SSE-fed live path
+ * externally-tracked timing context (`now`, `firstActiveAt`) — never a re-derivation of doctor's
+ * own health classification, and never reaching out to doctor itself. Both the SSE-fed live path
  * and the `GET /api/fleet-status` fail-soft path normalize into the SAME {@link ServiceSignal} shape
  * before calling {@link deriveServiceState}, which is what makes the derivation source-agnostic
  * (sd-AC-6): the same underlying condition yields the same state regardless of which feed reported it.

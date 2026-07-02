@@ -1,9 +1,9 @@
 /**
  * The dashboard CLIENT-SIDE ROUTER — PRD-003c (m-AC-1 / m-AC-2, retiring the hash router).
  *
- * thehive's SERVER is now the routing authority (PRD-003a): it evaluates the health-then-auth
+ * hive's SERVER is now the routing authority (PRD-003a): it evaluates the health-then-auth
  * gate on every request and serves the identical SPA shell for every real, path-based route
- * (`the-hive/src/daemon/dashboard/host.ts`'s catch-all). This hook's job narrows to what a
+ * (`hive/src/daemon/dashboard/host.ts`'s catch-all). This hook's job narrows to what a
  * server-routed SPA needs client-side: read the ALREADY-AUTHORIZED path the server served
  * (`location.pathname`), keep it in sync with History API navigation (back/forward, and this
  * hook's own `navigate`), and re-render. It does NOT decide what the operator is ALLOWED to see —
@@ -35,7 +35,7 @@ export function routeFromPath(pathname: string): string {
  * `app.tsx`, `HarnessesPage`), so without a broadcast only the instance whose `navigate` ran would
  * re-render and every other subscriber's `route` would go stale until a real `popstate`.
  */
-export const ROUTE_CHANGE_EVENT = "thehive:pathchange" as const;
+export const ROUTE_CHANGE_EVENT = "hive:pathchange" as const;
 
 /** The path-router contract the Shell consumes: the active route + a `navigate` helper. */
 export interface PathRoute {

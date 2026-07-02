@@ -1296,10 +1296,10 @@ export interface WireClientOptions {
 	readonly fetchImpl?: FetchLike;
 }
 
-// Federation is SERVER-SIDE (the-hive ADR-0002): the browser talks only to thehive's own origin
-// and thehive proxies each `/api/*` and `/setup/*` request over loopback to the owning workload
+// Federation is SERVER-SIDE (hive ADR-0002): the browser talks only to hive's own origin
+// and hive proxies each `/api/*` and `/setup/*` request over loopback to the owning workload
 // daemon. This client therefore fetches same-origin exactly like honeycomb's original dashboard
-// wire; the daemon-base routing and the loopback-trust gate now live on the thehive server
+// wire; the daemon-base routing and the loopback-trust gate now live on the hive server
 // (`src/daemon/proxy.ts` + `src/daemon/registry.ts`), not in the browser.
 
 /**
@@ -2041,7 +2041,7 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 				if (record !== null) onRecord(record);
 			};
 			try {
-				// Same-origin: EventSource hits thehive's own `/api/logs/stream`, which the server-side
+				// Same-origin: EventSource hits hive's own `/api/logs/stream`, which the server-side
 				// proxy forwards to the owning daemon's SSE tail. `event: "log"` frames are parsed through
 				// the SAME zod schema as the snapshot, so a malformed frame is dropped (never thrown).
 				source = new ES(url(ENDPOINTS.logsStream));

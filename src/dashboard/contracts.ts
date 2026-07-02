@@ -1,15 +1,15 @@
 /**
  * PARTIAL copy of honeycomb's `src/dashboard/contracts.ts` — PRD-001b ("copy partially").
  *
- * Only the web-consumed ROI view-model types cross into thehive: the subset that
+ * Only the web-consumed ROI view-model types cross into hive: the subset that
  * `web/wire.ts` (`EMPTY_ROI_TREND`, `EMPTY_ROI_VIEW`, `RoiTrendView`, `RoiView`) and the ROI
  * pages (`web/pages/roi.tsx`, `web/pages/roi-chart.tsx`) import. The rest of honeycomb's
- * contracts serve its own daemon-side view-models and STAY in honeycomb. thehive owns a small
+ * contracts serve its own daemon-side view-models and STAY in honeycomb. hive owns a small
  * copy of just the types its `wire` validates against.
  *
  * Copied verbatim from honeycomb `src/dashboard/contracts.ts` (the `PRD-060e` ROI section),
  * with one cross-repo JSDoc `{@link}` path softened to a plain reference so the module is
- * self-contained in thehive.
+ * self-contained in hive.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────

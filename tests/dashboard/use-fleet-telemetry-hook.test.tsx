@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * the-hive PRD-004/PRD-005 — `useFleetTelemetry` hook-level behavior. jsdom has no `EventSource`
+ * hive PRD-004/PRD-005 — `useFleetTelemetry` hook-level behavior. jsdom has no `EventSource`
  * (confirmed: `(globalThis as any).EventSource` is `undefined` here, same gap `wire.ts`'s
  * `logsStream` already documents), so this environment naturally exercises the REST-fallback path
  * (bz-AC-5/hr-AC-4) end to end; the SSE-fed reducer steps are covered directly in
@@ -39,7 +39,7 @@ describe("useFleetTelemetry — REST fallback in an EventSource-less environment
 				const url = requestUrl(input);
 				calls.push({ url });
 				if (url.includes("/api/registered-services")) {
-					return jsonResponse({ names: ["honeycomb", "hivenectar"] });
+					return jsonResponse({ names: ["honeycomb", "nectar"] });
 				}
 				if (url.includes("/api/fleet-status")) {
 					return jsonResponse(fleetStatusResponse);
@@ -60,7 +60,7 @@ describe("useFleetTelemetry — REST fallback in an EventSource-less environment
 
 	it("bz-AC-1/hr-AC-1: enumerates every registered service even before any telemetry (starting)", async () => {
 		const { result } = renderHook(() => useFleetTelemetry({ restPollMs: 10 }));
-		await waitFor(() => expect(result.current.services.map((s) => s.name)).toEqual(["honeycomb", "hivenectar"]));
+		await waitFor(() => expect(result.current.services.map((s) => s.name)).toEqual(["honeycomb", "nectar"]));
 		expect(result.current.services.every((s) => s.state === "starting")).toBe(true);
 	});
 
@@ -71,13 +71,13 @@ describe("useFleetTelemetry — REST fallback in an EventSource-less environment
 			asOf: "2026-07-01T12:00:00.000Z",
 			daemons: [
 				{ name: "honeycomb", health: "ok", escalation: null },
-				{ name: "hivenectar", health: "unreachable", escalation: null },
+				{ name: "nectar", health: "unreachable", escalation: null },
 			],
 		};
 		const { result } = renderHook(() => useFleetTelemetry({ restPollMs: 10 }));
 
 		await waitFor(() => expect(result.current.source).toBe("rest"));
-		expect(result.current.services.find((s) => s.name === "hivenectar")?.state).toBe("error");
+		expect(result.current.services.find((s) => s.name === "nectar")?.state).toBe("error");
 		// A degraded sibling never blanks the OTHER row (bz-AC-7-equivalent for the hook's own state).
 		expect(result.current.services.find((s) => s.name === "honeycomb")?.state).not.toBe("error");
 	});

@@ -4,9 +4,9 @@
 
 ## Overview
 
-This sub-PRD migrates the copied dashboard SPA off client hash routing and onto the path-based route model [`prd-003a`](./prd-003a-route-model-and-server-gate.md) defines, per the-hive [`ADR-0004`](../../../knowledge/private/architecture/ADR-0004-portal-landing-gate-and-path-based-routing.md). It retires `useHashRoute` / `routeFromHash` (`the-hive/src/dashboard/web/router.tsx`) as the router and converts `the-hive/src/dashboard/web/registry.tsx` from hash addressing to path addressing, while preserving every existing page's content unchanged.
+This sub-PRD migrates the copied dashboard SPA off client hash routing and onto the path-based route model [`prd-003a`](./prd-003a-route-model-and-server-gate.md) defines, per hive [`ADR-0004`](../../../knowledge/private/architecture/ADR-0004-portal-landing-gate-and-path-based-routing.md). It retires `useHashRoute` / `routeFromHash` (`hive/src/dashboard/web/router.tsx`) as the router and converts `hive/src/dashboard/web/registry.tsx` from hash addressing to path addressing, while preserving every existing page's content unchanged.
 
-The migration also unwinds the two nested React gates in `the-hive/src/dashboard/web/main.tsx` (`ReadinessSplash` then `SetupGate`): the health and auth decisions move to the server gate ([`prd-003a`](./prd-003a-route-model-and-server-gate.md)), the `ReadinessSplash` concept becomes the `/buzzing` route ([`prd-004`](../prd-004-buzzing-service-loaders/prd-004-buzzing-service-loaders-index.md)), and `SetupGate`'s device-flow view becomes the `/login` route ([`prd-003b`](./prd-003b-login-route-device-flow.md)). This is a routing-layer migration only: no page's data, layout, or behavior changes.
+The migration also unwinds the two nested React gates in `hive/src/dashboard/web/main.tsx` (`ReadinessSplash` then `SetupGate`): the health and auth decisions move to the server gate ([`prd-003a`](./prd-003a-route-model-and-server-gate.md)), the `ReadinessSplash` concept becomes the `/buzzing` route ([`prd-004`](../prd-004-buzzing-service-loaders/prd-004-buzzing-service-loaders-index.md)), and `SetupGate`'s device-flow view becomes the `/login` route ([`prd-003b`](./prd-003b-login-route-device-flow.md)). This is a routing-layer migration only: no page's data, layout, or behavior changes.
 
 ## Goals
 
@@ -32,7 +32,7 @@ The migration also unwinds the two nested React gates in `the-hive/src/dashboard
 
 | ID | Criterion |
 |---|---|
-| m-AC-1 | Given `the-hive/src/dashboard/web/router.tsx`, when the migration completes, then `useHashRoute` / `routeFromHash` no longer resolve the active route from `location.hash`; the active route derives from the path served per [`prd-003a`](./prd-003a-route-model-and-server-gate.md). |
+| m-AC-1 | Given `hive/src/dashboard/web/router.tsx`, when the migration completes, then `useHashRoute` / `routeFromHash` no longer resolve the active route from `location.hash`; the active route derives from the path served per [`prd-003a`](./prd-003a-route-model-and-server-gate.md). |
 | m-AC-2 | Given a browser back/forward navigation, when the migration completes, then navigation operates on real paths (history entries are paths, not fragments) and resolves the same screens. |
 
 ### US-2 - preserve every existing page
@@ -51,7 +51,7 @@ The migration also unwinds the two nested React gates in `the-hive/src/dashboard
 
 | ID | Criterion |
 |---|---|
-| m-AC-6 | Given `the-hive/src/dashboard/web/main.tsx`, when the migration completes, then the `ReadinessSplash`-then-`SetupGate` nested gate tree no longer makes the health/auth landing decision; that decision is the server gate's ([`prd-003a`](./prd-003a-route-model-and-server-gate.md)). |
+| m-AC-6 | Given `hive/src/dashboard/web/main.tsx`, when the migration completes, then the `ReadinessSplash`-then-`SetupGate` nested gate tree no longer makes the health/auth landing decision; that decision is the server gate's ([`prd-003a`](./prd-003a-route-model-and-server-gate.md)). |
 | m-AC-7 | Given the `ReadinessSplash` concept, when the migration completes, then it is reachable as the `/buzzing` route ([`prd-004`](../prd-004-buzzing-service-loaders/prd-004-buzzing-service-loaders-index.md)) rather than an unconditional pre-mount gate. |
 | m-AC-8 | Given `SetupGate`'s device-flow view, when the migration completes, then it is reachable as the `/login` route ([`prd-003b`](./prd-003b-login-route-device-flow.md)) rather than a nested gate branch. |
 
@@ -73,8 +73,8 @@ Because [`prd-003a`](./prd-003a-route-model-and-server-gate.md) makes the server
 - [`prd-003a-route-model-and-server-gate.md`](./prd-003a-route-model-and-server-gate.md) - the server route model and gate this migration conforms the SPA to.
 - [`prd-003b-login-route-device-flow.md`](./prd-003b-login-route-device-flow.md) - the `/login` route `SetupGate`'s view relocates to.
 - [`ADR-0004-portal-landing-gate-and-path-based-routing`](../../../knowledge/private/architecture/ADR-0004-portal-landing-gate-and-path-based-routing.md) - "server-side, path-based, not client hash" and the migration consequence it names.
-- the-hive [`prd-001b-dashboard-migration-and-copy-map`](../../in-work/prd-001-thehive-portal-daemon/prd-001b-dashboard-migration-and-copy-map.md) - the copy-and-own migration that brought this SPA (and its hash router) into thehive.
-- the-hive [`prd-002b-readiness-splash-ui`](../../in-work/prd-002-portal-readiness-splash/prd-002b-readiness-splash-ui.md) - the `ReadinessSplash` and `main.tsx` tree-order this migration unwinds into `/buzzing`.
-- `the-hive/src/dashboard/web/router.tsx` - `useHashRoute` / `routeFromHash`, retired here.
-- `the-hive/src/dashboard/web/registry.tsx` - the route registry converted from hash to path addressing.
-- `the-hive/src/dashboard/web/main.tsx` - the boot entry whose nested gates are unwound.
+- hive [`prd-001b-dashboard-migration-and-copy-map`](../../in-work/prd-001-hive-portal-daemon/prd-001b-dashboard-migration-and-copy-map.md) - the copy-and-own migration that brought this SPA (and its hash router) into hive.
+- hive [`prd-002b-readiness-splash-ui`](../../in-work/prd-002-portal-readiness-splash/prd-002b-readiness-splash-ui.md) - the `ReadinessSplash` and `main.tsx` tree-order this migration unwinds into `/buzzing`.
+- `hive/src/dashboard/web/router.tsx` - `useHashRoute` / `routeFromHash`, retired here.
+- `hive/src/dashboard/web/registry.tsx` - the route registry converted from hash to path addressing.
+- `hive/src/dashboard/web/main.tsx` - the boot entry whose nested gates are unwound.

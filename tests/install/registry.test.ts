@@ -3,14 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  buildThehiveRegistryEntry,
+  buildHiveRegistryEntry,
   createNodeRegistryFs,
-  registerThehiveWithHivedoctor,
+  registerHiveWithDoctor,
   type RegistryFs
 } from "../../src/install/registry.js";
 
 async function withTempDir(run: (dir: string) => Promise<void> | void): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "thehive-registry-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "hive-registry-test-"));
   try {
     await run(dir);
   } finally {
@@ -18,30 +18,30 @@ async function withTempDir(run: (dir: string) => Promise<void> | void): Promise<
   }
 }
 
-describe("thehive registry writer", () => {
-  it("d-AC-6 appends a thehive daemon entry with expected defaults", () => {
+describe("hive registry writer", () => {
+  it("d-AC-6 appends a hive daemon entry with expected defaults", () => {
     return withTempDir((dir) => {
-      const registryPath = join(dir, "hivedoctor.daemons.json");
-      registerThehiveWithHivedoctor({ registryPath });
+      const registryPath = join(dir, "doctor.daemons.json");
+      registerHiveWithDoctor({ registryPath });
 
       const parsed = JSON.parse(readFileSync(registryPath, "utf8")) as {
         daemons: Array<Record<string, unknown>>;
       };
-      const thehive = parsed.daemons.find((entry) => entry["name"] === "thehive");
-      expect(thehive).toEqual(buildThehiveRegistryEntry());
+      const hive = parsed.daemons.find((entry) => entry["name"] === "hive");
+      expect(hive).toEqual(buildHiveRegistryEntry());
     });
   });
 
-  it("d-AC-7 re-run updates thehive in place and does not duplicate by name", () => {
+  it("d-AC-7 re-run updates hive in place and does not duplicate by name", () => {
     return withTempDir((dir) => {
-      const registryPath = join(dir, "hivedoctor.daemons.json");
+      const registryPath = join(dir, "doctor.daemons.json");
       writeFileSync(
         registryPath,
         JSON.stringify(
           {
             daemons: [
               {
-                name: "thehive",
+                name: "hive",
                 healthUrl: "http://127.0.0.1:9999/health",
                 pidPath: "~/.honeycomb/old.pid",
                 probeIntervalMs: 1,
@@ -58,21 +58,21 @@ describe("thehive registry writer", () => {
         "utf8"
       );
 
-      registerThehiveWithHivedoctor({ registryPath });
-      registerThehiveWithHivedoctor({ registryPath });
+      registerHiveWithDoctor({ registryPath });
+      registerHiveWithDoctor({ registryPath });
 
       const parsed = JSON.parse(readFileSync(registryPath, "utf8")) as {
         daemons: Array<Record<string, unknown>>;
       };
-      const matches = parsed.daemons.filter((entry) => entry["name"] === "thehive");
+      const matches = parsed.daemons.filter((entry) => entry["name"] === "hive");
       expect(matches).toHaveLength(1);
-      expect(matches[0]).toEqual(buildThehiveRegistryEntry());
+      expect(matches[0]).toEqual(buildHiveRegistryEntry());
     });
   });
 
   it("d-AC-8 writes temp+rename atomically and leaves no partial target write on rename failure", () => {
     return withTempDir((dir) => {
-      const registryPath = join(dir, "hivedoctor.daemons.json");
+      const registryPath = join(dir, "doctor.daemons.json");
       const original = JSON.stringify(
         {
           daemons: [{ name: "honeycomb", healthUrl: "http://127.0.0.1:3850/health", pidPath: "~/.honeycomb/daemon.pid" }]
@@ -90,7 +90,7 @@ describe("thehive registry writer", () => {
         }
       };
 
-      expect(() => registerThehiveWithHivedoctor({ registryPath, fs: failingFs })).toThrow("rename failed");
+      expect(() => registerHiveWithDoctor({ registryPath, fs: failingFs })).toThrow("rename failed");
       expect(readFileSync(registryPath, "utf8")).toBe(`${original}\n`);
       expect(readdirSync(dir).some((name) => name.includes(".tmp-"))).toBe(false);
     });

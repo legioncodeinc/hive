@@ -8,8 +8,8 @@
  * bundle as a single static `<script>`; this module finds `#root` (created by the host shell HTML)
  * and mounts the screen the SERVER already authorized for the current path.
  *
- * PRD-003a moved the landing decision (fleet health, then auth) onto thehive's server gate
- * (`the-hive/src/daemon/gate.ts`): every request either gets redirected to `/buzzing` or `/login`
+ * PRD-003a moved the landing decision (fleet health, then auth) onto hive's server gate
+ * (`hive/src/daemon/gate.ts`): every request either gets redirected to `/buzzing` or `/login`
  * before the shell ever renders, or is served the shell for the path it actually requested. This
  * RETIRES the nested `<ReadinessSplash>` → `<SetupGate>` pre-mount gate that used to make that
  * decision client-side (m-AC-6): this module now does a single, path-keyed lookup

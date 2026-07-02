@@ -1,9 +1,9 @@
 /**
- * The `/health` PAGE — the-hive PRD-005b (per-service metrics + Deep Lake stats) and PRD-005c
+ * The `/health` PAGE — hive PRD-005b (per-service metrics + Deep Lake stats) and PRD-005c
  * (live log tail with selectable verbosity). Registered at `/health` in `registry.tsx`; reachable
  * via the health rail's "health details" link (PRD-005a) or direct navigation.
  *
- * `/health` shares the SAME literal path as thehive's own machine-liveness probe (`GET /health`
+ * `/health` shares the SAME literal path as hive's own machine-liveness probe (`GET /health`
  * JSON, `server.ts`) — content negotiation on the SERVER (`accept: text/html` → this SPA page,
  * anything else → the liveness JSON) keeps both working at the identical URL (see `gate.ts` /
  * `server.ts` module docs). Client-side navigation (the sidebar link, `navigate()`) never touches
@@ -209,7 +209,7 @@ export function HealthPage(_props: PageProps): React.JSX.Element {
 				{isTelemetryUnavailable(telemetry) ? (
 					<Panel title="Fleet metrics">
 						<div data-testid="health-telemetry-unavailable" style={{ padding: "12px 4px", fontSize: 13, color: "var(--text-tertiary)" }}>
-							Telemetry unavailable. Waiting for hivedoctor to report the fleet.
+							Telemetry unavailable. Waiting for doctor to report the fleet.
 						</div>
 					</Panel>
 				) : (

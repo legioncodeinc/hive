@@ -20,7 +20,7 @@ The mount point is `src/dashboard/web/main.tsx`, which today renders `<SetupGate
 - The proxy route, its fail-soft payload, and the `isFleetReady()` predicate itself - that is [`prd-002a`](./prd-002a-fleet-status-proxy.md); this sub-PRD only consumes it.
 - Visual polish (bees, spinner animation, brand treatment) - explicitly deferred to `ux-ui-worker-bee` at implementation time per the parent index's non-goals.
 - Any change to `SetupGate`'s own internal logic (its pre-auth/authenticated branches, the migration/coexistence wizards) beyond the one constraint that it must not start polling `/setup/state` before the fleet gate passes.
-- Adding hivenectar as a gating peer - it renders as a display-only row if present in `daemons[]`, per the parent index's "v1 required peers."
+- Adding nectar as a gating peer - it renders as a display-only row if present in `daemons[]`, per the parent index's "v1 required peers."
 
 ---
 
@@ -44,7 +44,7 @@ The mount point is `src/dashboard/web/main.tsx`, which today renders `<SetupGate
 |---|---|
 | rs-AC-4 | Given `ReadinessSplash` is mounted and the fleet is not yet ready, when it polls, then it calls `GET /api/fleet-status` on an interval between 1000ms and 2000ms (matching `SETUP_POLL_MS`'s existing 2500ms precedent in spirit, `setup-gate.tsx:45`, but faster per the pinned note's "every 1 to 2s"). |
 | rs-AC-5 | Given a `supervisor: "reachable"` response with a non-empty `daemons[]`, when `ReadinessSplash` renders, then it shows one row per `daemons[]` entry with the daemon's `name` and a mapped display state (`up` for `health: "ok"`, `degraded` for `health: "degraded"`, `unreachable` for `health: "unreachable"`, `starting` for `health: "unknown"`). |
-| rs-AC-6 | Given a `supervisor: "unreachable"` response (`daemons: []`), when `ReadinessSplash` renders, then it shows a distinct "waiting on hivedoctor" state rather than an empty grid, so an operator can tell "hivedoctor is down" apart from "hivedoctor reports zero daemons." |
+| rs-AC-6 | Given a `supervisor: "unreachable"` response (`daemons: []`), when `ReadinessSplash` renders, then it shows a distinct "waiting on doctor" state rather than an empty grid, so an operator can tell "doctor is down" apart from "doctor reports zero daemons." |
 | rs-AC-7 | Given the fleet becomes ready mid-poll, when the next `/api/fleet-status` response reports `isFleetReady() === true`, then `ReadinessSplash` stops polling (clears its interval) and renders `SetupGate` in the same tick, with no intermediate blank frame. |
 
 ### US-3 - `SetupGate` never fires early
@@ -54,7 +54,7 @@ The mount point is `src/dashboard/web/main.tsx`, which today renders `<SetupGate
 | ID | Criterion |
 |---|---|
 | rs-AC-8 | Given the fleet is ready (honeycomb `health: "ok"`, aggregate `health: "ok"`) and the user has no valid credential, when `SetupGate` mounts, then it proceeds through its existing unmodified logic and reaches `GuidedSetup` (`setup-gate.tsx:84-185`) exactly as it does today - PRD-002 changes nothing about `SetupGate`'s internal branches. |
-| rs-AC-9 | Given the fleet was ready and then hivedoctor becomes unreachable while `SetupGate`/`Shell` is already mounted (a post-boot flap, not the cold-boot case), when this happens, then `ReadinessSplash` does not unmount an already-mounted `SetupGate`/`Shell` mid-session - the gate applies once, at initial mount, not as a continuous kill-switch (out of scope: a post-mount fleet-health banner is a future enhancement, not this PRD). |
+| rs-AC-9 | Given the fleet was ready and then doctor becomes unreachable while `SetupGate`/`Shell` is already mounted (a post-boot flap, not the cold-boot case), when this happens, then `ReadinessSplash` does not unmount an already-mounted `SetupGate`/`Shell` mid-session - the gate applies once, at initial mount, not as a continuous kill-switch (out of scope: a post-mount fleet-health banner is a future enhancement, not this PRD). |
 
 ---
 
@@ -111,7 +111,7 @@ createRoot(root).render(
 
 ### Per-daemon state mapping (rs-AC-5)
 
-| hivedoctor `daemons[].health` | Splash row state | Copy |
+| doctor `daemons[].health` | Splash row state | Copy |
 |---|---|---|
 | `"ok"` | `up` | e.g. a green dot + daemon name |
 | `"degraded"` | `degraded` | e.g. a yellow dot + daemon name |
@@ -122,7 +122,7 @@ createRoot(root).render(
 
 ### Why the gate is "once, at mount" (rs-AC-9)
 
-The pinned note's acceptance sketch is scoped to the cold-boot phase transition (splash to setup-or-dashboard), not a continuous live health banner for an already-authenticated session. Continuously unmounting an authenticated `Shell` because hivedoctor flapped would be a worse UX regression than the bug this PRD fixes (a logged-in user bounced back to a splash mid-session). A persistent post-mount health indicator is explicitly left as a future enhancement in this sub-PRD's non-goals.
+The pinned note's acceptance sketch is scoped to the cold-boot phase transition (splash to setup-or-dashboard), not a continuous live health banner for an already-authenticated session. Continuously unmounting an authenticated `Shell` because doctor flapped would be a worse UX regression than the bug this PRD fixes (a logged-in user bounced back to a splash mid-session). A persistent post-mount health indicator is explicitly left as a future enhancement in this sub-PRD's non-goals.
 
 ## Related
 

@@ -18,11 +18,11 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-// The browser wire is same-origin (the-hive ADR-0002): every endpoint is fetched from thehive's
-// own origin, and thehive's server-side proxy federates it to the owning daemon. The fail-soft
+// The browser wire is same-origin (hive ADR-0002): every endpoint is fetched from hive's
+// own origin, and hive's server-side proxy federates it to the owning daemon. The fail-soft
 // posture (a failed/malformed response degrades to the empty state, never a throw) is unchanged.
 describe("wire same-origin fetch + fail-soft behavior", () => {
-  it("c-AC-1 fetches endpoints from thehive's own origin (no client-side daemon base)", async () => {
+  it("c-AC-1 fetches endpoints from hive's own origin (no client-side daemon base)", async () => {
     const fetchImpl = vi.fn(async (input: Parameters<FetchLike>[0]) => {
       const url = requestUrl(input);
       if (url === ENDPOINTS.settings) {

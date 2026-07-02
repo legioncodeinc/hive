@@ -57,6 +57,6 @@ export function fixedEnv(overrides: Partial<ServiceEnvironment> & Pick<ServiceEn
   return {
     platform: overrides.platform,
     home: overrides.home ?? "/home/tester",
-    execPath: overrides.execPath ?? "/tmp/thehive/dist/cli.js"
+    execPath: overrides.execPath ?? "/tmp/hive/dist/cli.js"
   };
 }

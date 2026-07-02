@@ -1,4 +1,4 @@
-// thehive dashboard bundler — PRD-001b Wave 2.
+// hive dashboard bundler — PRD-001b Wave 2.
 //
 // Bundles the migrated React SPA for the BROWSER: React + ReactDOM are bundled IN
 // (NO unpkg/CDN React), JSX is compiled at build time (NO @babel/standalone /
@@ -39,7 +39,7 @@ await build({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Telemetry define stamping (mirrors hivedoctor's esbuild define pattern).
+// Telemetry define stamping (mirrors doctor's esbuild define pattern).
 //
 // The node-side code ships as tsc output; only the telemetry chokepoint carries
 // build-time tokens, so esbuild re-emits that ONE file in place with `define`

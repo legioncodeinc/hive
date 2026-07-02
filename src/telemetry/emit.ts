@@ -1,12 +1,12 @@
 /**
- * the-hive's SINGLE telemetry-egress chokepoint.
+ * hive's SINGLE telemetry-egress chokepoint.
  *
  * `emitTelemetry(event, opts, deps?)` is the ONLY place in this package that posts to the PostHog
- * capture endpoint. The four lifecycle emit sites (install-service -> `thehive_installed`,
- * uninstall-service -> `thehive_uninstalled`, first `start` -> `thehive_first_run`, version change on
- * `start` -> `thehive_updated`) all funnel through here, so the allow-list, the opt-out gates, the
+ * capture endpoint. The four lifecycle emit sites (install-service -> `hive_installed`,
+ * uninstall-service -> `hive_uninstalled`, first `start` -> `hive_first_run`, version change on
+ * `start` -> `hive_updated`) all funnel through here, so the allow-list, the opt-out gates, the
  * dedupe ledger, and the bounded fire-and-forget POST posture live in ONE module. Mirrors the posture
- * of honeycomb's `src/daemon/runtime/telemetry/emit.ts` and hivedoctor's `src/telemetry/emit.ts`.
+ * of honeycomb's `src/daemon/runtime/telemetry/emit.ts` and doctor's `src/telemetry/emit.ts`.
  *
  * Gates, in order (a return is silent; telemetry NEVER throws):
  *   1. Build-injected `__HONEYCOMB_POSTHOG_KEY__` empty -> hard-disabled (unkeyed dev build).
@@ -18,8 +18,8 @@
  * The payload is BUILT FROM A CLOSED ALLOW-LIST: exactly `{package, version, os, arch, node}`. There
  * is no free-form property path, so a leak is structurally impossible. `distinct_id` prefers the
  * shared `~/.honeycomb/install-id` written by the honeycomb installer (correlates the funnel across
- * products); when absent, a UUID is generated once and persisted in the-hive's own state dir
- * (`~/.honeycomb/thehive/`, mode 0o700).
+ * products); when absent, a UUID is generated once and persisted in hive's own state dir
+ * (`~/.honeycomb/hive/`, mode 0o700).
  *
  * Fail-soft everywhere: the POST is wrapped in a 2s AbortController timeout and a try/catch that
  * swallows EVERYTHING (timeout, network error, 4xx, 5xx, ledger IO). `emitTelemetry` resolves to a
@@ -34,7 +34,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { arch, platform } from "node:os";
 import { join } from "node:path";
 
-import { HONEYCOMB_HOME_DIR, THEHIVE_VERSION } from "../shared/constants.js";
+import { HONEYCOMB_HOME_DIR, HIVE_VERSION } from "../shared/constants.js";
 
 // ----------------------------------------------------------------------------
 // Build-injected destination (esbuild `define`; empty key means hard-disabled).
@@ -75,7 +75,7 @@ export const ENV_TELEMETRY = "HONEYCOMB_TELEMETRY" as const;
 export const ENV_DO_NOT_TRACK = "DO_NOT_TRACK" as const;
 
 /**
- * True when the user has opted out via either env var. Mirrors honeycomb's and hivedoctor's
+ * True when the user has opted out via either env var. Mirrors honeycomb's and doctor's
  * `isOptedOut` so all three chokepoints agree on the same env contract.
  */
 export function isOptedOut(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -85,26 +85,26 @@ export function isOptedOut(env: NodeJS.ProcessEnv = process.env): boolean {
 }
 
 // ----------------------------------------------------------------------------
-// State locations: shared install-id (funnel correlation) + the-hive's own dir.
+// State locations: shared install-id (funnel correlation) + hive's own dir.
 // ----------------------------------------------------------------------------
 
 /**
- * the-hive's own state dir. the-hive already keeps per-product state under
- * `~/.honeycomb/thehive/` (the staged Windows service unit lives there), so the telemetry install-id
+ * hive's own state dir. hive already keeps per-product state under
+ * `~/.honeycomb/hive/` (the staged Windows service unit lives there), so the telemetry install-id
  * fallback and the dedupe ledger live beside it. Created lazily with mode 0o700.
  */
-export const THEHIVE_STATE_DIR = join(HONEYCOMB_HOME_DIR, "thehive");
+export const HIVE_STATE_DIR = join(HONEYCOMB_HOME_DIR, "hive");
 
 /**
  * The shared install-id written by the honeycomb installer. When present, its contents are used as
- * `distinct_id` so the-hive's lifecycle events correlate with the installer funnel.
+ * `distinct_id` so hive's lifecycle events correlate with the installer funnel.
  */
 export const SHARED_INSTALL_ID_PATH = join(HONEYCOMB_HOME_DIR, "install-id");
 
-/** Filename of the-hive's own generated install-id inside {@link THEHIVE_STATE_DIR}. */
+/** Filename of hive's own generated install-id inside {@link HIVE_STATE_DIR}. */
 export const INSTALL_ID_FILENAME = "install-id" as const;
 
-/** Filename of the dedupe ledger inside {@link THEHIVE_STATE_DIR}. */
+/** Filename of the dedupe ledger inside {@link HIVE_STATE_DIR}. */
 export const LEDGER_FILENAME = "telemetry.json" as const;
 
 // ----------------------------------------------------------------------------
@@ -130,7 +130,7 @@ export type AllowedProperties = Record<AllowedPropertyKey, string>;
  */
 export function buildAllowedProperties(version: string): AllowedProperties {
   return {
-    package: "thehive",
+    package: "hive",
     version,
     os: platform(),
     arch: arch(),
@@ -142,12 +142,12 @@ export function buildAllowedProperties(version: string): AllowedProperties {
 // The lifecycle event names.
 // ----------------------------------------------------------------------------
 
-/** The four the-hive lifecycle events. This union is the whole event vocabulary of this module. */
-export type ThehiveTelemetryEvent =
-  | "thehive_installed"
-  | "thehive_uninstalled"
-  | "thehive_first_run"
-  | "thehive_updated";
+/** The four hive lifecycle events. This union is the whole event vocabulary of this module. */
+export type HiveTelemetryEvent =
+  | "hive_installed"
+  | "hive_uninstalled"
+  | "hive_first_run"
+  | "hive_updated";
 
 // ----------------------------------------------------------------------------
 // The dedupe ledger (a small JSON file in the state dir).
@@ -155,7 +155,7 @@ export type ThehiveTelemetryEvent =
 
 /**
  * The dedupe ledger persisted at `${stateDir}/telemetry.json`. `reported` maps a dedupe key (an event
- * name, or `event@version` for `thehive_updated`) to the ISO timestamp it was sent. `lastSeenVersion`
+ * name, or `event@version` for `hive_updated`) to the ISO timestamp it was sent. `lastSeenVersion`
  * is the version observed on the most recent lifecycle-recorded `start`, used to detect upgrades.
  */
 export interface TelemetryLedger {
@@ -203,7 +203,7 @@ export function saveLedger(stateDir: string, ledger: TelemetryLedger): void {
 /**
  * Resolve the anonymized `distinct_id`, in preference order:
  *   1. The shared `~/.honeycomb/install-id` (honeycomb installer funnel correlation), when present.
- *   2. the-hive's own previously generated id at `${stateDir}/install-id`.
+ *   2. hive's own previously generated id at `${stateDir}/install-id`.
  *   3. A fresh UUID, persisted best-effort at `${stateDir}/install-id` (dir mode 0o700).
  * Never an email, account id, hostname, or path. Never throws: a persist failure still returns the
  * generated id (that emit just will not correlate with later ones).
@@ -214,10 +214,10 @@ export function resolveDistinctId(deps: EmitDeps = {}): string {
     const shared = readFileSync(sharedPath, "utf8").trim();
     if (shared.length > 0) return shared;
   } catch {
-    // No shared install-id: fall through to the-hive's own id.
+    // No shared install-id: fall through to hive's own id.
   }
 
-  const stateDir = deps.stateDir ?? THEHIVE_STATE_DIR;
+  const stateDir = deps.stateDir ?? HIVE_STATE_DIR;
   const ownPath = join(stateDir, INSTALL_ID_FILENAME);
   try {
     const own = readFileSync(ownPath, "utf8").trim();
@@ -267,9 +267,9 @@ export interface EmitDeps {
   readonly posthogKey?: string;
   /** Override the capture host (tests assert the posted URL without a rebuild). */
   readonly posthogHost?: string;
-  /** Override the version stamped into the payload (defaults to {@link THEHIVE_VERSION}). */
+  /** Override the version stamped into the payload (defaults to {@link HIVE_VERSION}). */
   readonly version?: string;
-  /** Override the-hive's state dir (tests point this at a temp dir). */
+  /** Override hive's state dir (tests point this at a temp dir). */
   readonly stateDir?: string;
   /** Override the shared install-id path (tests point this at a temp file). */
   readonly sharedInstallIdPath?: string;
@@ -307,8 +307,8 @@ export interface EmitOutcome {
 export interface EmitOptions {
   /**
    * When supplied, the emit is deduped: a ledger hit skips the send, and a successful send records
-   * this key. Plain event names dedupe once per machine; `thehive_updated@<version>` dedupes per
-   * version. Omit for events that may fire more than once (`thehive_uninstalled`).
+   * this key. Plain event names dedupe once per machine; `hive_updated@<version>` dedupes per
+   * version. Omit for events that may fire more than once (`hive_uninstalled`).
    */
   readonly dedupeKey?: string;
 }
@@ -316,7 +316,7 @@ export interface EmitOptions {
 /** The PostHog capture body shape: exactly `{ api_key, event, properties, distinct_id }`. */
 interface CaptureBody {
   readonly api_key: string;
-  readonly event: ThehiveTelemetryEvent;
+  readonly event: HiveTelemetryEvent;
   readonly properties: AllowedProperties;
   readonly distinct_id: string;
 }
@@ -332,13 +332,13 @@ interface CaptureBody {
  * verb's exit code: it resolves an {@link EmitOutcome} the caller may inspect or ignore.
  */
 export async function emitTelemetry(
-  event: ThehiveTelemetryEvent,
+  event: HiveTelemetryEvent,
   opts: EmitOptions = {},
   deps: EmitDeps = {}
 ): Promise<EmitOutcome> {
   const env = deps.env ?? process.env;
   const key = deps.posthogKey ?? POSTHOG_KEY;
-  const version = deps.version ?? THEHIVE_VERSION;
+  const version = deps.version ?? HIVE_VERSION;
   const properties = buildAllowedProperties(version);
 
   // Gate 1: empty build key means hard-disabled (unkeyed dev build). No IO, no network.
@@ -348,7 +348,7 @@ export async function emitTelemetry(
   if (isOptedOut(env)) return { sent: false, skipped: "opted_out", properties };
 
   try {
-    const stateDir = deps.stateDir ?? THEHIVE_STATE_DIR;
+    const stateDir = deps.stateDir ?? HIVE_STATE_DIR;
     const ledger = loadLedger(stateDir);
 
     // Gate 3: dedupe. A keyed emit sends at most once per ledger key.
@@ -387,7 +387,7 @@ export async function emitTelemetry(
  * body is exactly `{ api_key, event, properties, distinct_id }`.
  */
 async function postCapture(
-  event: ThehiveTelemetryEvent,
+  event: HiveTelemetryEvent,
   properties: AllowedProperties,
   distinctId: string,
   key: string,
@@ -422,17 +422,17 @@ async function postCapture(
 // The four lifecycle emit helpers (the only call sites, wired in src/cli.ts).
 // ----------------------------------------------------------------------------
 
-/** Emit `thehive_installed` after a successful `install-service`. Deduped once per machine. */
+/** Emit `hive_installed` after a successful `install-service`. Deduped once per machine. */
 export async function emitInstalled(deps: EmitDeps = {}): Promise<EmitOutcome> {
-  return emitTelemetry("thehive_installed", { dedupeKey: "thehive_installed" }, deps);
+  return emitTelemetry("hive_installed", { dedupeKey: "hive_installed" }, deps);
 }
 
 /**
- * Emit `thehive_uninstalled` on `uninstall-service`. Fired BEFORE teardown, fire-and-forget, and
+ * Emit `hive_uninstalled` on `uninstall-service`. Fired BEFORE teardown, fire-and-forget, and
  * deliberately NOT deduped: an install/uninstall/reinstall cycle legitimately fires it again.
  */
 export async function emitUninstalled(deps: EmitDeps = {}): Promise<EmitOutcome> {
-  return emitTelemetry("thehive_uninstalled", {}, deps);
+  return emitTelemetry("hive_uninstalled", {}, deps);
 }
 
 /** The outcome of the `start` lifecycle recording: the first-run emit plus the optional update emit. */
@@ -443,15 +443,15 @@ export interface StartLifecycleOutcome {
 }
 
 /**
- * Record the `start` lifecycle: emit `thehive_first_run` once per machine, and emit
- * `thehive_updated` when the persisted last-seen version differs from the current version (deduped
- * per version via `thehive_updated@<version>`), then advance the persisted version. Capturing the
+ * Record the `start` lifecycle: emit `hive_first_run` once per machine, and emit
+ * `hive_updated` when the persisted last-seen version differs from the current version (deduped
+ * per version via `hive_updated@<version>`), then advance the persisted version. Capturing the
  * upgrade on `start` means an npm reinstall is detected without any updater. Fail-soft: never throws
  * and never blocks the daemon (the caller invokes it after the listen line).
  */
 export async function recordStartLifecycle(deps: EmitDeps = {}): Promise<StartLifecycleOutcome> {
-  const version = deps.version ?? THEHIVE_VERSION;
-  const firstRun = await emitTelemetry("thehive_first_run", { dedupeKey: "thehive_first_run" }, deps);
+  const version = deps.version ?? HIVE_VERSION;
+  const firstRun = await emitTelemetry("hive_first_run", { dedupeKey: "hive_first_run" }, deps);
 
   // When telemetry is disabled or opted out, do no bookkeeping at all: no dirs, no ledger.
   if (firstRun.skipped === "disabled" || firstRun.skipped === "opted_out") {
@@ -459,12 +459,12 @@ export async function recordStartLifecycle(deps: EmitDeps = {}): Promise<StartLi
   }
 
   try {
-    const stateDir = deps.stateDir ?? THEHIVE_STATE_DIR;
+    const stateDir = deps.stateDir ?? HIVE_STATE_DIR;
     const lastSeen = loadLedger(stateDir).lastSeenVersion;
 
     let updated: EmitOutcome | null = null;
     if (lastSeen !== undefined && lastSeen !== version) {
-      updated = await emitTelemetry("thehive_updated", { dedupeKey: `thehive_updated@${version}` }, deps);
+      updated = await emitTelemetry("hive_updated", { dedupeKey: `hive_updated@${version}` }, deps);
     }
 
     // Advance the persisted version on the very first recorded start, or once the update event for

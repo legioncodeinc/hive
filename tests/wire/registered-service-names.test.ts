@@ -1,6 +1,6 @@
 /**
  * PRD-004a/PRD-005a — the full registered-service-name enumeration (bz-AC-1/bz-AC-2, hr-AC-1),
- * distinct from `parseHivedoctorRegistry`'s narrower honeycomb/hivenectar base-URL resolution.
+ * distinct from `parseDoctorRegistry`'s narrower honeycomb/nectar base-URL resolution.
  */
 
 import { parseRegisteredServiceNames, resolveRegisteredServiceNames } from "../../src/daemon/registry.js";
@@ -11,12 +11,12 @@ describe("parseRegisteredServiceNames", () => {
 			JSON.stringify({
 				daemons: [
 					{ name: "honeycomb", healthUrl: "http://127.0.0.1:4850/health", pidPath: "/tmp/honeycomb.pid" },
-					{ name: "hivenectar", healthUrl: "http://127.0.0.1:4854/health", pidPath: "/tmp/hivenectar.pid" },
-					{ name: "thehive", healthUrl: "http://127.0.0.1:4853/health", pidPath: "/tmp/thehive.pid" },
+					{ name: "nectar", healthUrl: "http://127.0.0.1:4854/health", pidPath: "/tmp/nectar.pid" },
+					{ name: "hive", healthUrl: "http://127.0.0.1:4853/health", pidPath: "/tmp/hive.pid" },
 				],
 			}),
 		);
-		expect(names).toEqual(["honeycomb", "hivenectar", "thehive"]);
+		expect(names).toEqual(["honeycomb", "nectar", "hive"]);
 	});
 
 	it("de-duplicates repeated names, preserving first-seen order", () => {

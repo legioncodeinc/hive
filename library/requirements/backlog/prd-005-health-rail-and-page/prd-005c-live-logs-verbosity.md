@@ -4,9 +4,9 @@
 
 ## Overview
 
-This sub-PRD delivers the live-logs section of the `/health` page: a tail of fleet log lines with selectable verbosity levels, streamed from hivedoctor over the SSE stream. Per the-hive [`ADR-0004`](../../../knowledge/private/architecture/ADR-0004-portal-landing-gate-and-path-based-routing.md), health data (including logs) arrives via the hivedoctor to thehive SSE stream (hivedoctor [`ADR-0001`](../../../../../hivedoctor/library/knowledge/private/architecture/ADR-0001-hive-telemetry-transport-and-single-source-of-truth.md)), consumed through thehive's server per [`ADR-0002`](../../../knowledge/private/architecture/ADR-0002-server-side-bff-proxy-for-dashboard-federation.md).
+This sub-PRD delivers the live-logs section of the `/health` page: a tail of fleet log lines with selectable verbosity levels, streamed from doctor over the SSE stream. Per hive [`ADR-0004`](../../../knowledge/private/architecture/ADR-0004-portal-landing-gate-and-path-based-routing.md), health data (including logs) arrives via the doctor to hive SSE stream (doctor [`ADR-0001`](../../../../../doctor/library/knowledge/private/architecture/ADR-0001-hive-telemetry-transport-and-single-source-of-truth.md)), consumed through hive's server per [`ADR-0002`](../../../knowledge/private/architecture/ADR-0002-server-side-bff-proxy-for-dashboard-federation.md).
 
-Logs are the strictest test of the parent index's memory-bounding constraint: a naive tail accumulates unbounded history. This sub-PRD requires **windowed** consumption. The view holds a bounded window of recent lines and never the whole log history, in either the browser or thehive's server.
+Logs are the strictest test of the parent index's memory-bounding constraint: a naive tail accumulates unbounded history. This sub-PRD requires **windowed** consumption. The view holds a bounded window of recent lines and never the whole log history, in either the browser or hive's server.
 
 ## Goals
 
@@ -19,7 +19,7 @@ Logs are the strictest test of the parent index's memory-bounding constraint: a 
 
 - Per-service metrics and Deep Lake stats - [`prd-005b`](./prd-005b-health-page-metrics.md).
 - The health rail - [`prd-005a`](./prd-005a-health-rail.md).
-- hivedoctor's log production, level tagging, or retention - hivedoctor [`ADR-0001`](../../../../../hivedoctor/library/knowledge/private/architecture/ADR-0001-hive-telemetry-transport-and-single-source-of-truth.md); this sub-PRD consumes the streamed lines and their levels.
+- doctor's log production, level tagging, or retention - doctor [`ADR-0001`](../../../../../doctor/library/knowledge/private/architecture/ADR-0001-hive-telemetry-transport-and-single-source-of-truth.md); this sub-PRD consumes the streamed lines and their levels.
 - Full-text log search or long-range historical querying - out of scope for a bounded live tail; this view is the recent window, not an archive browser.
 
 ---
@@ -32,7 +32,7 @@ Logs are the strictest test of the parent index's memory-bounding constraint: a 
 
 | ID | Criterion |
 |---|---|
-| lg-AC-1 | Given `/health`, when it renders, then it shows a live tail of fleet log lines updated from the hivedoctor SSE stream, consumed through thehive's server (the browser never contacts hivedoctor directly). |
+| lg-AC-1 | Given `/health`, when it renders, then it shows a live tail of fleet log lines updated from the doctor SSE stream, consumed through hive's server (the browser never contacts doctor directly). |
 | lg-AC-2 | Given new log lines arrive on the stream, when they are received, then the tail appends them live within its bounded window, without a page reload. |
 | lg-AC-3 | Given the SSE stream drops and reconnects, when it resumes, then the tail resumes appending without a manual refresh and without replaying the entire history. |
 
@@ -51,7 +51,7 @@ Logs are the strictest test of the parent index's memory-bounding constraint: a 
 
 | ID | Criterion |
 |---|---|
-| lg-AC-6 | Given a long-lived log session, when it runs, then the view retains only a bounded window of recent lines; older lines fall out of the window rather than accumulating, so memory does not grow with time connected, in either the browser or thehive's server. |
+| lg-AC-6 | Given a long-lived log session, when it runs, then the view retains only a bounded window of recent lines; older lines fall out of the window rather than accumulating, so memory does not grow with time connected, in either the browser or hive's server. |
 | lg-AC-7 | Given verbosity is changed or the stream reconnects, when the view refills, then it queries a windowed view over the SSE stream rather than pulling whole log history into memory. |
 | lg-AC-8 | Given a high log rate, when lines arrive faster than the window size, then the view keeps only the most recent window and remains responsive, never growing unboundedly to keep every line. |
 
@@ -61,7 +61,7 @@ Logs are the strictest test of the parent index's memory-bounding constraint: a 
 
 ### Windowed, not archival
 
-The core discipline is that the log view is a bounded window over a stream, not a buffer of everything seen. Both the browser view and any thehive-side handling hold a fixed-size recent window (lg-AC-6); older lines are dropped from memory as new ones arrive. This directly satisfies the parent index's constraint that thehive never holds whole log history in memory, and it is why full-text search over all history is a non-goal here (that would require an archive this view deliberately does not keep).
+The core discipline is that the log view is a bounded window over a stream, not a buffer of everything seen. Both the browser view and any hive-side handling hold a fixed-size recent window (lg-AC-6); older lines are dropped from memory as new ones arrive. This directly satisfies the parent index's constraint that hive never holds whole log history in memory, and it is why full-text search over all history is a non-goal here (that would require an archive this view deliberately does not keep).
 
 ### Verbosity is a filtered view of the same stream
 
@@ -74,5 +74,5 @@ Verbosity selection filters the streamed lines by level (lg-AC-4); it does not o
 - [`prd-005b-health-page-metrics.md`](./prd-005b-health-page-metrics.md) - the metrics section sharing the windowed approach.
 - [`ADR-0004-portal-landing-gate-and-path-based-routing`](../../../knowledge/private/architecture/ADR-0004-portal-landing-gate-and-path-based-routing.md) - health (including logs) arrives over the SSE stream.
 - [`ADR-0002-server-side-bff-proxy-for-dashboard-federation`](../../../knowledge/private/architecture/ADR-0002-server-side-bff-proxy-for-dashboard-federation.md) - the proxy the log stream rides over; browser stays same-origin.
-- hivedoctor [`ADR-0001-hive-telemetry-transport-and-single-source-of-truth`](../../../../../hivedoctor/library/knowledge/private/architecture/ADR-0001-hive-telemetry-transport-and-single-source-of-truth.md) - the SSE stream and log source of truth.
-- hivedoctor PRD-001 (telemetry transport + SSE), forthcoming under [`hivedoctor/library/requirements/backlog/`](../../../../../hivedoctor/library/requirements/backlog/) - the log-streaming contract this view consumes.
+- doctor [`ADR-0001-hive-telemetry-transport-and-single-source-of-truth`](../../../../../doctor/library/knowledge/private/architecture/ADR-0001-hive-telemetry-transport-and-single-source-of-truth.md) - the SSE stream and log source of truth.
+- doctor PRD-001 (telemetry transport + SSE), forthcoming under [`doctor/library/requirements/backlog/`](../../../../../doctor/library/requirements/backlog/) - the log-streaming contract this view consumes.

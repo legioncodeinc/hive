@@ -2,15 +2,15 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  createThehive,
-  startThehive,
-  type StartThehiveOptions
+  createHive,
+  startHive,
+  type StartHiveOptions
 } from "../../src/daemon/server.js";
 import type { ProxyFetch } from "../../src/daemon/proxy.js";
 import type { FetchImpl as FleetFetchImpl } from "../../src/daemon/fleet-status.js";
 import type { SetupAuthFetchImpl } from "../../src/daemon/setup-auth.js";
 import type { TelemetryFetch } from "../../src/daemon/telemetry-proxy.js";
-import { HIVEDOCTOR_EVENTS_URL, THEHIVE_VERSION } from "../../src/shared/constants.js";
+import { DOCTOR_EVENTS_URL, HIVE_VERSION } from "../../src/shared/constants.js";
 
 /** A fleet-status fetch that always reports honeycomb healthy (PRD-003a's gate then passes health). */
 const healthyFleetStatusFetch: FleetFetchImpl = async () =>
@@ -31,10 +31,10 @@ const authenticatedSetupAuthFetch: SetupAuthFetchImpl = async () =>
   });
 
 async function withTempLockPaths(run: (paths: { lockFilePath: string; pidFilePath: string }) => Promise<void> | void): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "thehive-server-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "hive-server-test-"));
   const lockPaths = {
-    lockFilePath: join(dir, "thehive.lock"),
-    pidFilePath: join(dir, "thehive.pid")
+    lockFilePath: join(dir, "hive.lock"),
+    pidFilePath: join(dir, "hive.pid")
   };
   try {
     await run(lockPaths);
@@ -43,30 +43,30 @@ async function withTempLockPaths(run: (paths: { lockFilePath: string; pidFilePat
   }
 }
 
-describe("thehive daemon server", () => {
+describe("hive daemon server", () => {
   it("a-AC-2 returns a cheap /health body", async () => {
     let now = 1000;
-    const daemon = createThehive({ now: () => now });
+    const daemon = createHive({ now: () => now });
 
     now = 1750;
-    const response = await daemon.app.request("http://thehive.local/health");
+    const response = await daemon.app.request("http://hive.local/health");
     expect(response.status).toBe(200);
 
     const payload = await response.json();
     expect(payload).toEqual({
       status: "ok",
       uptimeMs: 750,
-      version: THEHIVE_VERSION
+      version: HIVE_VERSION
     });
   });
 
   it("a-AC-3 serves the dashboard shell immediately when the portal gate passes (healthy + authenticated)", async () => {
-    const daemon = createThehive({
+    const daemon = createHive({
       fleetStatusFetch: healthyFleetStatusFetch,
       setupAuthFetch: authenticatedSetupAuthFetch
     });
 
-    const response = await daemon.app.request("http://thehive.local/");
+    const response = await daemon.app.request("http://hive.local/");
     expect(response.status).toBe(200);
 
     const html = await response.text();
@@ -75,25 +75,25 @@ describe("thehive daemon server", () => {
   });
 
   it("PRD-003a redirects `/` to /buzzing when the fleet is unhealthy (the gate, not the old unconditional shell)", async () => {
-    const daemon = createThehive({
+    const daemon = createHive({
       fleetStatusFetch: async () => new Response(JSON.stringify({ supervisor: "unreachable" }), { status: 502 }),
       setupAuthFetch: authenticatedSetupAuthFetch
     });
 
-    const response = await daemon.app.request("http://thehive.local/", { redirect: "manual" });
+    const response = await daemon.app.request("http://hive.local/", { redirect: "manual" });
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe("/buzzing");
   });
 
-  it("c-AC-1 proxies /api/* to the owning daemon resolved from the hivedoctor registry", async () => {
+  it("c-AC-1 proxies /api/* to the owning daemon resolved from the doctor registry", async () => {
     await withTempLockPaths(async (paths) => {
-      const registryPath = join(paths.lockFilePath, "..", "hivedoctor.daemons.json");
+      const registryPath = join(paths.lockFilePath, "..", "doctor.daemons.json");
       writeFileSync(
         registryPath,
         JSON.stringify({
           daemons: [
             { name: "honeycomb", healthUrl: "http://127.0.0.1:4850/health", pidPath: "/tmp/honeycomb.pid" },
-            { name: "hivenectar", healthUrl: "http://127.0.0.1:4854/health", pidPath: "/tmp/hivenectar.pid" }
+            { name: "nectar", healthUrl: "http://127.0.0.1:4854/health", pidPath: "/tmp/nectar.pid" }
           ]
         }),
         "utf8"
@@ -103,24 +103,24 @@ describe("thehive daemon server", () => {
         seen.push(url);
         return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
       };
-      const daemon = createThehive({ registryPath, proxyFetch });
+      const daemon = createHive({ registryPath, proxyFetch });
 
-      const honeycombResponse = await daemon.app.request("http://thehive.local/api/memories?limit=10");
+      const honeycombResponse = await daemon.app.request("http://hive.local/api/memories?limit=10");
       expect(honeycombResponse.status).toBe(200);
 
-      const hivenectarResponse = await daemon.app.request("http://thehive.local/api/source-graph/nodes?project=abc");
-      expect(hivenectarResponse.status).toBe(200);
+      const nectarResponse = await daemon.app.request("http://hive.local/api/hive-graph/nodes?project=abc");
+      expect(nectarResponse.status).toBe(200);
 
       expect(seen).toEqual([
         "http://127.0.0.1:4850/api/memories?limit=10",
-        "http://127.0.0.1:4854/api/source-graph/nodes?project=abc"
+        "http://127.0.0.1:4854/api/hive-graph/nodes?project=abc"
       ]);
     });
   });
 
   it("c-AC-6 serves /api/fleet-status itself rather than proxying it", async () => {
     const proxyFetch = vi.fn(async () => new Response("{}", { status: 200 })) as unknown as ProxyFetch;
-    const daemon = createThehive({
+    const daemon = createHive({
       proxyFetch,
       // A throwing fleet fetch degrades to the fail-soft unreachable body (still HTTP 200) without a socket.
       fleetStatusFetch: async () => {
@@ -128,14 +128,14 @@ describe("thehive daemon server", () => {
       }
     });
 
-    const response = await daemon.app.request("http://thehive.local/api/fleet-status");
+    const response = await daemon.app.request("http://hive.local/api/fleet-status");
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ supervisor: "unreachable" });
     expect(proxyFetch).not.toHaveBeenCalled();
   });
 
-  it("a-AC-7 keeps construction pure and binds only on startThehive", async () => {
-    const daemon = createThehive();
+  it("a-AC-7 keeps construction pure and binds only on startHive", async () => {
+    const daemon = createHive();
     expect(daemon.port).toBe(3853);
 
     const serveFn = vi
@@ -144,69 +144,69 @@ describe("thehive daemon server", () => {
           callback?.();
         }
       }))
-      .mockName("serveFn") as unknown as StartThehiveOptions["serveFn"];
+      .mockName("serveFn") as unknown as StartHiveOptions["serveFn"];
 
     await withTempLockPaths(async (lockPaths) => {
-      const started = startThehive({ serveFn, lockPaths });
+      const started = startHive({ serveFn, lockPaths });
       expect(serveFn).toHaveBeenCalledTimes(1);
       await started.stop();
     });
   });
 
   it("PRD-005b: /health serves the SPA shell for an HTML-accepting request (the operator page), not the liveness JSON", async () => {
-    const daemon = createThehive({
+    const daemon = createHive({
       fleetStatusFetch: healthyFleetStatusFetch,
       setupAuthFetch: authenticatedSetupAuthFetch
     });
-    const response = await daemon.app.request("http://thehive.local/health", { headers: { accept: "text/html" } });
+    const response = await daemon.app.request("http://hive.local/health", { headers: { accept: "text/html" } });
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).toContain("id=\"root\"");
   });
 
   it("PRD-005b: /health with an unhealthy fleet still redirects to /buzzing when HTML is requested (a normal gated page)", async () => {
-    const daemon = createThehive({
+    const daemon = createHive({
       fleetStatusFetch: async () => new Response(JSON.stringify({ supervisor: "unreachable" }), { status: 502 }),
       setupAuthFetch: authenticatedSetupAuthFetch
     });
-    const response = await daemon.app.request("http://thehive.local/health", { headers: { accept: "text/html" }, redirect: "manual" });
+    const response = await daemon.app.request("http://hive.local/health", { headers: { accept: "text/html" }, redirect: "manual" });
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe("/buzzing");
   });
 
   it("a non-HTML /health request (a liveness probe) still gets the cheap JSON body, gate-exempt, even when unhealthy", async () => {
-    const daemon = createThehive({
+    const daemon = createHive({
       fleetStatusFetch: async () => new Response(JSON.stringify({ supervisor: "unreachable" }), { status: 502 }),
       setupAuthFetch: authenticatedSetupAuthFetch
     });
-    const response = await daemon.app.request("http://thehive.local/health");
+    const response = await daemon.app.request("http://hive.local/health");
     expect(response.status).toBe(200);
     const payload = await response.json();
     expect(payload.status).toBe("ok");
   });
 
-  it("PRD-004a/PRD-005a: /api/registered-services returns the full registered-name list from the hivedoctor registry", async () => {
+  it("PRD-004a/PRD-005a: /api/registered-services returns the full registered-name list from the doctor registry", async () => {
     await withTempLockPaths(async (paths) => {
-      const registryPath = join(paths.lockFilePath, "..", "hivedoctor.daemons.json");
+      const registryPath = join(paths.lockFilePath, "..", "doctor.daemons.json");
       writeFileSync(
         registryPath,
         JSON.stringify({
           daemons: [
             { name: "honeycomb", healthUrl: "http://127.0.0.1:4850/health", pidPath: "/tmp/honeycomb.pid" },
-            { name: "hivenectar", healthUrl: "http://127.0.0.1:4854/health", pidPath: "/tmp/hivenectar.pid" },
-            { name: "thehive", healthUrl: "http://127.0.0.1:4853/health", pidPath: "/tmp/thehive.pid" }
+            { name: "nectar", healthUrl: "http://127.0.0.1:4854/health", pidPath: "/tmp/nectar.pid" },
+            { name: "hive", healthUrl: "http://127.0.0.1:4853/health", pidPath: "/tmp/hive.pid" }
           ]
         }),
         "utf8"
       );
-      const daemon = createThehive({ registryPath });
-      const response = await daemon.app.request("http://thehive.local/api/registered-services");
+      const daemon = createHive({ registryPath });
+      const response = await daemon.app.request("http://hive.local/api/registered-services");
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ names: ["honeycomb", "hivenectar", "thehive"] });
+      await expect(response.json()).resolves.toEqual({ names: ["honeycomb", "nectar", "hive"] });
     });
   });
 
-  it("PRD-004/PRD-005: /api/telemetry/stream relays hivedoctor's real SSE URL and never hits the generic daemon proxy", async () => {
+  it("PRD-004/PRD-005: /api/telemetry/stream relays doctor's real SSE URL and never hits the generic daemon proxy", async () => {
     const telemetrySeen: string[] = [];
     const telemetryStreamFetch: TelemetryFetch = async (url) => {
       telemetrySeen.push(url);
@@ -214,13 +214,13 @@ describe("thehive daemon server", () => {
     };
     const proxyFetch = vi.fn(async () => new Response("{}", { status: 200 })) as unknown as ProxyFetch;
 
-    const daemon = createThehive({ telemetryStreamFetch, proxyFetch });
-    const response = await daemon.app.request("http://thehive.local/api/telemetry/stream");
+    const daemon = createHive({ telemetryStreamFetch, proxyFetch });
+    const response = await daemon.app.request("http://hive.local/api/telemetry/stream");
 
     expect(response.status).toBe(200);
-    expect(telemetrySeen).toEqual([HIVEDOCTOR_EVENTS_URL]);
+    expect(telemetrySeen).toEqual([DOCTOR_EVENTS_URL]);
     // The browser's ONLY path is `/api/telemetry/stream`; asserting the generic proxy (which would
-    // forward to a workload daemon, not hivedoctor) never sees this request is the same-origin proof.
+    // forward to a workload daemon, not doctor) never sees this request is the same-origin proof.
     expect(proxyFetch).not.toHaveBeenCalled();
   });
 
@@ -230,9 +230,9 @@ describe("thehive daemon server", () => {
         .fn(() => {
           throw new Error("bind failed");
         })
-        .mockName("failingServeFn") as unknown as StartThehiveOptions["serveFn"];
+        .mockName("failingServeFn") as unknown as StartHiveOptions["serveFn"];
 
-      expect(() => startThehive({ serveFn, lockPaths })).toThrow("bind failed");
+      expect(() => startHive({ serveFn, lockPaths })).toThrow("bind failed");
       expect(existsSync(lockPaths.lockFilePath)).toBe(false);
       expect(existsSync(lockPaths.pidFilePath)).toBe(false);
     });

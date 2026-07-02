@@ -1,5 +1,5 @@
 /**
- * The bee-related status SVG set + the single shared state→icon mapping — the-hive PRD-004b.
+ * The bee-related status SVG set + the single shared state→icon mapping — hive PRD-004b.
  *
  * Five distinct bee-motif icons, one per locked {@link ServiceState} (`error`, `degraded`,
  * `starting`, `warming`, `active`), plus a fail-safe fallback for any unexpected value (svg-AC-5).

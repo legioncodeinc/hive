@@ -1,6 +1,6 @@
 import { WINDOWS_TASK_NAME, type ServicePlan } from "./platform.js";
 
-export const THEHIVE_START_COMMAND = "start" as const;
+export const HIVE_START_COMMAND = "start" as const;
 export const RESTART_SEC = 5 as const;
 export const WINDOWS_RESTART_INTERVAL = "PT1M" as const;
 
@@ -32,7 +32,7 @@ export function renderLaunchdPlist(plan: ServicePlan): string {
 	<array>
 		<string>${node}</string>
 		<string>${exec}</string>
-		<string>${THEHIVE_START_COMMAND}</string>
+		<string>${HIVE_START_COMMAND}</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
@@ -43,18 +43,18 @@ export function renderLaunchdPlist(plan: ServicePlan): string {
 	<key>ProcessType</key>
 	<string>Background</string>
 	<key>StandardOutPath</key>
-	<string>${home}/.honeycomb/thehive/launchd.out.log</string>
+	<string>${home}/.honeycomb/hive/launchd.out.log</string>
 	<key>StandardErrorPath</key>
-	<string>${home}/.honeycomb/thehive/launchd.err.log</string>
+	<string>${home}/.honeycomb/hive/launchd.err.log</string>
 </dict>
 </plist>
 `;
 }
 
 export function renderSystemdUnit(plan: ServicePlan): string {
-  const execStart = `${quoteSystemdToken(process.execPath)} ${quoteSystemdToken(plan.execPath)} ${THEHIVE_START_COMMAND}`;
+  const execStart = `${quoteSystemdToken(process.execPath)} ${quoteSystemdToken(plan.execPath)} ${HIVE_START_COMMAND}`;
   return `[Unit]
-Description=thehive portal daemon
+Description=hive portal daemon
 After=network.target
 
 [Service]
@@ -75,7 +75,7 @@ export function renderScheduledTaskXml(plan: ServicePlan): string {
   return `<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>thehive portal daemon</Description>
+    <Description>hive portal daemon</Description>
     <URI>\\${escapeXml(WINDOWS_TASK_NAME)}</URI>
   </RegistrationInfo>
   <Triggers>
@@ -107,7 +107,7 @@ export function renderScheduledTaskXml(plan: ServicePlan): string {
   <Actions Context="Author">
     <Exec>
       <Command>${node}</Command>
-      <Arguments>"${exec}" ${THEHIVE_START_COMMAND}</Arguments>
+      <Arguments>"${exec}" ${HIVE_START_COMMAND}</Arguments>
     </Exec>
   </Actions>
 </Task>
