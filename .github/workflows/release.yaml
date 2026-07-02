@@ -126,8 +126,19 @@ jobs:
       - name: Test
         run: npm run test
 
+      # Build-time telemetry config. esbuild bakes the PostHog destination in
+      # via `define` (__HONEYCOMB_POSTHOG_KEY__ / __HONEYCOMB_POSTHOG_HOST__);
+      # an UNSET key compiles to "" which the telemetry chokepoint treats as
+      # DISABLED (fail-soft), so a tokenless/fork run emits nothing. The key is
+      # a PUBLIC write-only ingest key, embedded in the published tarball by
+      # design; the secret only keeps it out of logs/fork PRs. The SAME env
+      # block also rides both publish steps below because `prepack`
+      # (= npm run build) rebuilds inside `npm publish`.
       - name: Build (tsc + esbuild bundles)
         run: npm run build
+        env:
+          HONEYCOMB_POSTHOG_KEY: ${{ secrets.HONEYCOMB_POSTHOG_KEY }}
+          HONEYCOMB_POSTHOG_HOST: ${{ vars.HONEYCOMB_POSTHOG_HOST }}
 
       # ── Tag-vs-package.json version guard. ───────────────────────────────
       - name: Guard - pushed tag matches package.json version
@@ -209,9 +220,14 @@ jobs:
       # ── Publish. `prepack` (= npm run build) runs again inside `npm
       # publish`, so the tarball is always built from the just-checked-out
       # tree. Auth is TOKENLESS via OIDC (npm >= 11.5.1, ensured above).
+      # The telemetry env vars ride here too: the prepack rebuild is what
+      # actually produces the packed tarball, so it must be keyed as well.
       - name: Publish (real)
         if: ${{ steps.mode.outputs.publish == 'true' && steps.npm_version.outputs.exists != 'true' }}
         run: npm publish --provenance --access public
+        env:
+          HONEYCOMB_POSTHOG_KEY: ${{ secrets.HONEYCOMB_POSTHOG_KEY }}
+          HONEYCOMB_POSTHOG_HOST: ${{ vars.HONEYCOMB_POSTHOG_HOST }}
 
       # Rehearse: same command minus the real upload. Runs whenever we are
       # NOT in real-publish mode so the pipeline is exercised end-to-end and
@@ -219,6 +235,9 @@ jobs:
       - name: Publish (dry-run rehearsal)
         if: ${{ steps.mode.outputs.publish != 'true' }}
         run: npm publish --provenance --access public --dry-run
+        env:
+          HONEYCOMB_POSTHOG_KEY: ${{ secrets.HONEYCOMB_POSTHOG_KEY }}
+          HONEYCOMB_POSTHOG_HOST: ${{ vars.HONEYCOMB_POSTHOG_HOST }}
 
       # ── GitHub Release. Only on a real tag push AND only after a real
       # publish (or the idempotent rerun path). ────────────────────────────
