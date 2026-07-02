@@ -13,15 +13,22 @@ describe("thehive service module", () => {
     });
 
     const result = await service.install();
-    const unitPath = "/home/t/.config/systemd/user/thehive.service";
+    const unitPath = "/home/t/.config/systemd/user/hive.service";
 
     expect(result.ok).toBe(true);
     expect(fs.files.has(unitPath)).toBe(true);
     expect(fs.files.get(unitPath)).toContain("Restart=always");
     expect(fs.files.get(unitPath)).toContain(`"/opt/thehive/dist/cli.js" start`);
+    // Decision #32 migration: the legacy `thehive` unit is deregistered (and its
+    // file removed) first, then the new unit is enabled.
     expect(runner.calls[0]).toEqual({
       command: "systemctl",
-      args: ["--user", "enable", "--now", "thehive.service"]
+      args: ["--user", "disable", "--now", "thehive.service"]
+    });
+    expect(fs.removed).toContain("/home/t/.config/systemd/user/thehive.service");
+    expect(runner.calls[1]).toEqual({
+      command: "systemctl",
+      args: ["--user", "enable", "--now", "hive.service"]
     });
   });
 
@@ -40,19 +47,24 @@ describe("thehive service module", () => {
 
     expect(result.ok).toBe(true);
     expect(fs.files.get(stagedPath)).toContain("<Task ");
+    // Decision #32 migration: the legacy `thehive` task is deleted first, then /Create runs.
     expect(runner.calls[0]).toEqual({
       command: "schtasks",
-      args: ["/Create", "/XML", stagedPath, "/TN", "thehive", "/F"]
+      args: ["/Delete", "/TN", "thehive", "/F"]
+    });
+    expect(runner.calls[1]).toEqual({
+      command: "schtasks",
+      args: ["/Create", "/XML", stagedPath, "/TN", "hive", "/F"]
     });
   });
 
-  it("d-AC-4 uninstall removes thehive unit only and never touches hivedoctor paths", async () => {
+  it("d-AC-4 uninstall removes the hive unit only and never touches hivedoctor paths", async () => {
     const runner = createRecordingRunner();
     const fs = createMemoryFs();
-    const thehiveUnit = "/home/t/.config/systemd/user/thehive.service";
-    const hivedoctorUnit = "/home/t/.config/systemd/user/hivedoctor.service";
-    fs.files.set(thehiveUnit, "thehive unit");
-    fs.files.set(hivedoctorUnit, "hivedoctor unit");
+    const hiveUnit = "/home/t/.config/systemd/user/hive.service";
+    const hivedoctorUnit = "/home/t/.config/systemd/user/doctor.service";
+    fs.files.set(hiveUnit, "hive unit");
+    fs.files.set(hivedoctorUnit, "doctor unit");
 
     const service = createServiceModule({
       execPath: "/opt/thehive/dist/cli.js",
@@ -64,12 +76,12 @@ describe("thehive service module", () => {
     const result = await service.uninstall();
 
     expect(result.ok).toBe(true);
-    expect(fs.removed).toContain(thehiveUnit);
+    expect(fs.removed).toContain(hiveUnit);
     expect(fs.removed).not.toContain(hivedoctorUnit);
     expect(runner.calls[0]).toEqual({
       command: "systemctl",
-      args: ["--user", "disable", "--now", "thehive.service"]
+      args: ["--user", "disable", "--now", "hive.service"]
     });
-    expect(runner.calls.some((call) => call.args.some((arg) => arg.includes("hivedoctor")))).toBe(false);
+    expect(runner.calls.some((call) => call.args.some((arg) => arg.includes("doctor")))).toBe(false);
   });
 });

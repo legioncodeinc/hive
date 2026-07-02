@@ -6,7 +6,7 @@ describe("thehive service platform resolution", () => {
     const plan = resolveServicePlan(fixedEnv({ platform: "darwin", home: "/Users/t" }));
     expect(plan.manager).toBe("launchd");
     expect(plan.unitPath).toBe(`/Users/t/Library/LaunchAgents/${SERVICE_LABEL}.plist`);
-    expect(plan.label).toBe("thehive");
+    expect(plan.label).toBe("com.legioncode.hive");
   });
 
   it("d-AC-1 maps Linux to systemd user units", () => {
@@ -19,7 +19,7 @@ describe("thehive service platform resolution", () => {
     const plan = resolveServicePlan(fixedEnv({ platform: "win32", home: "C:\\Users\\t" }));
     expect(plan.manager).toBe("schtasks");
     expect(plan.unitPath).toBe("");
-    expect(WINDOWS_TASK_NAME).toBe("thehive");
+    expect(WINDOWS_TASK_NAME).toBe("hive");
   });
 
   it("rejects unsupported platforms with a clean error", () => {

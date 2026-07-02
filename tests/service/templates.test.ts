@@ -15,7 +15,7 @@ describe("thehive service templates", () => {
     const plan = resolveServicePlan(fixedEnv({ platform: "darwin", home: "/Users/t", execPath: "/opt/thehive/dist/cli.js" }));
     const xml = renderLaunchdPlist(plan);
 
-    expect(xml).toContain("<string>thehive</string>");
+    expect(xml).toContain("<string>com.legioncode.hive</string>");
     expect(xml).toContain("<key>RunAtLoad</key>");
     expect(xml).toContain("<key>KeepAlive</key>");
     expect(xml).toContain(`<integer>${RESTART_SEC}</integer>`);
@@ -36,7 +36,7 @@ describe("thehive service templates", () => {
     const plan = resolveServicePlan(fixedEnv({ platform: "win32", execPath: "C:\\thehive\\dist\\cli.js" }));
     const xml = renderScheduledTaskXml(plan);
 
-    expect(xml).toContain("<URI>\\thehive</URI>");
+    expect(xml).toContain("<URI>\\hive</URI>");
     expect(xml).toContain("<LogonTrigger>");
     expect(xml).toContain("<RestartOnFailure>");
     expect(xml).toContain(`<Interval>${WINDOWS_RESTART_INTERVAL}</Interval>`);

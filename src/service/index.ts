@@ -2,8 +2,9 @@ import { execFile } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-import { installCommands, uninstallCommands, type ServiceCommand } from "./commands.js";
+import { installCommands, legacyUninstallCommands, uninstallCommands, type ServiceCommand } from "./commands.js";
 import {
+  legacyUnitPath,
   resolveServiceContext,
   resolveServicePlan,
   type ServiceEnvironment,
@@ -154,6 +155,17 @@ export function createServiceModule(deps: ServiceModuleDeps): ServiceModule {
           ok: false,
           message: `Could not register thehive service: ${error instanceof Error ? error.message : "unknown error"}.`
         };
+      }
+
+      // Decision #32 migration: best-effort deregister the legacy `thehive` unit and
+      // remove its unit file, so a re-run never leaves two units racing over one daemon.
+      // Expected to fail harmlessly when no legacy unit exists; never blocks the install.
+      await runAll(runner, legacyUninstallCommands(resolvedPlan, uid));
+      try {
+        const legacyPath = legacyUnitPath(resolvedPlan);
+        if (legacyPath !== "") fs.removeFile(legacyPath);
+      } catch {
+        // Best-effort migration cleanup only; a remove failure never blocks the install.
       }
 
       const needsUnitFile = resolvedPlan.unitPath !== "" || resolvedPlan.manager === "schtasks";
