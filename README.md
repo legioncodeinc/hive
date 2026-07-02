@@ -2,24 +2,33 @@
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/legioncodeinc/honeycomb/main/assets/logos/honeycomb-mark.svg">
-    <img src="https://raw.githubusercontent.com/legioncodeinc/honeycomb/main/assets/logos/honeycomb-mark.svg" alt="The Hive" height="72">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/hive-wordmark-on-dark.svg">
+    <img src="assets/brand/hive-wordmark-black.svg" alt="The Hive" height="84">
   </picture>
 </p>
 
 <h1 align="center">The Hive</h1>
 
 <p align="center">
-  <strong>The always-on portal for the Apiary.</strong><br>
-  One dashboard, up the moment your device boots, that shows every daemon in the hive even when a daemon is not.
+  <strong>The front door to your agents' shared brain.</strong><br>
+  One URL, always on, and every daemon in the Apiary is standing behind it.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/status-early%20development-F7A823?style=flat-square" alt="Early development">
-  <img src="https://img.shields.io/badge/node-%E2%89%A522-339933?style=flat-square&logo=node.js&logoColor=white" alt="Node ≥ 22">
-  <img src="https://img.shields.io/badge/port-3853-2088FF?style=flat-square" alt="Port 3853">
+  <a href="https://www.npmjs.com/package/@legioncodeinc/hive"><img src="https://img.shields.io/npm/v/@legioncodeinc/hive?style=flat-square&color=E8722A&label=version" alt="npm version"></a>
+  <img src="https://img.shields.io/badge/harnesses-6-E8722A?style=flat-square" alt="6 harnesses">
+  <img src="https://img.shields.io/badge/OS-windows%20%7C%20macos%20%7C%20linux-6E6A62?style=flat-square" alt="Windows, macOS, Linux">
+</p>
+
+<p align="center">
+  <a href="https://linktr.ee/marioaldayuz"><img src="https://img.shields.io/badge/designed%20by-Mario%20Aldayuz-8B7CF0?style=flat-square" alt="Designed by Mario Aldayuz"></a>
+  <a href="https://www.legioncodeinc.com"><img src="https://img.shields.io/badge/built%20by-Legion%20Code%20Inc.-111111?style=flat-square" alt="Built by Legion Code Inc."></a>
   <a href="https://deeplake.ai"><img src="https://img.shields.io/badge/powered%20by-Deep%20Lake-ff5a1f?style=flat-square" alt="Powered by Deep Lake"></a>
-  <a href="#license"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square" alt="AGPL-3.0"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/legioncodeinc/hive"><img src="https://img.shields.io/github/stars/legioncodeinc/hive?style=flat-square&color=E8722A" alt="GitHub stars"></a>
+  <a href="https://discord.gg/GX95YTQypQ"><img src="https://img.shields.io/badge/discord-find%20us-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord"></a>
 </p>
 
 <!-- ──────────────────────────────  PARTNERS  ────────────────────────────── -->
@@ -27,111 +36,227 @@
 <p align="center">
   <a href="https://github.com/legioncodeinc">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/legioncodeinc/honeycomb/main/assets/logos/legion-logo-dark.svg">
-      <img src="https://raw.githubusercontent.com/legioncodeinc/honeycomb/main/assets/logos/legion-logo-light.svg" alt="Legion Code" height="34">
+      <source media="(prefers-color-scheme: dark)" srcset="assets/brand/legion-logo-dark.svg">
+      <img src="assets/brand/legion-logo-light.svg" alt="Legion Code" height="34">
     </picture>
   </a>
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://activeloop.ai"><img src="https://raw.githubusercontent.com/legioncodeinc/honeycomb/main/assets/logos/activeloop-full-mark-logo.svg" alt="Activeloop" height="26"></a>
+  <a href="https://github.com/activeloopai">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="assets/brand/activeloop-full-mark-logo-on-dark.svg">
+      <img src="assets/brand/activeloop-full-mark-logo.svg" alt="Activeloop" height="26">
+    </picture>
+  </a>
 </p>
 
-<p align="center"><sub>Part of <a href="https://github.com/legioncodeinc/the-apiary"><strong>The Apiary</strong></a> · a <a href="https://github.com/legioncodeinc"><strong>Legion Code</strong></a> &times; <a href="https://activeloop.ai"><strong>Activeloop</strong></a> collaboration · powered by <a href="https://deeplake.ai">Deep Lake</a></sub></p>
+<p align="center"><em>A <a href="https://github.com/legioncodeinc">Legion Code Inc.</a> × <a href="https://github.com/activeloopai">Activeloop</a> collaboration.</em></p>
 
----
+<img src="assets/brand/divider-major.svg" width="100%" height="6">
 
-**The Hive** (`thehive`) is the always-on **portal daemon** of the [Apiary](https://github.com/legioncodeinc/the-apiary). It boots with your device, sits under [HiveDoctor](https://github.com/legioncodeinc/hivedoctor)'s supervision alongside the workload daemons, and serves one unified dashboard for the whole hive. It does the presenting; the workload daemons ([Honeycomb](https://github.com/legioncodeinc/honeycomb), [Hivenectar](https://github.com/legioncodeinc/hivenectar)) do the work.
+The Apiary runs four daemons on your machine: Honeycomb doing the memory work, Hivenectar mapping your sources, Doctor watching all of them, and each one holding its own port. Great architecture. Miserable to look at. Which port was the dashboard again? Is my memory daemon even up, or did it die overnight? Why is my browser juggling origins and tokens for three separate loopback services just to render one status page?
 
-Its one load-bearing property is in the name: it is *always on*. The dashboard shell renders the moment The Hive's socket is bound, before any workload daemon is confirmed healthy. A daemon that has not answered yet shows as "starting," never as a broken page. That is the whole reason The Hive is its own process instead of a route inside another daemon.
+**The Hive is the answer to all of it.** One always-on portal daemon at `127.0.0.1:3853`. It boots with your device, renders the moment its socket binds, and serves the entire Apiary dashboard from a single origin. When a workload daemon has not answered yet, its panel says "starting," never a broken page. That failure mode is the whole reason The Hive exists: the old dashboard lived inside Honeycomb, so exactly when you needed a status surface most was exactly when it went dark.
 
-> **Status: early development.** This repository is greenfield. The design is settled (see [Design references](#design-references)) and implementation is about to begin. This README describes what The Hive is and the contracts it is being built to. Expect the build, CLI, and dashboard sections to fill in as the PRDs land.
+<img src="assets/brand/divider-minor.svg" width="100%" height="3">
 
----
+> **New here?** One command and you're on a dashboard. [Jump to Install](#-install-one-command). · **Want the docs?** Everything lives at **[theapiary.sh](https://theapiary.sh)**.
 
-## Why it exists
+<img src="assets/brand/divider-minor.svg" width="100%" height="3">
 
-Before The Hive, the dashboard lived inside the Honeycomb daemon's HTTP server. That meant the dashboard was only up when Honeycomb was up: exactly when you most need a status surface (a workload daemon is wedged, mid-outage, or still booting) is exactly when it went dark.
+<table>
+<tr>
+<td width="50%" valign="top">
 
-The Hive lifts the dashboard into its own always-on process so it survives any single workload daemon's outage. It also splits the fast-moving dashboard surface away from the stability-sensitive supervisor: HiveDoctor stays minimal and rarely updated, while The Hive absorbs the UI that changes often. A dashboard change ships as a Hive release, never a supervisor release.
+#### 🛹 For AI Augmented Devs
+One URL for the whole stack. You bookmark `127.0.0.1:3853` and you're done: memories, graph, sync, source graph, fleet health, all of it behind one front door. Zero port hunting, zero "which daemon serves that page," zero mental map of the loopback range required.
 
-## Where it sits
+</td>
+<td width="50%" valign="top">
 
-The Hive is one of four roles in the Apiary's four-process topology. Two workload daemons do the memory work, The Hive presents it, and HiveDoctor supervises the set.
+#### 🏢 For Enterprise Teams
+One origin, one boundary. The browser never sees a workload daemon's port or holds a credential for it; The Hive's server proxies every request over loopback and passes auth headers straight through without storing a thing. Nothing sensitive lives in the browser, and no daemon owes the world a CORS allowance.
+
+</td>
+</tr>
+</table>
+
+<img src="assets/brand/divider-minor.svg" width="100%" height="3">
+
+## ✨ What makes The Hive different
+
+Plenty of tools bolt a status page onto a daemon. The Hive is built the other way around: the portal is the product, and four deliberate decisions make it hold up.
+
+- **A single portal.** Every dashboard route in the Apiary lives here. Honeycomb's in-daemon dashboard is retired; The Hive is the one source of always-on UI truth.
+- **Server-side BFF proxy.** Per [ADR-0002](library/knowledge/private/architecture/ADR-0002-server-side-bff-proxy-for-dashboard-federation.md), the browser talks to The Hive's origin only. The server resolves which daemon owns each `/api/*` and `/setup/*` request, fetches it over loopback, and streams it back. No CORS on any workload daemon, no daemon ports handed to a browser, loopback trust enforced on the server with redirect pinning.
+- **Copy-and-own dashboard.** Per [ADR-0001](library/knowledge/private/architecture/ADR-0001-retire-honeycomb-dashboard-and-copy-and-own-into-thehive.md), the dashboard code was copied out of Honeycomb once and is owned here outright. No live shared module to drift, no fork to babysit, no second copy left to diverge from.
+- **Always on.** The Hive is its own supervised OS process, boot-ordered, not gated on any workload daemon's health. It ships on its own release train, so a dashboard change never forces a supervisor or workload release.
+
+<img src="assets/brand/divider-minor.svg" width="100%" height="3">
+
+## 🐝 Features
+
+- 🖥️ **The unified Apiary dashboard**, served from one process the moment the socket binds.
+- 🔀 **Server-side BFF proxy** routing `/api/*` and `/setup/*` to the owning daemon: Honeycomb (`:3850`), Hivenectar (`:3854`), each resolved from Doctor's registry.
+- 🌐 **Single browser origin.** Same-origin fetches only; your browser never learns another daemon's port.
+- 🔒 **Credential-free by design.** Transparent auth pass-through; The Hive stores no token and holds no Deep Lake client.
+- 🩹 **Fail-soft aggregation.** One daemon down means one panel shows unreachable while the rest of the dashboard keeps working.
+- 🚦 **Fleet readiness via Doctor.** `/api/fleet-status` reads the supervisor's status page server-side, so the portal shows honest per-fleet health instead of guessing from failed fetches.
+- ♻️ **Always-on daemon on `:3853`** with `/health`, a PID/lock single-instance guard, and OS service units (launchd, systemd, schtasks) that restart it on crash and start it on boot.
+- 🩺 **Supervised by Doctor** through an idempotent registry entry, installed at setup time.
+
+<img src="assets/brand/divider-minor.svg" width="100%" height="3">
+
+## 🚀 Install (one command)
+
+The Hive doesn't install alone; it comes up as part of the Apiary stack. One line, and the installer handles Node, npm, the daemons, and the watchdog.
+
+```bash
+# macOS / Linux
+curl -fsSL https://get.theapiary.sh | sh
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://get.theapiary.sh/install.ps1 | iex
+```
+
+That single line installs the whole Apiary: Honeycomb, Hivenectar, Doctor, and The Hive, which comes up at **`127.0.0.1:3853`** and becomes the one address you ever need to remember. The terminal is just a progress log; the portal is the product.
+
+<details>
+<summary><strong>Prefer to build from source?</strong></summary>
+
+```bash
+git clone https://github.com/legioncodeinc/hive.git
+cd hive
+npm install
+npm run build        # tsc + esbuild → dist/cli.js
+
+npm start            # runs `node dist/cli.js start`, binds :3853
+npm run typecheck    # tsc --noEmit
+npm test             # vitest run
+```
+
+The portal aggregates its data from the other Apiary daemons over loopback, so a source build of The Hive alone gets you the shell and fleet status; the full dashboard lights up when Honeycomb and friends are running.
+
+</details>
+
+<img src="assets/brand/divider-minor.svg" width="100%" height="3">
+
+## 🖥️ Using the dashboard
+
+<!-- screenshot pending: drop hive dashboard capture into assets/screenshots/dashboard.png -->
+<img src="assets/screenshots/dashboard.png" alt="The Hive dashboard" width="100%">
+
+Open `http://127.0.0.1:3853` and the shell renders immediately, even on a cold boot. While the fleet is still waking up you get a readiness splash with per-daemon health rows instead of a false "first time setup" screen. Once the fleet is ready, the full portal takes over: the memory pages, the graph, sync, and ROI views migrated from Honeycomb, plus fleet status pulled from Doctor. Every page hydrates through the same-origin wire, proxied server-side to whichever daemon owns the data.
+
+<img src="assets/brand/divider-minor.svg" width="100%" height="3">
+
+## ⌨️ Using the CLI
+
+The `thehive` binary keeps a deliberately small surface. It's a portal daemon, not a Swiss Army knife:
+
+```bash
+thehive start                # run the portal daemon on :3853 (the default verb)
+thehive install-service      # install the OS service unit (launchd / systemd / schtasks)
+thehive uninstall-service    # remove the service unit
+thehive register             # append The Hive to Doctor's daemon registry
+```
+
+That's the whole list, on purpose. Day to day you never touch it; the installer wires the service unit and registration, Doctor keeps the process alive, and you live in the browser.
+
+<img src="assets/brand/divider-minor.svg" width="100%" height="3">
+
+## ✨ Open one URL, see the whole hive
+
+```bash
+# One address. No port hunting, no tab juggling.
+open http://127.0.0.1:3853
+
+# Honeycomb up, Hivenectar up, Doctor watching, memories flowing.
+# You just checked four daemons without remembering a single port number.
+```
+
+Kill a workload daemon mid-session and the dashboard doesn't blink: that daemon's panels go "unreachable," everything else keeps rendering, and the page recovers on its own when Doctor brings the daemon back. That's the moment this thing earns its keep.
+
+<img src="assets/brand/divider-minor.svg" width="100%" height="3">
+
+## 🏗️ How it works
+
+The browser talks to exactly one origin. The Hive's server does the reaching around, over loopback, with the trust checks on its side of the line.
 
 ```mermaid
 flowchart TD
-    os["OS service manager"] --> doctor["HiveDoctor<br/>supervisor"]
-    doctor -->|supervises| hive["The Hive<br/>always-on portal (:3853)"]
-    doctor -->|supervises| comb["Honeycomb<br/>workload daemon (:3850)"]
-    doctor -->|supervises| nectar["Hivenectar<br/>workload daemon (:3854)"]
-    hive -->|fetches /api/*| comb
-    hive -->|fetches /api/*| nectar
-    comb --> deeplake["Deep Lake"]
-    nectar --> deeplake
+    browser["Browser"] -->|"same-origin /api/*, /setup/*"| hive["The Hive :3853<br/>portal + BFF proxy"]
+    hive -->|"loopback proxy"| comb["Honeycomb :3850<br/>memory workload"]
+    hive -->|"loopback proxy"| nectar["Hivenectar :3854<br/>source graph workload"]
+    hive -->|"fleet status"| doctor["Doctor :3852<br/>supervisor status page"]
 ```
 
-The Hive talks to the workload daemons over their HTTP APIs and never touches storage directly. Honeycomb and Hivenectar own their Deep Lake clients, tenancy scoping, and query surfaces; The Hive owns only the presentation and aggregation seam.
+The browser never talks to the back daemons directly. The Hive resolves each request's owner from Doctor's registry, guards every resolved base as loopback-only, pins redirects so a daemon can't bounce a proxied fetch off the machine, and forwards your session headers verbatim without keeping any credential of its own.
 
-## The four binding decisions
+<img src="assets/brand/divider-minor.svg" width="100%" height="3">
 
-The Hive's role is defined by four decisions from [ADR-0004](https://github.com/legioncodeinc/the-apiary/blob/main/hivenectar/library/knowledge/private/architecture/ADR-0004-thehive-portal-daemon-role-and-boundaries.md). They are what make The Hive a distinct architectural component rather than "another daemon that happens to serve HTTP."
+## 🧭 Why one front door matters
 
-1. **Always-on, boot-ordered.** The Hive is a supervised daemon in its own right, booted by the OS service manager on device start. It is not a child of any workload and is not gated on any workload's `/health`. The shell renders as soon as the socket binds; unanswered daemons render as "starting," not as errors.
-2. **API aggregation, not direct Deep Lake.** The Hive holds no Deep Lake client, resolves no tenancy scope, and runs no queries. It fetches from each registered daemon's `/api/*` and aggregates the responses. The aggregation is fail-soft per daemon: if one daemon is unreachable, its panels render empty while the rest of the dashboard keeps working.
-3. **Owns the unified dashboard.** Every dashboard route lives in The Hive, including the workload pages and the new Source Graph page. The Hive owns this surface outright: the dashboard code is copied into this repository and owned here (Honeycomb's in-daemon dashboard is retired), so there is no live shared module to drift and no fork to keep in sync.
-4. **Independent update cadence.** The Hive ships on its own release train. A dashboard change does not require a HiveDoctor, Honeycomb, or Hivenectar release, and HiveDoctor's rare updates do not force a Hive redeploy.
+Here's the thing about a stack of loopback daemons: individually they're clean, collectively they're a chore. Four processes means four ports, and four ports means the knowledge of your own tooling lives in your head instead of in the product. Every "wait, which one was 3854" is a small tax, and small taxes compound.
 
-## Runtime contract
+One front door collapses that. Your credentials cross exactly one boundary, enforced by a server you control, instead of being sprayed across browser tabs that each talk to a different origin. Your bookmark bar holds one entry. When something breaks at 2 a.m., you don't run a mental port scan; you open the one page and the sick daemon is the red row.
 
-These are the process facts every sibling daemon and installer is built against.
+And there's a quieter payoff: the stack starts feeling like one product. Honeycomb, Hivenectar, and Doctor stay sharply separated where it counts, in process boundaries and data ownership, while you experience them as a single coherent surface. Separation of concerns for the machine, one front door for the human. That's the trade The Hive makes, and it's the right one.
 
-| Concern | Value | Notes |
-|---|---|---|
-| Port | `3853` | The next free port after HiveDoctor's status page (3852). Honeycomb is 3850, embeddings 3851, Hivenectar 3854. |
-| Health | `GET http://127.0.0.1:3853/health` | Cheap liveness (`status` + `uptimeMs` + `version`), no heavy query, so HiveDoctor's probe gets a fast answer. |
-| PID / lock | `~/.honeycomb/thehive.pid` · `~/.honeycomb/thehive.lock` | Single-instance guard, sibling to the other daemons' files under `~/.honeycomb`. |
-| Supervision | HiveDoctor registry entry (`~/.honeycomb/hivedoctor.daemons.json`) | Installed at setup time as a one-step file edit; supervised at HiveDoctor's next boot. |
-| Service unit | launchd (macOS) · systemd (Linux) · schtasks (Windows) | Starts The Hive on boot/login, restarts on crash, installed and removed independently of HiveDoctor. |
+<img src="assets/brand/divider-minor.svg" width="100%" height="3">
 
-## How it relates to the rest of the Apiary
+## 🎛️ Other interfaces
 
-- **[Honeycomb](https://github.com/legioncodeinc/honeycomb)** is a workload daemon. The Hive renders its pages (memories, graph, sync, ROI, and more) by fetching Honeycomb's `/api/*`. Honeycomb no longer serves its own dashboard; that surface now lives here.
-- **[Hivenectar](https://github.com/legioncodeinc/hivenectar)** is a workload daemon. The Hive renders its Source Graph page by fetching Hivenectar's `/api/source-graph/*`.
-- **[HiveDoctor](https://github.com/legioncodeinc/hivedoctor)** supervises The Hive as one entry in its daemon registry: it probes The Hive's `/health`, restarts it on crash, and escalates when it cannot. The Hive supervises nothing; it is a supervised peer.
+Straight talk: The Hive ships two surfaces, and that's it for now.
 
-## Development
+- **Dashboard.** The web portal at `http://127.0.0.1:3853`. This is the product.
+- **HTTP portal API.** The Hive's own loopback endpoints: `GET /health` for cheap liveness (status, uptime, version) and `GET /api/fleet-status` for fleet health, plus the proxied `/api/*` and `/setup/*` surfaces of the daemons behind it.
 
-> Planned. The Hive is a TypeScript / Node (`>= 22`) daemon built on [Hono](https://hono.dev/), modeled on Honeycomb's daemon server shape. The dashboard is copied and owned from Honeycomb's `src/dashboard/web/` (route registry, page components, and the shell), with a Hive-owned `wire` client that routes each request to the owning daemon's API instead of an in-process handler.
+No MCP server, no SDK, and none pretending. The workload daemons own those surfaces; The Hive owns the door.
+
+<img src="assets/brand/divider-minor.svg" width="100%" height="3">
+
+<h2 align="center"><a href="https://ideas.theapiary.sh">📍 Status & Roadmap</a></h2>
+
+The Hive is **pre-release (v0.1.0)**. The portal daemon, the migrated dashboard, the server-side BFF proxy, and the service-unit plus registry work are in active development under PRD-001 and PRD-002, with the readiness splash, landing gate, and health rail lined up behind them. We document what's real and flag what's in flight; the roadmap and idea board live at [ideas.theapiary.sh](https://ideas.theapiary.sh).
+
+<img src="assets/brand/divider-minor.svg" width="100%" height="3">
+
+## 🛠️ Development
 
 ```bash
-# once the toolchain lands
 npm install
-npm run build      # tsc to dist/
-npm run typecheck
-npm test
-
-# run the portal
-npm start          # binds :3853, serves the dashboard
+npm run build        # tsc + esbuild → dist/cli.js
+npm run typecheck    # tsc --noEmit
+npm test             # vitest run
 ```
 
-Until then, the runnable surface is defined by the PRDs below; verbs that invoke not-yet-built mechanics will exit with a clear "owned by PRD-NNN" notice rather than a silent stub.
+Node `>= 22`, TypeScript, Hono on the server, React on the dashboard. The proxy surface (header hygiene, redirect pinning, streaming) carries its own test coverage; keep it that way.
 
-## Design references
+<img src="assets/brand/divider-major.svg" width="100%" height="6">
 
-The design is recorded in the Apiary corpus (currently under the `hivenectar` submodule's `library/`).
+## 🙏 Credits
 
-- **[ADR-0003, three-daemon topology and thehive portal](https://github.com/legioncodeinc/the-apiary/blob/main/hivenectar/library/knowledge/private/architecture/ADR-0003-three-daemon-topology-and-thehive-portal.md)** - why the portal is split out of HiveDoctor into its own always-on daemon.
-- **[ADR-0004, thehive portal daemon role and boundaries](https://github.com/legioncodeinc/the-apiary/blob/main/hivenectar/library/knowledge/private/architecture/ADR-0004-thehive-portal-daemon-role-and-boundaries.md)** - what The Hive is: the four binding decisions above.
-- **[PRD-001, three-daemon topology](https://github.com/legioncodeinc/the-apiary/blob/main/hivenectar/library/requirements/backlog/prd-001-three-daemon-topology/prd-001-three-daemon-topology-index.md)** - the four-role contract and the locked port and path map.
-- **[PRD-004c, thehive portal daemon](https://github.com/legioncodeinc/the-apiary/blob/main/hivenectar/library/requirements/backlog/prd-004-hivedoctor-registry-and-thehive/prd-004c-thehive-portal-daemon.md)** - bootstrap, dashboard serving, and the API-aggregation contract.
-- **[PRD-004d, thehive service unit and registration](https://github.com/legioncodeinc/the-apiary/blob/main/hivenectar/library/requirements/backlog/prd-004-hivedoctor-registry-and-thehive/prd-004d-thehive-service-unit-and-registration.md)** - the OS service unit and how installers register The Hive with HiveDoctor.
+- **[Activeloop](https://activeloop.ai/)** brings **[Deep Lake](https://deeplake.ai/)** (the versioned, multi-modal database for AI with native vector + columnar indexing and hybrid search) and **[Hivemind](https://github.com/activeloopai/hivemind)**, the open-source agent-memory project Honeycomb is built upon.
+- **[Legion Code Inc](https://github.com/legioncodeinc)** brings the **multi-tier memory system** (Tier 1 / 2 / 3 keys, summaries, raw), **code base atlas memory architecture**, **auto healing service**, **session priming**, **automatic skill development & propagation**, the **pollinating loop**, the **knowledge graph**, **cross device cross repository cross team skill sharing**, and the daemon architecture that turns Deep Lake into a shared brain your coding agents read and write on every turn.
+
+<img src="assets/brand/divider-minor.svg" width="100%" height="3">
 
 ## License
 
-The Hive is licensed under the **GNU Affero General Public License v3.0 or later** ([AGPL-3.0-or-later](LICENSE)). Use it commercially or privately, free of charge; keep the copyright and license notices intact, and if you run a modified version as a network service you owe its source to its users.
+The Hive is licensed under the **GNU Affero General Public License v3.0 or later** ([AGPL-3.0-or-later](LICENSE)).
 
----
+Use it commercially or privately, free of charge. In return: keep the copyright and license notices intact, and if you modify it, your changes ship under the same AGPL license with source available. The "Affero" part is the point: run a modified version as a network service and you owe its source to the users who interact with it. No locking a fork behind a SaaS wall.
+
+© 2026 Legion Code Inc.
+
+<img src="assets/brand/divider-minor.svg" width="100%" height="3">
 
 <p align="center">
-  <sub><strong>Built by <a href="https://github.com/legioncodeinc">Legion Code Inc</a></strong> · <strong>Powered by <a href="https://deeplake.ai">Activeloop Deep Lake</a></strong> · <strong>Built on <a href="https://github.com/activeloopai/hivemind">Hivemind</a></strong></sub><br>
-  <sub>Part of <a href="https://github.com/legioncodeinc/the-apiary">The Apiary</a> · <a href="https://theapiary.sh">theapiary.sh</a></sub>
+  <sub><strong>Built by <a href="https://github.com/legioncodeinc">Legion Code Inc</a></strong> · <strong>Powered by <a href="https://deeplake.ai/">Activeloop Deeplake</a></strong> · <a href="https://theapiary.sh/">theapiary.sh</a></sub>
 </p>
+
+<p align="center"><strong>I am Legion. We are Legion.</strong></p>
+
+<p align="center">#vibewithlegion</p>
