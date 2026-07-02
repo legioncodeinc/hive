@@ -45,7 +45,7 @@ function createFetchRecorder(respond?: () => { ok: boolean; status: number } | P
 }
 
 async function withTempDir(run: (dir: string) => Promise<void> | void): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "thehive-telemetry-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "hive-telemetry-test-"));
   try {
     await run(dir);
   } finally {
@@ -72,7 +72,7 @@ describe("telemetry chokepoint gates", () => {
     return withTempDir(async (dir) => {
       const recorder = createFetchRecorder();
       const deps = keyedDeps(dir, recorder, { posthogKey: "" });
-      const outcome = await emitTelemetry("thehive_installed", { dedupeKey: "thehive_installed" }, deps);
+      const outcome = await emitTelemetry("hive_installed", { dedupeKey: "hive_installed" }, deps);
       expect(outcome.sent).toBe(false);
       expect(outcome.skipped).toBe("disabled");
       expect(recorder.calls).toHaveLength(0);
@@ -84,7 +84,7 @@ describe("telemetry chokepoint gates", () => {
     return withTempDir(async (dir) => {
       const recorder = createFetchRecorder();
       const deps = keyedDeps(dir, recorder, { env: { HONEYCOMB_TELEMETRY: "0" } });
-      const outcome = await emitTelemetry("thehive_first_run", {}, deps);
+      const outcome = await emitTelemetry("hive_first_run", {}, deps);
       expect(outcome).toMatchObject({ sent: false, skipped: "opted_out" });
       expect(recorder.calls).toHaveLength(0);
       expect(existsSync(join(dir, "state"))).toBe(false);
@@ -105,7 +105,7 @@ describe("telemetry chokepoint gates", () => {
     return withTempDir(async (dir) => {
       const recorder = createFetchRecorder();
       const deps = keyedDeps(dir, recorder, { env: { DO_NOT_TRACK: "1" } });
-      const outcome = await emitTelemetry("thehive_updated", {}, deps);
+      const outcome = await emitTelemetry("hive_updated", {}, deps);
       expect(outcome).toMatchObject({ sent: false, skipped: "opted_out" });
       expect(recorder.calls).toHaveLength(0);
     });
@@ -117,7 +117,7 @@ describe("telemetry payload shape", () => {
     return withTempDir(async (dir) => {
       const recorder = createFetchRecorder();
       const deps = keyedDeps(dir, recorder);
-      const outcome = await emitTelemetry("thehive_installed", {}, deps);
+      const outcome = await emitTelemetry("hive_installed", {}, deps);
       expect(outcome.sent).toBe(true);
 
       expect(recorder.calls).toHaveLength(1);
@@ -128,17 +128,17 @@ describe("telemetry payload shape", () => {
       expect(call.init.signal).toBeInstanceOf(AbortSignal);
       expect(Object.keys(call.body).sort()).toEqual(["api_key", "distinct_id", "event", "properties"]);
       expect(call.body["api_key"]).toBe("phc_test_key");
-      expect(call.body["event"]).toBe("thehive_installed");
+      expect(call.body["event"]).toBe("hive_installed");
     });
   });
 
   it("properties carry exactly the closed allow-list {package, version, os, arch, node}", () => {
     return withTempDir(async (dir) => {
       const recorder = createFetchRecorder();
-      await emitTelemetry("thehive_first_run", {}, keyedDeps(dir, recorder));
+      await emitTelemetry("hive_first_run", {}, keyedDeps(dir, recorder));
       const properties = recorder.calls[0].body["properties"] as Record<string, string>;
       expect(Object.keys(properties).sort()).toEqual([...ALLOWED_PROPERTY_KEYS].sort());
-      expect(properties["package"]).toBe("thehive");
+      expect(properties["package"]).toBe("hive");
       expect(properties["version"]).toBe("1.2.3");
       expect(properties["os"]).toBe(process.platform);
       expect(properties["node"]).toBe(process.version);
@@ -167,7 +167,7 @@ describe("distinct_id preference", () => {
       writeFileSync(sharedPath, "shared-funnel-id-123\n", "utf8");
       const recorder = createFetchRecorder();
       const deps = keyedDeps(dir, recorder, { sharedInstallIdPath: sharedPath });
-      await emitTelemetry("thehive_installed", {}, deps);
+      await emitTelemetry("hive_installed", {}, deps);
       expect(recorder.calls[0].body["distinct_id"]).toBe("shared-funnel-id-123");
       // No fallback id gets generated when the shared one exists.
       expect(existsSync(join(dir, "state", INSTALL_ID_FILENAME))).toBe(false);
@@ -178,7 +178,7 @@ describe("distinct_id preference", () => {
     return withTempDir(async (dir) => {
       const recorder = createFetchRecorder();
       const deps = keyedDeps(dir, recorder);
-      await emitTelemetry("thehive_installed", {}, deps);
+      await emitTelemetry("hive_installed", {}, deps);
 
       const sentId = recorder.calls[0].body["distinct_id"] as string;
       expect(sentId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
@@ -194,7 +194,7 @@ describe("distinct_id preference", () => {
       const first = resolveDistinctId(deps);
       const second = resolveDistinctId(deps);
       expect(second).toBe(first);
-      await emitTelemetry("thehive_uninstalled", {}, deps);
+      await emitTelemetry("hive_uninstalled", {}, deps);
       expect(recorder.calls[0].body["distinct_id"]).toBe(first);
     });
   });
@@ -212,7 +212,7 @@ describe("dedupe ledger", () => {
       expect(recorder.calls).toHaveLength(1);
 
       const ledger = loadLedger(join(dir, "state"));
-      expect(Object.keys(ledger.reported)).toEqual(["thehive_installed"]);
+      expect(Object.keys(ledger.reported)).toEqual(["hive_installed"]);
     });
   });
 
@@ -223,7 +223,7 @@ describe("dedupe ledger", () => {
       await emitUninstalled(deps);
       await emitUninstalled(deps);
       expect(recorder.calls).toHaveLength(2);
-      expect(recorder.calls.every((call) => call.body["event"] === "thehive_uninstalled")).toBe(true);
+      expect(recorder.calls.every((call) => call.body["event"] === "hive_uninstalled")).toBe(true);
     });
   });
 
@@ -259,7 +259,7 @@ describe("fail-soft posture", () => {
   it("a throwing fetch resolves send_failed and never rejects", () => {
     return withTempDir(async (dir) => {
       const throwing = createFetchRecorder(() => Promise.reject(new Error("network down")));
-      const outcome = await emitTelemetry("thehive_installed", { dedupeKey: "thehive_installed" }, keyedDeps(dir, throwing));
+      const outcome = await emitTelemetry("hive_installed", { dedupeKey: "hive_installed" }, keyedDeps(dir, throwing));
       expect(outcome).toMatchObject({ sent: false, skipped: "send_failed" });
     });
   });
@@ -267,7 +267,7 @@ describe("fail-soft posture", () => {
   it("a non-2xx response resolves send_failed", () => {
     return withTempDir(async (dir) => {
       const rejecting = createFetchRecorder(() => ({ ok: false, status: 400 }));
-      const outcome = await emitTelemetry("thehive_first_run", {}, keyedDeps(dir, rejecting));
+      const outcome = await emitTelemetry("hive_first_run", {}, keyedDeps(dir, rejecting));
       expect(outcome).toMatchObject({ sent: false, skipped: "send_failed" });
     });
   });
@@ -288,7 +288,7 @@ describe("fail-soft posture", () => {
 });
 
 describe("recordStartLifecycle (first_run + updated)", () => {
-  it("first start emits thehive_first_run once and pins lastSeenVersion, no updated event", () => {
+  it("first start emits hive_first_run once and pins lastSeenVersion, no updated event", () => {
     return withTempDir(async (dir) => {
       const recorder = createFetchRecorder();
       const deps = keyedDeps(dir, recorder, { version: "1.0.0" });
@@ -296,7 +296,7 @@ describe("recordStartLifecycle (first_run + updated)", () => {
       const outcome = await recordStartLifecycle(deps);
       expect(outcome.firstRun.sent).toBe(true);
       expect(outcome.updated).toBeNull();
-      expect(recorder.calls.map((call) => call.body["event"])).toEqual(["thehive_first_run"]);
+      expect(recorder.calls.map((call) => call.body["event"])).toEqual(["hive_first_run"]);
       expect(loadLedger(join(dir, "state")).lastSeenVersion).toBe("1.0.0");
 
       const again = await recordStartLifecycle(deps);
@@ -306,7 +306,7 @@ describe("recordStartLifecycle (first_run + updated)", () => {
     });
   });
 
-  it("a version change on start emits thehive_updated once per version and advances lastSeenVersion", () => {
+  it("a version change on start emits hive_updated once per version and advances lastSeenVersion", () => {
     return withTempDir(async (dir) => {
       const recorder = createFetchRecorder();
       await recordStartLifecycle(keyedDeps(dir, recorder, { version: "1.0.0" }));
@@ -315,12 +315,12 @@ describe("recordStartLifecycle (first_run + updated)", () => {
       const upgraded = keyedDeps(dir, recorder, { version: "1.1.0" });
       const outcome = await recordStartLifecycle(upgraded);
       expect(outcome.updated?.sent).toBe(true);
-      expect(recorder.calls.map((call) => call.body["event"])).toEqual(["thehive_first_run", "thehive_updated"]);
+      expect(recorder.calls.map((call) => call.body["event"])).toEqual(["hive_first_run", "hive_updated"]);
       expect(recorder.calls[1].body["properties"]).toMatchObject({ version: "1.1.0" });
 
       const ledger = loadLedger(join(dir, "state"));
       expect(ledger.lastSeenVersion).toBe("1.1.0");
-      expect(Object.keys(ledger.reported)).toContain("thehive_updated@1.1.0");
+      expect(Object.keys(ledger.reported)).toContain("hive_updated@1.1.0");
 
       // The same version starting again emits nothing further.
       const rerun = await recordStartLifecycle(upgraded);

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * the-hive PRD-004a — the `/buzzing` readiness screen. jsdom has no `EventSource`, so the shared
+ * hive PRD-004a — the `/buzzing` readiness screen. jsdom has no `EventSource`, so the shared
  * telemetry hook naturally exercises its REST-fallback path here (mirrors `use-fleet-telemetry-hook.test.tsx`).
  * A single mutable `fleetStatusResponse` (rather than a shift-based queue) avoids ordering
  * flakiness between the hook's own fallback poll and this screen's independent dismissal poll —
@@ -27,7 +27,7 @@ describe("BuzzingScreen", () => {
 
 	beforeEach(() => {
 		fleetStatusResponse = { supervisor: "unreachable", daemons: [] };
-		registeredNames = ["honeycomb", "hivenectar"];
+		registeredNames = ["honeycomb", "nectar"];
 		vi.stubGlobal(
 			"fetch",
 			vi.fn(async (input: RequestInfo | URL) => {
@@ -48,7 +48,7 @@ describe("BuzzingScreen", () => {
 		render(<BuzzingScreen assetBase="assets" pollMs={10} onReady={() => {}} />);
 		await waitFor(() => expect(screen.getByTestId("buzzing-tile-grid")).toBeTruthy());
 		expect(screen.getByTestId("buzzing-tile-honeycomb")).toBeTruthy();
-		expect(screen.getByTestId("buzzing-tile-hivenectar")).toBeTruthy();
+		expect(screen.getByTestId("buzzing-tile-nectar")).toBeTruthy();
 		expect(screen.getByTestId("buzzing-tile-state-honeycomb").textContent).toBe("starting");
 	});
 
@@ -59,12 +59,12 @@ describe("BuzzingScreen", () => {
 			asOf: "2026-07-01T12:00:00.000Z",
 			daemons: [
 				{ name: "honeycomb", health: "ok", escalation: null },
-				{ name: "hivenectar", health: "unreachable", escalation: null },
+				{ name: "nectar", health: "unreachable", escalation: null },
 			],
 		};
 		render(<BuzzingScreen assetBase="assets" pollMs={10} onReady={() => {}} />);
 
-		await waitFor(() => expect(screen.getByTestId("buzzing-tile-state-hivenectar").textContent).toBe("error"));
+		await waitFor(() => expect(screen.getByTestId("buzzing-tile-state-nectar").textContent).toBe("error"));
 		expect(screen.getByTestId("buzzing-tile-honeycomb")).toBeTruthy();
 		expect(screen.getByTestId("buzzing-tile-state-honeycomb").textContent).not.toBe("error");
 	});

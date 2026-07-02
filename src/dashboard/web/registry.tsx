@@ -219,7 +219,7 @@ export const ROUTES: readonly RouteEntry[] = [
 	{ route: "/sync", label: "Sync", icon: SyncIcon, component: SyncPage },
 	{ route: "/logs", label: "Logs", icon: LogsIcon, component: LogsPage },
 	// PRD-005b/PRD-005c: the persistent fleet health page (per-service metrics + Deep Lake stats +
-	// a live, verbosity-filtered log tail). Note: `/health` is ALSO thehive's own machine-liveness
+	// a live, verbosity-filtered log tail). Note: `/health` is ALSO hive's own machine-liveness
 	// path (`server.ts`); content negotiation on the server (`accept: text/html`) keeps both
 	// working at the identical literal path (see `gate.ts`/`server.ts`/`pages/health.tsx` docs).
 	{ route: "/health", label: "Health", icon: HealthIcon, component: HealthPage },

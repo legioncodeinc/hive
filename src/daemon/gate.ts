@@ -1,7 +1,7 @@
 /**
  * The server-side PORTAL LANDING GATE — PRD-003a, implementing ADR-0004's precedence.
  *
- * On landing on ANY non-exempt route thehive evaluates ONE ordered precedence, health then auth,
+ * On landing on ANY non-exempt route hive evaluates ONE ordered precedence, health then auth,
  * before deciding what to serve:
  *
  *   1. Fleet not healthy (per the EXISTING `isFleetReady()` projection, `fleet-status.ts`) →
@@ -17,7 +17,7 @@
  * are always served directly and the redirect can never loop (g-AC-7 / g-AC-8 / g-AC-9): the only
  * two redirect destinations are themselves exempt from producing another redirect.
  *
- * This middleware also bypasses thehive's own infra: `/health` (this daemon's own liveness, not a
+ * This middleware also bypasses hive's own infra: `/health` (this daemon's own liveness, not a
  * portal screen), the bundled asset routes (`/app.js`, `/styles.css`, the logo, `/fonts/*` — these
  * must load even when the shell just redirected the BROWSER to `/buzzing` or `/login`, since the
  * exempt screens are the same SPA bundle), and the `/api/*` / `/setup/*` data-plane proxy (that is
@@ -33,7 +33,7 @@
 
 import type { Context, MiddlewareHandler } from "hono";
 
-import { HIVEDOCTOR_STATUS_URL } from "../shared/constants.js";
+import { DOCTOR_STATUS_URL } from "../shared/constants.js";
 import { isFleetReady } from "../shared/fleet-readiness.js";
 import { fetchFleetStatus, type FetchImpl as FleetFetchImpl } from "./fleet-status.js";
 import { fetchSetupAuthenticated, type SetupAuthFetchImpl } from "./setup-auth.js";
@@ -48,7 +48,7 @@ const LOGIN_ROUTE = "/login" as const;
 export const GATE_EXEMPT_ROUTES = [BUZZING_ROUTE, LOGIN_ROUTE] as const;
 
 /**
- * thehive's OWN liveness route + the bundled SPA asset routes — never a page navigation to gate.
+ * hive's OWN liveness route + the bundled SPA asset routes — never a page navigation to gate.
  * `/health` is deliberately NOT in this set (see {@link isInfraPath}): PRD-005b claims that same
  * literal path for the operator-facing `/health` page, so it needs content-negotiated handling
  * rather than a blanket exemption.
@@ -59,8 +59,8 @@ const GATE_EXEMPT_INFRA_PATHS = new Set<string>(["/app.js", "/styles.css", "/hon
 const GATE_EXEMPT_INFRA_PREFIXES = ["/api/", "/setup/", "/fonts/"] as const;
 
 /**
- * thehive's own machine-liveness path. Ambiguous on purpose (PRD-005b): a health-probe/monitoring
- * caller (hivedoctor's own `/health` probe, an ops tool) never sends `Accept: text/html`, while a
+ * hive's own machine-liveness path. Ambiguous on purpose (PRD-005b): a health-probe/monitoring
+ * caller (doctor's own `/health` probe, an ops tool) never sends `Accept: text/html`, while a
  * browser navigating to the new `/health` OPERATOR page always does. `server.ts`'s `/health`
  * handler makes the SAME distinction so the two behaviors stay in lockstep.
  */
@@ -72,7 +72,7 @@ function prefersHtml(accept: string): boolean {
 }
 
 /**
- * True for thehive's own infra/asset/proxy surface — bypasses the gate entirely (see module doc).
+ * True for hive's own infra/asset/proxy surface — bypasses the gate entirely (see module doc).
  * `/health` is infra ONLY when the caller is not asking for HTML (a liveness probe); an
  * HTML-accepting request to `/health` is treated as a normal page route so it gets the same
  * buzzing/login precedence as every other SPA route (PRD-005b).
@@ -91,16 +91,16 @@ function isExemptRoute(pathname: string): boolean {
 export interface CreatePortalGateOptions {
   /** The fetch used for the health check (defaults to the global `fetch`; a test injects a fake). */
   readonly fleetStatusFetch?: FleetFetchImpl;
-  /** Override hivedoctor's status URL (defaults to the fixed loopback constant). */
-  readonly hivedoctorStatusUrl?: string;
+  /** Override doctor's status URL (defaults to the fixed loopback constant). */
+  readonly doctorStatusUrl?: string;
   /** The fetch used for the auth check (defaults to the global `fetch`; a test injects a fake). */
   readonly setupAuthFetch?: SetupAuthFetchImpl;
-  /** Override the hivedoctor registry file path the auth check resolves honeycomb's base from. */
+  /** Override the doctor registry file path the auth check resolves honeycomb's base from. */
   readonly registryPath?: string;
 }
 
 /**
- * Build the portal landing gate middleware (g-AC-1..11). Register it FIRST on thehive's Hono app
+ * Build the portal landing gate middleware (g-AC-1..11). Register it FIRST on hive's Hono app
  * (`app.use("*", createPortalGate(...))`) so it runs ahead of every other route. It never renders
  * a response itself for the passing case — it calls `next()` and lets the routes registered after
  * it (the asset routes, `/health`, `/api/fleet-status`, the BFF proxy, and finally the SPA shell
@@ -108,7 +108,7 @@ export interface CreatePortalGateOptions {
  */
 export function createPortalGate(options: CreatePortalGateOptions = {}): MiddlewareHandler {
   const fleetStatusFetch = options.fleetStatusFetch ?? fetch;
-  const hivedoctorStatusUrl = options.hivedoctorStatusUrl ?? HIVEDOCTOR_STATUS_URL;
+  const doctorStatusUrl = options.doctorStatusUrl ?? DOCTOR_STATUS_URL;
   const setupAuthFetch = options.setupAuthFetch ?? fetch;
   const registryPath = options.registryPath;
 
@@ -116,7 +116,7 @@ export function createPortalGate(options: CreatePortalGateOptions = {}): Middlew
     const pathname = new URL(c.req.url).pathname;
     const accept = c.req.header("accept") ?? "";
 
-    // thehive's own infra/asset/proxy surface: never a page navigation, never gated.
+    // hive's own infra/asset/proxy surface: never a page navigation, never gated.
     if (isInfraPath(pathname, accept)) {
       await next();
       return undefined;
@@ -133,7 +133,7 @@ export function createPortalGate(options: CreatePortalGateOptions = {}): Middlew
     // g-AC-3: health first, before auth is even evaluated. Reuses the SAME `isFleetReady()`
     // predicate `/buzzing`'s own readiness view will read (PRD-002a), so "healthy" means one
     // thing across the gate and the screen it redirects to.
-    const fleetStatus = await fetchFleetStatus(fleetStatusFetch, hivedoctorStatusUrl);
+    const fleetStatus = await fetchFleetStatus(fleetStatusFetch, doctorStatusUrl);
     if (!isFleetReady(fleetStatus)) {
       return c.redirect(BUZZING_ROUTE, 302);
     }

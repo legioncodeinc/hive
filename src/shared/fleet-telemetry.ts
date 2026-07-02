@@ -1,15 +1,15 @@
 /**
- * Shared fleet-TELEMETRY shapes — the-hive PRD-004/PRD-005, mirroring hivedoctor's
+ * Shared fleet-TELEMETRY shapes — hive PRD-004/PRD-005, mirroring doctor's
  * `src/telemetry/schema.ts` (Contract C in `library/ledger/EXECUTION_LEDGER.md`).
  *
- * thehive does not depend on the hivedoctor package (each fleet member is its own published
+ * hive does not depend on the doctor package (each fleet member is its own published
  * npm package), so this module is a hand-kept, browser-and-server-safe COPY of the wire shape
- * hivedoctor's SSE stream (`GET http://127.0.0.1:3852/events`, event `fleet-telemetry`) actually
- * emits. Keep it in lockstep with hivedoctor's schema.ts if that contract ever changes.
+ * doctor's SSE stream (`GET http://127.0.0.1:3852/events`, event `fleet-telemetry`) actually
+ * emits. Keep it in lockstep with doctor's schema.ts if that contract ever changes.
  *
  * `metrics` is deliberately `Readonly<Record<string, number>>`: honeycomb ships three counters
- * (`actionsTaken`, `filesProcessed`, `memoriesCreated`), hivenectar ships five
- * (`filesRegistered`, `nectarsMinted`, `descriptionsGenerated`, `sourceGraphVersions`,
+ * (`actionsTaken`, `filesProcessed`, `memoriesCreated`), nectar ships five
+ * (`filesRegistered`, `nectarsMinted`, `descriptionsGenerated`, `hiveGraphVersions`,
  * `embeddingsComputed`) — every reader built on this module (PRD-005b's metrics render, PRD-004c's
  * derivation) is schema-tolerant by construction: it never hardcodes one service's key names.
  */
@@ -22,7 +22,7 @@ export type FleetHealth = "ok" | "degraded" | "unreachable" | "unknown";
 /** A schema-tolerant metrics snapshot: whatever counters a service's telemetry DB reports, camelCased. */
 export type ServiceMetrics = Readonly<Record<string, number>>;
 
-/** Why a service's telemetry read was skipped this hivedoctor poll tick (fault isolation, sd-AC-9). */
+/** Why a service's telemetry read was skipped this doctor poll tick (fault isolation, sd-AC-9). */
 export type TelemetryFaultReason = "missing" | "locked" | "malformed" | "read-error";
 
 /** Deep Lake connection/stats fields carried on one service's fleet model (PRD-005b hm-AC-5/hm-AC-6). */
@@ -32,7 +32,7 @@ export interface FleetDeeplakeStats {
 }
 
 /**
- * One service's merged fleet-model row, as hivedoctor's poll loop emits it: the static
+ * One service's merged fleet-model row, as doctor's poll loop emits it: the static
  * "should exist" registry entry plus its live runtime status. A registered-but-silent service
  * appears here with `health: "unknown"` and `lastSeen: null` (never omitted, never a false
  * `active` — sd-AC-2).
@@ -68,7 +68,7 @@ export interface FleetTelemetryEvent {
 	readonly logs: readonly FleetLogEntry[];
 }
 
-/** The one SSE event name hivedoctor's stream ever emits (mirrors hivedoctor's `ingestion/sse.ts`). */
+/** The one SSE event name doctor's stream ever emits (mirrors doctor's `ingestion/sse.ts`). */
 export const FLEET_TELEMETRY_EVENT_NAME = "fleet-telemetry" as const;
 
 // ── Defensive parse (untrusted transport boundary: the SSE frame body / the JSON fetch body) ──

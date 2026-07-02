@@ -1,11 +1,11 @@
 /**
  * PRD-003a — the server-side portal landing gate (g-AC-1 through g-AC-11), plus l-AC-6 (a
- * `/setup/state` fetch failure reads as logged out). Exercises the gate through `createThehive`'s
+ * `/setup/state` fetch failure reads as logged out). Exercises the gate through `createHive`'s
  * full Hono app (`app.request(...)`, no real sockets), matching this repo's existing style
  * (`tests/daemon/server.test.ts`, `tests/daemon/proxy.test.ts`).
  */
 
-import { createThehive } from "../../src/daemon/server.js";
+import { createHive } from "../../src/daemon/server.js";
 import type { FetchImpl as FleetFetchImpl } from "../../src/daemon/fleet-status.js";
 import type { SetupAuthFetchImpl } from "../../src/daemon/setup-auth.js";
 
@@ -40,17 +40,17 @@ const LOGGED_IN = setupAuthFetch(true);
 const LOGGED_OUT = setupAuthFetch(false);
 
 function gatedDaemon(options: { fleetStatusFetch: FleetFetchImpl; setupAuthFetch: SetupAuthFetchImpl }) {
-  return createThehive({
+  return createHive({
     fleetStatusFetch: options.fleetStatusFetch,
     setupAuthFetch: options.setupAuthFetch
   });
 }
 
 async function requestPath(
-  daemon: ReturnType<typeof createThehive>,
+  daemon: ReturnType<typeof createHive>,
   path: string
 ): Promise<Response> {
-  return daemon.app.request(`http://thehive.local${path}`, { redirect: "manual" });
+  return daemon.app.request(`http://hive.local${path}`, { redirect: "manual" });
 }
 
 describe("PRD-003a portal landing gate — precedence", () => {
@@ -61,7 +61,7 @@ describe("PRD-003a portal landing gate — precedence", () => {
     expect(response.headers.get("location")).toBe("/buzzing");
   });
 
-  it("g-AC-3 redirects to /buzzing when hivedoctor is unreachable", async () => {
+  it("g-AC-3 redirects to /buzzing when doctor is unreachable", async () => {
     const daemon = gatedDaemon({ fleetStatusFetch: UNREACHABLE, setupAuthFetch: LOGGED_IN });
     const response = await requestPath(daemon, "/");
     expect(response.status).toBe(302);
@@ -236,7 +236,7 @@ describe("PRD-003c — every pre-migration route is still reachable at its real 
   });
 });
 
-describe("PRD-003a portal landing gate — bypasses thehive's own infra", () => {
+describe("PRD-003a portal landing gate — bypasses hive's own infra", () => {
   it("never gates /health, the asset routes, or /api|/setup even when unhealthy + logged out", async () => {
     const daemon = gatedDaemon({ fleetStatusFetch: UNHEALTHY, setupAuthFetch: LOGGED_OUT });
 
@@ -256,7 +256,7 @@ describe("PRD-003a portal landing gate — bypasses thehive's own infra", () => 
 describe("PRD-005b — /health is content-negotiated between the liveness probe and the operator page", () => {
   it("an HTML-accepting request to /health is treated as a normal gated page (redirected when unhealthy)", async () => {
     const daemon = gatedDaemon({ fleetStatusFetch: UNHEALTHY, setupAuthFetch: LOGGED_OUT });
-    const response = await daemon.app.request("http://thehive.local/health", {
+    const response = await daemon.app.request("http://hive.local/health", {
       headers: { accept: "text/html" },
       redirect: "manual"
     });
@@ -266,14 +266,14 @@ describe("PRD-005b — /health is content-negotiated between the liveness probe 
 
   it("a non-HTML request to /health (a liveness probe) is still gate-exempt even when unhealthy + logged out", async () => {
     const daemon = gatedDaemon({ fleetStatusFetch: UNHEALTHY, setupAuthFetch: LOGGED_OUT });
-    const response = await daemon.app.request("http://thehive.local/health", { redirect: "manual" });
+    const response = await daemon.app.request("http://hive.local/health", { redirect: "manual" });
     expect(response.status).toBe(200);
     expect(response.headers.get("location")).toBeNull();
   });
 
   it("an HTML-accepting request to /health when healthy+authed serves the SPA shell directly (no redirect)", async () => {
     const daemon = gatedDaemon({ fleetStatusFetch: HEALTHY, setupAuthFetch: LOGGED_IN });
-    const response = await daemon.app.request("http://thehive.local/health", { headers: { accept: "text/html" } });
+    const response = await daemon.app.request("http://hive.local/health", { headers: { accept: "text/html" } });
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).toContain('id="root"');

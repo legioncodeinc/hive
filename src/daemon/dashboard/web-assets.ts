@@ -1,7 +1,7 @@
 /**
  * The daemon-side ASSET RESOLVER for the bundled dashboard web app — PRD-001b Wave 2.
  *
- * Adapted from honeycomb `src/daemon/runtime/dashboard/web-assets.ts`. thehive serves the
+ * Adapted from honeycomb `src/daemon/runtime/dashboard/web-assets.ts`. hive serves the
  * dashboard at the ROOT (`/`), not under `/dashboard`, so the served asset routes and the
  * `@font-face` URL prefix are rooted at `/` instead of `/dashboard`. The bundle esbuild emits
  * is `app.js` beside this module (`dist/daemon/dashboard/app.js`), not honeycomb's
@@ -58,7 +58,7 @@ const FONT_FILES = [
 ] as const;
 const FONT_ALLOW = new Set<string>(FONT_FILES);
 
-/** The same-origin path thehive serves the fonts under (origin-rooted; see {@link rewriteFontUrls}). */
+/** The same-origin path hive serves the fonts under (origin-rooted; see {@link rewriteFontUrls}). */
 const FONT_ROUTE_PREFIX = "/fonts/";
 
 /** Map a font filename to its `content-type` by extension (`.woff2` → `font/woff2`, `.ttf` → `font/ttf`). */

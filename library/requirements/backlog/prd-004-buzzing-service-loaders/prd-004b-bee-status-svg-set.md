@@ -6,7 +6,7 @@
 
 This sub-PRD owns the visual half of the readiness screen: the bee-related status SVG icon set and the mapping from each status state to its SVG. The status state model itself is locked in the parent index; this sub-PRD makes each state visually legible so an operator glancing at `/buzzing` ([`prd-004a`](./prd-004a-buzzing-screen.md)) can read a service's condition at a glance.
 
-The five states, drawn from the-hive [`ADR-0004`](../../../knowledge/private/architecture/ADR-0004-portal-landing-gate-and-path-based-routing.md)'s requirement that `/buzzing` render per-service loading state, are: `error`, `degraded`, `starting`, `warming`, `active`. Each gets a distinct bee-themed SVG that conveys its meaning without relying on color alone (so the states are distinguishable in dark mode and for color-vision-deficient operators). The derivation from hivedoctor telemetry to these states is [`prd-004c`](./prd-004c-status-derivation.md).
+The five states, drawn from hive [`ADR-0004`](../../../knowledge/private/architecture/ADR-0004-portal-landing-gate-and-path-based-routing.md)'s requirement that `/buzzing` render per-service loading state, are: `error`, `degraded`, `starting`, `warming`, `active`. Each gets a distinct bee-themed SVG that conveys its meaning without relying on color alone (so the states are distinguishable in dark mode and for color-vision-deficient operators). The derivation from doctor telemetry to these states is [`prd-004c`](./prd-004c-status-derivation.md).
 
 ## Goals
 
@@ -17,7 +17,7 @@ The five states, drawn from the-hive [`ADR-0004`](../../../knowledge/private/arc
 
 ## Non-Goals
 
-- The rule mapping hivedoctor telemetry to a state - [`prd-004c`](./prd-004c-status-derivation.md).
+- The rule mapping doctor telemetry to a state - [`prd-004c`](./prd-004c-status-derivation.md).
 - The screen layout, tile grid, and lifecycle - [`prd-004a`](./prd-004a-buzzing-screen.md).
 - Final art direction, motion choreography, and exact palette tokens beyond legibility and distinctness - an implementation-time `ux-ui-worker-bee` concern; this sub-PRD fixes the state set, the semantics, and the distinctness requirement.
 - Icons for the health rail pills on other routes - [`prd-005a`](../prd-005-health-rail-and-page/prd-005a-health-rail.md) may reuse this set, but its pill rendering is that PRD's concern.
@@ -83,4 +83,4 @@ The same state set backs the health rail pills in [`prd-005a`](../prd-005-health
 - [`prd-004a-buzzing-screen.md`](./prd-004a-buzzing-screen.md) - the screen that renders these SVGs per tile.
 - [`prd-004c-status-derivation.md`](./prd-004c-status-derivation.md) - the derivation that produces the state each SVG represents.
 - [`ADR-0004-portal-landing-gate-and-path-based-routing`](../../../knowledge/private/architecture/ADR-0004-portal-landing-gate-and-path-based-routing.md) - the requirement that `/buzzing` render per-service loading state.
-- the-hive [`prd-005a-health-rail`](../prd-005-health-rail-and-page/prd-005a-health-rail.md) - the rail that reuses this state-to-icon vocabulary.
+- hive [`prd-005a-health-rail`](../prd-005-health-rail-and-page/prd-005a-health-rail.md) - the rail that reuses this state-to-icon vocabulary.

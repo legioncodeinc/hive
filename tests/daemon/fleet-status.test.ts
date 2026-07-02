@@ -1,10 +1,10 @@
-import { createThehive } from "../../src/daemon/server.js";
+import { createHive } from "../../src/daemon/server.js";
 import {
   fetchFleetStatus,
   isFleetReady,
   type FleetStatusResponse
 } from "../../src/daemon/fleet-status.js";
-import { HIVEDOCTOR_STATUS_URL } from "../../src/shared/constants.js";
+import { DOCTOR_STATUS_URL } from "../../src/shared/constants.js";
 
 function mockFetch(body: unknown, init: { ok?: boolean; status?: number } = {}): typeof fetch {
   const ok = init.ok ?? true;
@@ -23,12 +23,12 @@ function mockFailingFetch(error: Error): typeof fetch {
 }
 
 describe("fetchFleetStatus", () => {
-  it("fs-AC-3 returns fail-soft unreachable when hivedoctor fetch throws", async () => {
+  it("fs-AC-3 returns fail-soft unreachable when doctor fetch throws", async () => {
     const result = await fetchFleetStatus(mockFailingFetch(new Error("connection refused")));
     expect(result).toEqual({ supervisor: "unreachable", daemons: [] });
   });
 
-  it("fs-AC-3 returns fail-soft unreachable when hivedoctor responds non-200", async () => {
+  it("fs-AC-3 returns fail-soft unreachable when doctor responds non-200", async () => {
     const result = await fetchFleetStatus(mockFetch(null, { ok: false, status: 503 }));
     expect(result).toEqual({ supervisor: "unreachable", daemons: [] });
   });
@@ -55,11 +55,11 @@ describe("fetchFleetStatus", () => {
     const upstream = {
       health: "ok",
       escalation: null,
-      suggestedCommands: ["hivedoctor status"],
+      suggestedCommands: ["doctor status"],
       asOf: "2026-07-01T12:00:00.000Z",
       daemons: [
         { name: "honeycomb", health: "ok", escalation: null },
-        { name: "hivenectar", health: "degraded", escalation: { reason: "stale" } }
+        { name: "nectar", health: "degraded", escalation: { reason: "stale" } }
       ]
     };
 
@@ -70,16 +70,16 @@ describe("fetchFleetStatus", () => {
       asOf: "2026-07-01T12:00:00.000Z",
       daemons: [
         { name: "honeycomb", health: "ok", escalation: null },
-        { name: "hivenectar", health: "degraded", escalation: { reason: "stale" } }
+        { name: "nectar", health: "degraded", escalation: { reason: "stale" } }
       ]
     });
   });
 
-  it("fs-AC-5 defaults daemons to empty when absent (older hivedoctor)", async () => {
+  it("fs-AC-5 defaults daemons to empty when absent (older doctor)", async () => {
     const upstream = {
       health: "ok",
       escalation: null,
-      suggestedCommands: ["hivedoctor status"],
+      suggestedCommands: ["doctor status"],
       asOf: "2026-07-01T12:00:00.000Z"
     };
 
@@ -105,13 +105,13 @@ describe("fetchFleetStatus", () => {
   });
 
   it("fs-AC-2 uses hard-pinned loopback constant by default", () => {
-    expect(HIVEDOCTOR_STATUS_URL).toBe("http://127.0.0.1:3852/status.json");
+    expect(DOCTOR_STATUS_URL).toBe("http://127.0.0.1:3852/status.json");
   });
 
   it("fs-AC-9 pins redirect mode so a loopback 3xx cannot follow off loopback", async () => {
     const fetchImpl = mockFetch({ health: "ok", asOf: "2026-07-01T12:00:00.000Z" });
     await fetchFleetStatus(fetchImpl);
-    expect(fetchImpl).toHaveBeenCalledWith(HIVEDOCTOR_STATUS_URL, { redirect: "error" });
+    expect(fetchImpl).toHaveBeenCalledWith(DOCTOR_STATUS_URL, { redirect: "error" });
   });
 
   it("fs-AC-9 fail-softs when the fetch rejects on a redirect", async () => {
@@ -165,7 +165,7 @@ describe("isFleetReady", () => {
         supervisor: "reachable",
         health: "ok",
         asOf: "2026-07-01T12:00:00.000Z",
-        daemons: [{ name: "hivenectar", health: "ok", escalation: null }]
+        daemons: [{ name: "nectar", health: "ok", escalation: null }]
       })
     ).toBe(false);
   });
@@ -187,19 +187,19 @@ describe("isFleetReady", () => {
 });
 
 describe("GET /api/fleet-status route", () => {
-  it("fs-AC-1 proxies hivedoctor status through thehive server", async () => {
+  it("fs-AC-1 proxies doctor status through hive server", async () => {
     const fleetStatusFetch = mockFetch({
       health: "ok",
       asOf: "2026-07-01T12:00:00.000Z",
       daemons: [{ name: "honeycomb", health: "ok", escalation: null }]
     });
 
-    const daemon = createThehive({
+    const daemon = createHive({
       fleetStatusFetch,
-      hivedoctorStatusUrl: HIVEDOCTOR_STATUS_URL
+      doctorStatusUrl: DOCTOR_STATUS_URL
     });
 
-    const response = await daemon.app.request("http://thehive.local/api/fleet-status");
+    const response = await daemon.app.request("http://hive.local/api/fleet-status");
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       supervisor: "reachable",
@@ -207,15 +207,15 @@ describe("GET /api/fleet-status route", () => {
       asOf: "2026-07-01T12:00:00.000Z",
       daemons: [{ name: "honeycomb", health: "ok", escalation: null }]
     });
-    expect(fleetStatusFetch).toHaveBeenCalledWith(HIVEDOCTOR_STATUS_URL, { redirect: "error" });
+    expect(fleetStatusFetch).toHaveBeenCalledWith(DOCTOR_STATUS_URL, { redirect: "error" });
   });
 
   it("fs-AC-3 route returns 200 with fail-soft body when upstream is down", async () => {
-    const daemon = createThehive({
+    const daemon = createHive({
       fleetStatusFetch: mockFailingFetch(new Error("ECONNREFUSED"))
     });
 
-    const response = await daemon.app.request("http://thehive.local/api/fleet-status");
+    const response = await daemon.app.request("http://hive.local/api/fleet-status");
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       supervisor: "unreachable",
@@ -230,8 +230,8 @@ describe("GET /api/fleet-status route", () => {
       daemons: [{ name: "honeycomb", health: "ok", escalation: null }]
     });
 
-    const daemon = createThehive({ fleetStatusFetch });
-    const response = await daemon.app.request("http://thehive.local/api/fleet-status");
+    const daemon = createHive({ fleetStatusFetch });
+    const response = await daemon.app.request("http://hive.local/api/fleet-status");
     const payload = await response.json();
 
     expect(Object.keys(payload).sort()).toEqual(["asOf", "daemons", "health", "supervisor"]);

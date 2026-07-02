@@ -1,12 +1,12 @@
 name: Release
 
 # The npm-publish workflow for @legioncodeinc/hive. Mirrors honeycomb's
-# and hivedoctor's OIDC Trusted Publishing release.yaml pattern EXACTLY
-# (PRD-001c c-AC-1), adjusted only for the-hive's actual build/test scripts:
+# and doctor's OIDC Trusted Publishing release.yaml pattern EXACTLY
+# (PRD-001c c-AC-1), adjusted only for hive's actual build/test scripts:
 # there is no aggregate `npm run ci` or `pack:check` script in this package
 # yet, so the gate below runs `typecheck` and `test` as discrete steps
 # instead of one `npm run ci` call. This is the FIRST release pipeline
-# the-hive has ever had; it publishes to npm under `@legioncodeinc` so the
+# hive has ever had; it publishes to npm under `@legioncodeinc` so the
 # hive-release manifest (the-apiary PRD-001a) can pin a real, resolvable
 # version of this product.
 #
@@ -24,7 +24,7 @@ name: Release
 # configured on npm BEFORE the first CI publish, and that configuration
 # requires the package to already exist on the registry — so the FIRST
 # publish of @legioncodeinc/hive is necessarily a one-time MANUAL publish
-# (2FA), exactly like honeycomb's and hivedoctor's RELEASING.md bootstrap.
+# (2FA), exactly like honeycomb's and doctor's RELEASING.md bootstrap.
 # Every subsequent CI publish (from a pushed `vX.Y.Z` tag) is tokenless.
 # Until that manual bootstrap + npm trusted-publisher registration happens,
 # a real tag push here will fail the OIDC handshake — this is expected and
@@ -32,7 +32,7 @@ name: Release
 #
 # FAILS CLOSED: the publishability preflight aborts if the version is the
 # `0.0.0` not-cut-yet sentinel or if the package name is not the scoped
-# `@legioncodeinc/hive`, mirroring hivedoctor's guard. A real `npm
+# `@legioncodeinc/hive`, mirroring doctor's guard. A real `npm
 # publish` only happens on a tag push AND when this is not a dry run; a
 # workflow_dispatch always rehearses (`npm publish --dry-run`) and defaults
 # `dry_run` to true so the manual button is safe by default.
@@ -72,7 +72,7 @@ permissions:
 
 jobs:
   release:
-    name: Publish the-hive to npm
+    name: Publish hive to npm
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -117,8 +117,8 @@ jobs:
       - name: Install (npm ci)
         run: npm ci
 
-      # ── The gate. the-hive has no aggregate `npm run ci` script (unlike
-      # honeycomb/hivedoctor) — run its two real checks explicitly instead of
+      # ── The gate. hive has no aggregate `npm run ci` script (unlike
+      # honeycomb/doctor) — run its two real checks explicitly instead of
       # inventing a script this package does not have. ──────────────────────
       - name: Typecheck
         run: npm run typecheck
@@ -154,7 +154,7 @@ jobs:
           fi
           echo "OK — tag and package.json agree on $PKG_VERSION"
 
-      # ── Publishability preflight — FAILS CLOSED (mirrors hivedoctor). ────
+      # ── Publishability preflight — FAILS CLOSED (mirrors doctor). ────
       - name: Preflight — publishability (version + scoped-name guard)
         run: |
           PKG_VERSION="$(node -p "require('./package.json').version")"

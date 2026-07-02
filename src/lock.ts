@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 import { DaemonAlreadyRunningError } from "./errors.js";
-import { THEHIVE_LOCK_PATH, THEHIVE_PID_PATH } from "./shared/constants.js";
+import { HIVE_LOCK_PATH, HIVE_PID_PATH } from "./shared/constants.js";
 
 export interface LockPaths {
   readonly lockFilePath: string;
@@ -19,8 +19,8 @@ export interface LockPaths {
 
 export function resolveLockPaths(paths: Partial<LockPaths> = {}): LockPaths {
   return {
-    lockFilePath: paths.lockFilePath ?? THEHIVE_LOCK_PATH,
-    pidFilePath: paths.pidFilePath ?? THEHIVE_PID_PATH
+    lockFilePath: paths.lockFilePath ?? HIVE_LOCK_PATH,
+    pidFilePath: paths.pidFilePath ?? HIVE_PID_PATH
   };
 }
 

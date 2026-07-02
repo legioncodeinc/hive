@@ -4,16 +4,16 @@
  * dispatcher assigns to `process.exitCode`.
  *
  * Lifecycle telemetry firing points (all funnel through src/telemetry/emit.ts, all fail-soft):
- *   - `thehive_installed`   after a successful `install-service` (deduped once per machine).
- *   - `thehive_uninstalled` on `uninstall-service`, initiated BEFORE teardown, fire-and-forget.
- *   - `thehive_first_run`   after the first successful `start` (deduped once per machine).
- *   - `thehive_updated`     on `start` when the persisted last-seen version differs (deduped per
+ *   - `hive_installed`   after a successful `install-service` (deduped once per machine).
+ *   - `hive_uninstalled` on `uninstall-service`, initiated BEFORE teardown, fire-and-forget.
+ *   - `hive_first_run`   after the first successful `start` (deduped once per machine).
+ *   - `hive_updated`     on `start` when the persisted last-seen version differs (deduped per
  *                           version), which captures npm-reinstall upgrades without an updater.
  * A telemetry failure NEVER changes a verb's exit code: emit helpers resolve, never reject.
  */
 
-import { startThehive, type StartThehiveOptions } from "./daemon/server.js";
-import { registerThehiveWithHivedoctor, type RegistryUpsertOptions } from "./install/registry.js";
+import { startHive, type StartHiveOptions } from "./daemon/server.js";
+import { registerHiveWithDoctor, type RegistryUpsertOptions } from "./install/registry.js";
 import { createServiceModule, type ServiceModule } from "./service/index.js";
 import {
   emitInstalled,
@@ -31,22 +31,22 @@ const defaultOut: OutputWriter = (text) => {
 
 /** Injectable deps for the `start` verb. */
 export interface StartCommandDeps {
-  readonly startOptions?: StartThehiveOptions;
+  readonly startOptions?: StartHiveOptions;
   readonly telemetry?: EmitDeps;
   readonly out?: OutputWriter;
 }
 
 export async function runStartCommand(deps: StartCommandDeps = {}): Promise<number> {
   const out = deps.out ?? defaultOut;
-  const runtime = startThehive(deps.startOptions);
-  out(`thehive listening on http://${runtime.host}:${runtime.port}\n`);
+  const runtime = startHive(deps.startOptions);
+  out(`hive listening on http://${runtime.host}:${runtime.port}\n`);
 
   // The daemon is already listening; record first_run/updated after the user-facing readiness line.
   // recordStartLifecycle never rejects, so a telemetry failure cannot alter the exit code.
   await recordStartLifecycle(deps.telemetry);
 
   const shutdown = async (signal: string): Promise<void> => {
-    out(`received ${signal}, shutting down thehive\n`);
+    out(`received ${signal}, shutting down hive\n`);
     await runtime.stop();
     process.exit(0);
   };
@@ -78,11 +78,11 @@ export async function runInstallServiceCommand(
   out(`${result.message}\n`);
   if (!result.ok) return 1;
 
-  const registration = registerThehiveWithHivedoctor(deps.registry);
+  const registration = registerHiveWithDoctor(deps.registry);
   out(
     registration.updatedExistingEntry
-      ? `Updated existing thehive registry entry at ${registration.registryPath}\n`
-      : `Registered thehive in ${registration.registryPath}\n`
+      ? `Updated existing hive registry entry at ${registration.registryPath}\n`
+      : `Registered hive in ${registration.registryPath}\n`
   );
 
   // Telemetry fires only AFTER the user-facing success; it never rejects and never alters the code.
@@ -116,11 +116,11 @@ export interface RegisterCommandDeps {
 
 export async function runRegisterCommand(deps: RegisterCommandDeps = {}): Promise<number> {
   const out = deps.out ?? defaultOut;
-  const registration = registerThehiveWithHivedoctor(deps.registry);
+  const registration = registerHiveWithDoctor(deps.registry);
   out(
     registration.updatedExistingEntry
-      ? `Updated existing thehive registry entry at ${registration.registryPath}\n`
-      : `Registered thehive in ${registration.registryPath}\n`
+      ? `Updated existing hive registry entry at ${registration.registryPath}\n`
+      : `Registered hive in ${registration.registryPath}\n`
   );
   return 0;
 }

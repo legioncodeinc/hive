@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { HIVEDOCTOR_STATUS_URL } from "../shared/constants.js";
+import { DOCTOR_STATUS_URL } from "../shared/constants.js";
 import { isLoopbackBaseUrl } from "../shared/daemon-routing.js";
 import {
   isFleetReady,
@@ -26,7 +26,7 @@ const FleetDaemonSchema = z.object({
   escalation: z.unknown().nullable().optional()
 });
 
-const HivedoctorStatusSchema = z.object({
+const DoctorStatusSchema = z.object({
   health: FleetHealthSchema,
   daemons: z.array(FleetDaemonSchema).optional().default([]),
   asOf: z.string().min(1)
@@ -35,7 +35,7 @@ const HivedoctorStatusSchema = z.object({
 /**
  * Minimal init surface for the status fetch. `redirect` is pinned (fs-AC-9 defense in depth on top
  * of the loopback URL pin): native fetch defaults to `redirect: "follow"`, so a rogue or compromised
- * loopback service answering on :3852 could 3xx-redirect thehive's fetch to a non-loopback origin,
+ * loopback service answering on :3852 could 3xx-redirect hive's fetch to a non-loopback origin,
  * silently defeating `isLoopbackBaseUrl()` (which only validates the initial URL). Pinning
  * `redirect: "error"` makes fetch reject on any redirect, so the off-loopback request never fires.
  */
@@ -44,7 +44,7 @@ export type FetchImpl = (input: string, init?: FleetFetchInit) => Promise<Respon
 
 export async function fetchFleetStatus(
   fetchImpl: FetchImpl = fetch,
-  url: string = HIVEDOCTOR_STATUS_URL
+  url: string = DOCTOR_STATUS_URL
 ): Promise<FleetStatusResponse> {
   if (!isLoopbackBaseUrl(url)) {
     return UNREACHABLE_RESPONSE;
@@ -63,7 +63,7 @@ export async function fetchFleetStatus(
       return UNREACHABLE_RESPONSE;
     }
 
-    const parsed = HivedoctorStatusSchema.safeParse(parsedJson);
+    const parsed = DoctorStatusSchema.safeParse(parsedJson);
     if (!parsed.success) {
       return UNREACHABLE_RESPONSE;
     }

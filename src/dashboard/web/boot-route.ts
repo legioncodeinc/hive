@@ -1,7 +1,7 @@
 /**
  * The bundle's BOOT SCREEN selector — PRD-003c (m-AC-6 / m-AC-7 / m-AC-8).
  *
- * By the time this bundle runs, thehive's SERVER gate (`the-hive/src/daemon/gate.ts`, PRD-003a)
+ * By the time this bundle runs, hive's SERVER gate (`hive/src/daemon/gate.ts`, PRD-003a)
  * has already evaluated health-then-auth and served the shell ONLY for a path it authorized:
  * `/buzzing` (fleet not healthy, or landed there directly — always exempt), `/login` (logged out,
  * or landed there directly — always exempt), or any other path (healthy + authenticated). This

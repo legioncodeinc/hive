@@ -1,5 +1,5 @@
 /**
- * the-hive PRD-004/PRD-005 — the shared fleet-telemetry view-model's PURE reducer steps
+ * hive PRD-004/PRD-005 — the shared fleet-telemetry view-model's PURE reducer steps
  * (`applyRegisteredNames`, `applySseEvent`, `applyRestFallback`, `appendLogs`,
  * `deriveServiceViews`) plus the verbosity filter (PRD-005c). These are exercised directly
  * (no live `EventSource`/`fetch`) so the coverage does not depend on jsdom's SSE support.
@@ -29,9 +29,9 @@ function logLine(overrides: Partial<FleetLogEntry> = {}): FleetLogEntry {
 
 describe("applyRegisteredNames (bz-AC-1/bz-AC-2, hr-AC-1)", () => {
 	it("a registered service with no telemetry yet still appears (as a name), never omitted", () => {
-		const state = applyRegisteredNames(createInitialTelemetryState(), ["honeycomb", "hivenectar", "never-seen-svc"]);
+		const state = applyRegisteredNames(createInitialTelemetryState(), ["honeycomb", "nectar", "never-seen-svc"]);
 		const views = deriveServiceViews(state, NOW);
-		expect(views.map((v) => v.name)).toEqual(["honeycomb", "hivenectar", "never-seen-svc"]);
+		expect(views.map((v) => v.name)).toEqual(["honeycomb", "nectar", "never-seen-svc"]);
 		expect(views.find((v) => v.name === "never-seen-svc")?.state).toBe("starting");
 	});
 
@@ -48,15 +48,15 @@ describe("applySseEvent (bz-AC-4, hr-AC-3, sd-AC-8/sd-AC-9 isolation)", () => {
 			asOf: "2026-07-01T12:00:00.000Z",
 			services: [
 				{ name: "honeycomb", health: "ok", lastSeen: "2026-07-01T11:59:59.900Z", metrics: { actionsTaken: 4 }, deeplake: null, telemetryFault: null },
-				{ name: "hivenectar", health: "unreachable", lastSeen: null, metrics: {}, deeplake: null, telemetryFault: null },
+				{ name: "nectar", health: "unreachable", lastSeen: null, metrics: {}, deeplake: null, telemetryFault: null },
 			],
 			logs: [],
 		};
 		const state = applySseEvent(createInitialTelemetryState(), event, NOW);
 		const view = toFleetTelemetryView(state, NOW);
 		expect(view.source).toBe("sse");
-		expect(view.services.find((s) => s.name === "hivenectar")?.state).toBe("error");
-		// honeycomb's own state is unaffected by hivenectar being unreachable (per-service isolation).
+		expect(view.services.find((s) => s.name === "nectar")?.state).toBe("error");
+		// honeycomb's own state is unaffected by nectar being unreachable (per-service isolation).
 		expect(view.services.find((s) => s.name === "honeycomb")?.state).not.toBe("error");
 	});
 
@@ -65,7 +65,7 @@ describe("applySseEvent (bz-AC-4, hr-AC-3, sd-AC-8/sd-AC-9 isolation)", () => {
 			asOf: "2026-07-01T12:00:00.000Z",
 			services: [
 				{ name: "honeycomb", health: "ok", lastSeen: "2026-07-01T11:59:00.000Z", metrics: {}, deeplake: null, telemetryFault: null },
-				{ name: "hivenectar", health: "ok", lastSeen: "2026-07-01T11:59:00.000Z", metrics: {}, deeplake: null, telemetryFault: null },
+				{ name: "nectar", health: "ok", lastSeen: "2026-07-01T11:59:00.000Z", metrics: {}, deeplake: null, telemetryFault: null },
 			],
 			logs: [],
 		};
@@ -74,7 +74,7 @@ describe("applySseEvent (bz-AC-4, hr-AC-3, sd-AC-8/sd-AC-9 isolation)", () => {
 
 		const next: FleetTelemetryEvent = {
 			asOf: "2026-07-01T12:00:10.000Z",
-			services: [{ name: "hivenectar", health: "unreachable", lastSeen: null, metrics: {}, deeplake: null, telemetryFault: null }],
+			services: [{ name: "nectar", health: "unreachable", lastSeen: null, metrics: {}, deeplake: null, telemetryFault: null }],
 			logs: [],
 		};
 		state = applySseEvent(state, next, NOW);
@@ -120,14 +120,14 @@ describe("applyRestFallback (bz-AC-5, hr-AC-4, hm-AC-10)", () => {
 			asOf: "2026-07-01T12:00:00.000Z",
 			daemons: [
 				{ name: "honeycomb", health: "ok", escalation: null },
-				{ name: "hivenectar", health: "ok", escalation: null },
+				{ name: "nectar", health: "ok", escalation: null },
 			],
 		};
 		const afterFirst = applyRestFallback(createInitialTelemetryState(), firstStatus, NOW - 60_000);
-		expect(toFleetTelemetryView(afterFirst, NOW).services.find((s) => s.name === "hivenectar")?.state).toBe("active");
+		expect(toFleetTelemetryView(afterFirst, NOW).services.find((s) => s.name === "nectar")?.state).toBe("active");
 
-		// hivenectar disappears from the projection entirely (e.g. deregistered or dropped by
-		// hivedoctor). Its NAME must survive (never omitted from the view), but its runtime signal
+		// nectar disappears from the projection entirely (e.g. deregistered or dropped by
+		// doctor). Its NAME must survive (never omitted from the view), but its runtime signal
 		// must not: it falls back to the registered-but-silent derivation instead of staying active.
 		const secondStatus: FleetStatusResponse = {
 			supervisor: "reachable",
@@ -137,10 +137,10 @@ describe("applyRestFallback (bz-AC-5, hr-AC-4, hm-AC-10)", () => {
 		};
 		const afterSecond = applyRestFallback(afterFirst, secondStatus, NOW);
 		const view = toFleetTelemetryView(afterSecond, NOW);
-		const hivenectar = view.services.find((s) => s.name === "hivenectar");
-		expect(hivenectar).toBeDefined();
-		expect(hivenectar?.state).toBe("starting");
-		expect(hivenectar?.health).toBeNull();
+		const nectar = view.services.find((s) => s.name === "nectar");
+		expect(nectar).toBeDefined();
+		expect(nectar?.state).toBe("starting");
+		expect(nectar?.health).toBeNull();
 		expect(view.services.find((s) => s.name === "honeycomb")?.state).toBe("active");
 	});
 

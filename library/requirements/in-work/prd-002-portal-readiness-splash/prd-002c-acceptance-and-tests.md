@@ -27,12 +27,12 @@ This sub-PRD consolidates the module-level acceptance criteria - adapted directl
 
 | ID | Pinned-note bullet | Criterion | Traces to |
 |---|---|---|---|
-| ac-AC-1 | "With honeycomb stopped and hivedoctor reporting degraded/unreachable, `:3853` shows readiness splash only (no 'First time setup')." | Given honeycomb is stopped and hivedoctor's aggregate `health` is `"degraded"` or `"unreachable"`, when a client loads `:3853`, then `ReadinessSplash` renders and `SetupGate` never mounts (so `GuidedSetup`'s "First time setup" button never renders). | fs-AC-6, fs-AC-7, rs-AC-3 |
-| ac-AC-2 | "When hivedoctor reports fleet ok (and required daemons[] rows are up), splash dismisses into setup or dashboard." | Given hivedoctor reports aggregate `health: "ok"` and honeycomb's `daemons[]` row is `health: "ok"`, when `ReadinessSplash` polls, then it mounts `SetupGate`, which then resolves to `GuidedSetup` or `Shell` per its own existing unmodified logic. | fs-AC-6, rs-AC-7, rs-AC-8 |
+| ac-AC-1 | "With honeycomb stopped and doctor reporting degraded/unreachable, `:3853` shows readiness splash only (no 'First time setup')." | Given honeycomb is stopped and doctor's aggregate `health` is `"degraded"` or `"unreachable"`, when a client loads `:3853`, then `ReadinessSplash` renders and `SetupGate` never mounts (so `GuidedSetup`'s "First time setup" button never renders). | fs-AC-6, fs-AC-7, rs-AC-3 |
+| ac-AC-2 | "When doctor reports fleet ok (and required daemons[] rows are up), splash dismisses into setup or dashboard." | Given doctor reports aggregate `health: "ok"` and honeycomb's `daemons[]` row is `health: "ok"`, when `ReadinessSplash` polls, then it mounts `SetupGate`, which then resolves to `GuidedSetup` or `Shell` per its own existing unmodified logic. | fs-AC-6, rs-AC-7, rs-AC-8 |
 | ac-AC-3 | "With honeycomb up but no DeepLake credentials, user reaches guided setup (correct phase)." | Given the fleet is ready and the user has no valid credential, when `SetupGate` mounts, then the user reaches `GuidedSetup`, not an error and not an infinite splash. | rs-AC-8 |
 | ac-AC-4 | "Splash renders before any /setup/state or dashboard page fetch." | Given a cold load of `:3853`, when the page first paints, then no `GET /setup/state` request and no dashboard `wire` fetch has fired yet - only `GET /api/fleet-status` has. | rs-AC-1, rs-AC-2, rs-AC-3 |
-| ac-AC-5 | "hivedoctor down -> splash persists; no setup mis-detection." | Given hivedoctor's `:3852` is down, when `ReadinessSplash` polls indefinitely, then it never mounts `SetupGate` and never shows "First time setup" or any authenticated content. | fs-AC-3, rs-AC-6 |
-| ac-AC-6 | "/api/fleet-status rejects non-loopback hivedoctor URLs (tamper-safe, mirrors security fix on daemon-bases)." | Given the route's fetch target, when constructed, then it is validated against `isLoopbackBaseUrl()` before use and never accepts a non-loopback origin from any input source. | fs-AC-2, fs-AC-9 |
+| ac-AC-5 | "doctor down -> splash persists; no setup mis-detection." | Given doctor's `:3852` is down, when `ReadinessSplash` polls indefinitely, then it never mounts `SetupGate` and never shows "First time setup" or any authenticated content. | fs-AC-3, rs-AC-6 |
+| ac-AC-6 | "/api/fleet-status rejects non-loopback doctor URLs (tamper-safe, mirrors security fix on daemon-bases)." | Given the route's fetch target, when constructed, then it is validated against `isLoopbackBaseUrl()` before use and never accepts a non-loopback origin from any input source. | fs-AC-2, fs-AC-9 |
 
 ### US-2 - the locked "no exception for degraded" rule is tested
 
@@ -53,10 +53,10 @@ Mirrors the existing pattern in `tests/daemon/server.test.ts` (PRD-001c, `/api/d
 
 | Test case | Verifies |
 |---|---|
-| `GET /api/fleet-status` with a mocked `fetch` returning a well-formed hivedoctor payload | fs-AC-1, fs-AC-5 - reachable pass-through shape |
+| `GET /api/fleet-status` with a mocked `fetch` returning a well-formed doctor payload | fs-AC-1, fs-AC-5 - reachable pass-through shape |
 | `GET /api/fleet-status` with a mocked `fetch` that rejects (simulated connection refused) | fs-AC-3 - fail-soft to `{ supervisor: "unreachable", daemons: [] }` |
 | `GET /api/fleet-status` with a mocked `fetch` returning non-JSON body | fs-AC-4 - fail-soft, no throw |
-| `GET /api/fleet-status` with a mocked `fetch` returning a 500 from hivedoctor | fs-AC-3/fs-AC-4 - treated as unreachable, not forwarded as a 500 to the client |
+| `GET /api/fleet-status` with a mocked `fetch` returning a 500 from doctor | fs-AC-3/fs-AC-4 - treated as unreachable, not forwarded as a 500 to the client |
 | Unit test: `isFleetReady()` with aggregate `ok` + `honeycomb: ok` | fs-AC-6 - returns `true` |
 | Unit test: `isFleetReady()` with aggregate `degraded` + `honeycomb: ok` | fs-AC-7, ac-AC-7 - returns `false` |
 | Unit test: `isFleetReady()` with aggregate `ok` + `honeycomb` entry absent | fs-AC-8, ac-AC-8 - returns `false` |
@@ -71,7 +71,7 @@ Mirrors `SetupGate`'s own testable posture (`client?: WireClient` injection poin
 | Test case | Verifies |
 |---|---|
 | First render, before any poll resolves | rs-AC-2 - splash state shown by default, `SetupGate` not mounted |
-| Poll resolves with `supervisor: "unreachable"` | rs-AC-6, ac-AC-1, ac-AC-5 - distinct "waiting on hivedoctor" state, no `SetupGate` |
+| Poll resolves with `supervisor: "unreachable"` | rs-AC-6, ac-AC-1, ac-AC-5 - distinct "waiting on doctor" state, no `SetupGate` |
 | Poll resolves with aggregate `degraded`, honeycomb `ok` | rs-AC-5, ac-AC-1, ac-AC-7 - still splash, not `SetupGate` |
 | Poll resolves with aggregate `ok`, honeycomb `ok` | rs-AC-7, ac-AC-2 - transitions to `SetupGate`, polling stops (assert no further `fetch` calls after the transition) |
 | `SetupGate`'s `/setup/state` fetch is never called before the fleet-ready transition | rs-AC-3, ac-AC-4 - a spy/mock on the `wire`/fetch layer records zero `/setup/state` calls pre-transition |

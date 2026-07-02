@@ -3,15 +3,15 @@ import { dirname, join } from "node:path";
 
 import { HONEYCOMB_HOME_DIR } from "../shared/constants.js";
 
-export const HIVEDOCTOR_REGISTRY_PATH = join(HONEYCOMB_HOME_DIR, "hivedoctor.daemons.json");
+export const DOCTOR_REGISTRY_PATH = join(HONEYCOMB_HOME_DIR, "doctor.daemons.json");
 
-export const THEHIVE_REGISTRY_NAME = "thehive" as const;
-export const THEHIVE_REGISTRY_HEALTH_URL = "http://127.0.0.1:3853/health" as const;
-export const THEHIVE_REGISTRY_PID_PATH = "~/.honeycomb/thehive.pid" as const;
-export const THEHIVE_REGISTRY_PROBE_INTERVAL_MS = 30_000 as const;
-export const THEHIVE_REGISTRY_STARTUP_GRACE_MS = 60_000 as const;
-export const THEHIVE_REGISTRY_RESTART_GIVE_UP_THRESHOLD = 3 as const;
-export const THEHIVE_REGISTRY_RESTART_COOLDOWN_MS = 5_000 as const;
+export const HIVE_REGISTRY_NAME = "hive" as const;
+export const HIVE_REGISTRY_HEALTH_URL = "http://127.0.0.1:3853/health" as const;
+export const HIVE_REGISTRY_PID_PATH = "~/.honeycomb/hive.pid" as const;
+export const HIVE_REGISTRY_PROBE_INTERVAL_MS = 30_000 as const;
+export const HIVE_REGISTRY_STARTUP_GRACE_MS = 60_000 as const;
+export const HIVE_REGISTRY_RESTART_GIVE_UP_THRESHOLD = 3 as const;
+export const HIVE_REGISTRY_RESTART_COOLDOWN_MS = 5_000 as const;
 
 export interface RegistryFs {
   readFile(path: string): string;
@@ -92,15 +92,15 @@ function parseRegistryDocument(raw: string): ParsedRegistryDocument {
   return { root, daemons };
 }
 
-export function buildThehiveRegistryEntry(): RegistryDaemonEntry {
+export function buildHiveRegistryEntry(): RegistryDaemonEntry {
   return {
-    name: THEHIVE_REGISTRY_NAME,
-    healthUrl: THEHIVE_REGISTRY_HEALTH_URL,
-    pidPath: THEHIVE_REGISTRY_PID_PATH,
-    probeIntervalMs: THEHIVE_REGISTRY_PROBE_INTERVAL_MS,
-    startupGraceMs: THEHIVE_REGISTRY_STARTUP_GRACE_MS,
-    restartGiveUpThreshold: THEHIVE_REGISTRY_RESTART_GIVE_UP_THRESHOLD,
-    restartCooldownMs: THEHIVE_REGISTRY_RESTART_COOLDOWN_MS
+    name: HIVE_REGISTRY_NAME,
+    healthUrl: HIVE_REGISTRY_HEALTH_URL,
+    pidPath: HIVE_REGISTRY_PID_PATH,
+    probeIntervalMs: HIVE_REGISTRY_PROBE_INTERVAL_MS,
+    startupGraceMs: HIVE_REGISTRY_STARTUP_GRACE_MS,
+    restartGiveUpThreshold: HIVE_REGISTRY_RESTART_GIVE_UP_THRESHOLD,
+    restartCooldownMs: HIVE_REGISTRY_RESTART_COOLDOWN_MS
   };
 }
 
@@ -118,18 +118,18 @@ function nextTempPath(registryPath: string): string {
   return `${registryPath}.tmp-${process.pid}-${Date.now()}`;
 }
 
-export function registerThehiveWithHivedoctor(options: RegistryUpsertOptions = {}): RegistryUpsertResult {
-  const registryPath = options.registryPath ?? HIVEDOCTOR_REGISTRY_PATH;
+export function registerHiveWithDoctor(options: RegistryUpsertOptions = {}): RegistryUpsertResult {
+  const registryPath = options.registryPath ?? DOCTOR_REGISTRY_PATH;
   const fs = options.fs ?? createNodeRegistryFs();
   const parsed = readRegistryDocument(registryPath, fs);
   const nextDaemons = [...parsed.daemons];
-  const thehiveEntry = buildThehiveRegistryEntry();
+  const hiveEntry = buildHiveRegistryEntry();
 
-  const index = nextDaemons.findIndex((entry) => entry["name"] === THEHIVE_REGISTRY_NAME);
+  const index = nextDaemons.findIndex((entry) => entry["name"] === HIVE_REGISTRY_NAME);
   if (index >= 0) {
-    nextDaemons[index] = { ...nextDaemons[index], ...thehiveEntry };
+    nextDaemons[index] = { ...nextDaemons[index], ...hiveEntry };
   } else {
-    nextDaemons.push(thehiveEntry);
+    nextDaemons.push(hiveEntry);
   }
 
   const nextRoot: Record<string, unknown> = { ...parsed.root, daemons: nextDaemons };

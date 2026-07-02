@@ -9,10 +9,10 @@ import {
 } from "../src/lock.js";
 
 async function withTempLockPaths(run: (paths: { lockFilePath: string; pidFilePath: string }) => Promise<void> | void): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "thehive-lock-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "hive-lock-test-"));
   const lockPaths = {
-    lockFilePath: join(dir, "thehive.lock"),
-    pidFilePath: join(dir, "thehive.pid")
+    lockFilePath: join(dir, "hive.lock"),
+    pidFilePath: join(dir, "hive.pid")
   };
   try {
     await run(lockPaths);

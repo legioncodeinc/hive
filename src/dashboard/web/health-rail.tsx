@@ -1,5 +1,5 @@
 /**
- * The top HEALTH RAIL — the-hive PRD-005a. A strip of per-service status pills, mounted once in
+ * The top HEALTH RAIL — hive PRD-005a. A strip of per-service status pills, mounted once in
  * the {@link Shell} (`app.tsx`) so it is present on EVERY in-app route (hr-AC-1), giving an
  * operator constant fleet awareness without leaving their current page.
  *

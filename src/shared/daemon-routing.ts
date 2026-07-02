@@ -1,16 +1,16 @@
 export const DEFAULT_DAEMON_BASES = Object.freeze({
   honeycomb: "http://127.0.0.1:3850",
-  hivenectar: "http://127.0.0.1:3854"
+  nectar: "http://127.0.0.1:3854"
 } as const);
 
 export type DaemonName = keyof typeof DEFAULT_DAEMON_BASES;
 export type DaemonBases = Record<DaemonName, string>;
 
-const SOURCE_GRAPH_PREFIX = "/api/source-graph";
+const HIVE_GRAPH_PREFIX = "/api/hive-graph";
 
 export function resolveEndpointOwner(endpointPath: string): DaemonName {
-  return endpointPath === SOURCE_GRAPH_PREFIX || endpointPath.startsWith(`${SOURCE_GRAPH_PREFIX}/`)
-    ? "hivenectar"
+  return endpointPath === HIVE_GRAPH_PREFIX || endpointPath.startsWith(`${HIVE_GRAPH_PREFIX}/`)
+    ? "nectar"
     : "honeycomb";
 }
 
@@ -19,10 +19,10 @@ export function normalizeBaseUrl(baseUrl: string): string {
 }
 
 /**
- * The only hostnames a daemon base is trusted to resolve to. thehive aggregates every workload
- * daemon over loopback HTTP by construction (`DAEMON_HOST`/`THEHIVE_HOST` are always
+ * The only hostnames a daemon base is trusted to resolve to. hive aggregates every workload
+ * daemon over loopback HTTP by construction (`DAEMON_HOST`/`HIVE_HOST` are always
  * `127.0.0.1`); a registry entry naming any other host is rejected rather than trusted, so a
- * tampered `hivedoctor.daemons.json` (or a compromised daemon registration) cannot redirect the
+ * tampered `doctor.daemons.json` (or a compromised daemon registration) cannot redirect the
  * server-side proxy (`src/daemon/proxy.ts`) — and the session/memory data it carries in request
  * bodies — to an attacker-controlled origin.
  */
@@ -40,6 +40,6 @@ export function isLoopbackBaseUrl(baseUrl: string): boolean {
 export function normalizeDaemonBases(bases: Partial<Record<DaemonName, string>> = {}): DaemonBases {
   return {
     honeycomb: normalizeBaseUrl(bases.honeycomb ?? DEFAULT_DAEMON_BASES.honeycomb),
-    hivenectar: normalizeBaseUrl(bases.hivenectar ?? DEFAULT_DAEMON_BASES.hivenectar)
+    nectar: normalizeBaseUrl(bases.nectar ?? DEFAULT_DAEMON_BASES.nectar)
   };
 }

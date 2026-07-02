@@ -9,7 +9,7 @@ import {
 import { DaemonAlreadyRunningError } from "./errors.js";
 
 function printUsage(): void {
-  process.stderr.write("Usage: thehive <start|install-service|uninstall-service|register>\n");
+  process.stderr.write("Usage: hive <start|install-service|uninstall-service|register>\n");
 }
 
 async function run(): Promise<void> {

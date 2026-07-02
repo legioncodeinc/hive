@@ -1,12 +1,12 @@
 /**
- * The SHARED fleet-telemetry view-model hook — the-hive PRD-004/PRD-005. One hook, consumed by
+ * The SHARED fleet-telemetry view-model hook — hive PRD-004/PRD-005. One hook, consumed by
  * `/buzzing` (PRD-004a), the health rail (PRD-005a), and the `/health` page (PRD-005b/PRD-005c),
  * so the SSE-first/REST-fallback wiring, the registered-name enumeration, and the bounded log
  * ring buffer are each written exactly once (per the implementation brief), not duplicated per
  * consumer.
  *
  * Sourcing precedence (bz-AC-4/bz-AC-5/bz-AC-6, hr-AC-3/hr-AC-4/hr-AC-5):
- *   1. `EventSource("/api/telemetry/stream")` — the same-origin relay of hivedoctor's real SSE
+ *   1. `EventSource("/api/telemetry/stream")` — the same-origin relay of doctor's real SSE
  *      stream (`telemetry-proxy.ts`). Live, near-real-time. `EventSource` auto-reconnects on its
  *      own after a drop (the browser's built-in behavior), so "resumes without a manual refresh"
  *      falls out of the platform rather than hand-rolled reconnect logic.
@@ -46,7 +46,7 @@ import {
 } from "../../shared/service-status.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Endpoints (same-origin only — hr-AC-6/sd-AC-6: the browser never reaches hivedoctor directly).
+// Endpoints (same-origin only — hr-AC-6/sd-AC-6: the browser never reaches doctor directly).
 // ─────────────────────────────────────────────────────────────────────────────
 
 const REGISTERED_SERVICES_ENDPOINT = "/api/registered-services" as const;
@@ -67,7 +67,7 @@ export const LOG_RING_BUFFER_CAP = 500;
 export interface ServiceView {
 	readonly name: string;
 	readonly state: ServiceState;
-	/** The raw hivedoctor health, or `null` before any signal has been observed for this service. */
+	/** The raw doctor health, or `null` before any signal has been observed for this service. */
 	readonly health: FleetHealth | null;
 	readonly lastSeen: string | null;
 	/** Schema-tolerant per-service counters (PRD-005b) — `{}` until telemetry reports any. */
@@ -362,7 +362,7 @@ export const LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
 
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
-/** Rank an arbitrary (free-form, per hivedoctor's schema) log level string; an unrecognized level defaults to `info`'s rank. */
+/** Rank an arbitrary (free-form, per doctor's schema) log level string; an unrecognized level defaults to `info`'s rank. */
 function logLevelRank(level: string): number {
 	const idx = LOG_LEVELS.indexOf(level.trim().toLowerCase() as LogLevel);
 	return idx === -1 ? LOG_LEVELS.indexOf("info") : idx;

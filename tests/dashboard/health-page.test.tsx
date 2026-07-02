@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * the-hive PRD-005b (per-service metrics + Deep Lake stats, rendered generically) and PRD-005c
+ * hive PRD-005b (per-service metrics + Deep Lake stats, rendered generically) and PRD-005c
  * (live log tail + verbosity filtering + bounded buffer). Exercises the REST-fallback path
  * (jsdom has no `EventSource`) since only the fallback carries no `logs`/metrics through the
  * pure hook tests already covering the SSE path directly.
@@ -58,7 +58,7 @@ describe("HealthPage with reachable fleet-status fallback", () => {
 			"fetch",
 			vi.fn(async (input: RequestInfo | URL) => {
 				const url = requestUrl(input);
-				if (url.includes("/api/registered-services")) return jsonResponse({ names: ["honeycomb", "hivenectar"] });
+				if (url.includes("/api/registered-services")) return jsonResponse({ names: ["honeycomb", "nectar"] });
 				if (url.includes("/api/fleet-status")) {
 					return jsonResponse({
 						supervisor: "reachable",
@@ -66,7 +66,7 @@ describe("HealthPage with reachable fleet-status fallback", () => {
 						asOf: "2026-07-01T12:00:00.000Z",
 						daemons: [
 							{ name: "honeycomb", health: "ok", escalation: null },
-							{ name: "hivenectar", health: "ok", escalation: null },
+							{ name: "nectar", health: "ok", escalation: null },
 						],
 					});
 				}

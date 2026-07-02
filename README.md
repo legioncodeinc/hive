@@ -3,11 +3,11 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/brand/hive-wordmark-on-dark.svg">
-    <img src="assets/brand/hive-wordmark-black.svg" alt="The Hive" height="84">
+    <img src="assets/brand/hive-wordmark-black.svg" alt="Hive" height="84">
   </picture>
 </p>
 
-<h1 align="center">The Hive</h1>
+<h1 align="center">Hive</h1>
 
 <p align="center">
   <strong>The front door to your agents' shared brain.</strong><br>
@@ -53,9 +53,9 @@
 
 <img src="assets/brand/divider-major.svg" width="100%" height="6">
 
-The Apiary runs four daemons on your machine: Honeycomb doing the memory work, Hivenectar mapping your sources, Doctor watching all of them, and each one holding its own port. Great architecture. Miserable to look at. Which port was the dashboard again? Is my memory daemon even up, or did it die overnight? Why is my browser juggling origins and tokens for three separate loopback services just to render one status page?
+The Apiary runs four daemons on your machine: Honeycomb doing the memory work, Nectar mapping your sources, Doctor watching all of them, and each one holding its own port. Great architecture. Miserable to look at. Which port was the dashboard again? Is my memory daemon even up, or did it die overnight? Why is my browser juggling origins and tokens for three separate loopback services just to render one status page?
 
-**The Hive is the answer to all of it.** One always-on portal daemon at `127.0.0.1:3853`. It boots with your device, renders the moment its socket binds, and serves the entire Apiary dashboard from a single origin. When a workload daemon has not answered yet, its panel says "starting," never a broken page. That failure mode is the whole reason The Hive exists: the old dashboard lived inside Honeycomb, so exactly when you needed a status surface most was exactly when it went dark.
+**Hive is the answer to all of it.** One always-on portal daemon at `127.0.0.1:3853`. It boots with your device, renders the moment its socket binds, and serves the entire Apiary dashboard from a single origin. When a workload daemon has not answered yet, its panel says "starting," never a broken page. That failure mode is the whole reason Hive exists: the old dashboard lived inside Honeycomb, so exactly when you needed a status surface most was exactly when it went dark.
 
 <img src="assets/brand/divider-minor.svg" width="100%" height="3">
 
@@ -68,13 +68,13 @@ The Apiary runs four daemons on your machine: Honeycomb doing the memory work, H
 <td width="50%" valign="top">
 
 #### 🛹 For AI Augmented Devs
-One URL for the whole stack. You bookmark `127.0.0.1:3853` and you're done: memories, graph, sync, source graph, fleet health, all of it behind one front door. Zero port hunting, zero "which daemon serves that page," zero mental map of the loopback range required.
+One URL for the whole stack. You bookmark `127.0.0.1:3853` and you're done: memories, graph, sync, hive graph, fleet health, all of it behind one front door. Zero port hunting, zero "which daemon serves that page," zero mental map of the loopback range required.
 
 </td>
 <td width="50%" valign="top">
 
 #### 🏢 For Enterprise Teams
-One origin, one boundary. The browser never sees a workload daemon's port or holds a credential for it; The Hive's server proxies every request over loopback and passes auth headers straight through without storing a thing. Nothing sensitive lives in the browser, and no daemon owes the world a CORS allowance.
+One origin, one boundary. The browser never sees a workload daemon's port or holds a credential for it; Hive's server proxies every request over loopback and passes auth headers straight through without storing a thing. Nothing sensitive lives in the browser, and no daemon owes the world a CORS allowance.
 
 </td>
 </tr>
@@ -82,23 +82,23 @@ One origin, one boundary. The browser never sees a workload daemon's port or hol
 
 <img src="assets/brand/divider-minor.svg" width="100%" height="3">
 
-## ✨ What makes The Hive different
+## ✨ What makes Hive different
 
-Plenty of tools bolt a status page onto a daemon. The Hive is built the other way around: the portal is the product, and four deliberate decisions make it hold up.
+Plenty of tools bolt a status page onto a daemon. Hive is built the other way around: the portal is the product, and four deliberate decisions make it hold up.
 
-- **A single portal.** Every dashboard route in the Apiary lives here. Honeycomb's in-daemon dashboard is retired; The Hive is the one source of always-on UI truth.
-- **Server-side BFF proxy.** Per [ADR-0002](library/knowledge/private/architecture/ADR-0002-server-side-bff-proxy-for-dashboard-federation.md), the browser talks to The Hive's origin only. The server resolves which daemon owns each `/api/*` and `/setup/*` request, fetches it over loopback, and streams it back. No CORS on any workload daemon, no daemon ports handed to a browser, loopback trust enforced on the server with redirect pinning.
-- **Copy-and-own dashboard.** Per [ADR-0001](library/knowledge/private/architecture/ADR-0001-retire-honeycomb-dashboard-and-copy-and-own-into-thehive.md), the dashboard code was copied out of Honeycomb once and is owned here outright. No live shared module to drift, no fork to babysit, no second copy left to diverge from.
-- **Always on.** The Hive is its own supervised OS process, boot-ordered, not gated on any workload daemon's health. It ships on its own release train, so a dashboard change never forces a supervisor or workload release.
+- **A single portal.** Every dashboard route in the Apiary lives here. Honeycomb's in-daemon dashboard is retired; Hive is the one source of always-on UI truth.
+- **Server-side BFF proxy.** Per [ADR-0002](library/knowledge/private/architecture/ADR-0002-server-side-bff-proxy-for-dashboard-federation.md), the browser talks to Hive's origin only. The server resolves which daemon owns each `/api/*` and `/setup/*` request, fetches it over loopback, and streams it back. No CORS on any workload daemon, no daemon ports handed to a browser, loopback trust enforced on the server with redirect pinning.
+- **Copy-and-own dashboard.** Per [ADR-0001](library/knowledge/private/architecture/ADR-0001-retire-honeycomb-dashboard-and-copy-and-own-into-hive.md), the dashboard code was copied out of Honeycomb once and is owned here outright. No live shared module to drift, no fork to babysit, no second copy left to diverge from.
+- **Always on.** Hive is its own supervised OS process, boot-ordered, not gated on any workload daemon's health. It ships on its own release train, so a dashboard change never forces a supervisor or workload release.
 
 <img src="assets/brand/divider-minor.svg" width="100%" height="3">
 
 ## 🐝 Features
 
 - 🖥️ **The unified Apiary dashboard**, served from one process the moment the socket binds.
-- 🔀 **Server-side BFF proxy** routing `/api/*` and `/setup/*` to the owning daemon: Honeycomb (`:3850`), Hivenectar (`:3854`), each resolved from Doctor's registry.
+- 🔀 **Server-side BFF proxy** routing `/api/*` and `/setup/*` to the owning daemon: Honeycomb (`:3850`), Nectar (`:3854`), each resolved from Doctor's registry.
 - 🌐 **Single browser origin.** Same-origin fetches only; your browser never learns another daemon's port.
-- 🔒 **Credential-free by design.** Transparent auth pass-through; The Hive stores no token and holds no Deeplake client.
+- 🔒 **Credential-free by design.** Transparent auth pass-through; Hive stores no token and holds no Deeplake client.
 - 🩹 **Fail-soft aggregation.** One daemon down means one panel shows unreachable while the rest of the dashboard keeps working.
 - 🚦 **Fleet readiness via Doctor.** `/api/fleet-status` reads the supervisor's status page server-side, so the portal shows honest per-fleet health instead of guessing from failed fetches.
 - ♻️ **Always-on daemon on `:3853`** with `/health`, a PID/lock single-instance guard, and OS service units (launchd, systemd, schtasks) that restart it on crash and start it on boot.
@@ -108,7 +108,7 @@ Plenty of tools bolt a status page onto a daemon. The Hive is built the other wa
 
 ## 🚀 Install (one command)
 
-The Hive doesn't install alone; it comes up as part of the Apiary stack. One line, and the installer handles Node, npm, the daemons, and the watchdog.
+Hive doesn't install alone; it comes up as part of the Apiary stack. One line, and the installer handles Node, npm, the daemons, and the watchdog.
 
 ```bash
 # macOS / Linux
@@ -120,7 +120,7 @@ curl -fsSL https://get.theapiary.sh | sh
 irm https://get.theapiary.sh/install.ps1 | iex
 ```
 
-That single line installs the whole Apiary: Honeycomb, Hivenectar, Doctor, and The Hive, which comes up at **`127.0.0.1:3853`** and becomes the one address you ever need to remember. The terminal is just a progress log; the portal is the product.
+That single line installs the whole Apiary: Honeycomb, Nectar, Doctor, and Hive, which comes up at **`127.0.0.1:3853`** and becomes the one address you ever need to remember. The terminal is just a progress log; the portal is the product.
 
 <details>
 <summary><strong>Prefer to build from source?</strong></summary>
@@ -136,7 +136,7 @@ npm run typecheck    # tsc --noEmit
 npm test             # vitest run
 ```
 
-The portal aggregates its data from the other Apiary daemons over loopback, so a source build of The Hive alone gets you the shell and fleet status; the full dashboard lights up when Honeycomb and friends are running.
+The portal aggregates its data from the other Apiary daemons over loopback, so a source build of Hive alone gets you the shell and fleet status; the full dashboard lights up when Honeycomb and friends are running.
 
 </details>
 
@@ -145,7 +145,7 @@ The portal aggregates its data from the other Apiary daemons over loopback, so a
 ## 🖥️ Using the dashboard
 
 <!-- screenshot pending: drop hive dashboard capture into assets/screenshots/dashboard.png -->
-<img src="assets/screenshots/dashboard.png" alt="The Hive dashboard" width="100%">
+<img src="assets/screenshots/dashboard.png" alt="Hive dashboard" width="100%">
 
 Open `http://127.0.0.1:3853` and the shell renders immediately, even on a cold boot. While the fleet is still waking up you get a readiness splash with per-daemon health rows instead of a false "first time setup" screen. Once the fleet is ready, the full portal takes over: the memory pages, the graph, sync, and ROI views migrated from Honeycomb, plus fleet status pulled from Doctor. Every page hydrates through the same-origin wire, proxied server-side to whichever daemon owns the data.
 
@@ -153,13 +153,13 @@ Open `http://127.0.0.1:3853` and the shell renders immediately, even on a cold b
 
 ## ⌨️ Using the CLI
 
-The `thehive` binary keeps a deliberately small surface. It's a portal daemon, not a Swiss Army knife:
+The `hive` binary keeps a deliberately small surface. It's a portal daemon, not a Swiss Army knife:
 
 ```bash
-thehive start                # run the portal daemon on :3853 (the default verb)
-thehive install-service      # install the OS service unit (launchd / systemd / schtasks)
-thehive uninstall-service    # remove the service unit
-thehive register             # append The Hive to Doctor's daemon registry
+hive start                # run the portal daemon on :3853 (the default verb)
+hive install-service      # install the OS service unit (launchd / systemd / schtasks)
+hive uninstall-service    # remove the service unit
+hive register             # append Hive to Doctor's daemon registry
 ```
 
 That's the whole list, on purpose. Day to day you never touch it; the installer wires the service unit and registration, Doctor keeps the process alive, and you live in the browser.
@@ -172,7 +172,7 @@ That's the whole list, on purpose. Day to day you never touch it; the installer 
 # One address. No port hunting, no tab juggling.
 open http://127.0.0.1:3853
 
-# Honeycomb up, Hivenectar up, Doctor watching, memories flowing.
+# Honeycomb up, Nectar up, Doctor watching, memories flowing.
 # You just checked four daemons without remembering a single port number.
 ```
 
@@ -182,17 +182,17 @@ Kill a workload daemon mid-session and the dashboard doesn't blink: that daemon'
 
 ## 🏗️ How it works
 
-The browser talks to exactly one origin. The Hive's server does the reaching around, over loopback, with the trust checks on its side of the line.
+The browser talks to exactly one origin. Hive's server does the reaching around, over loopback, with the trust checks on its side of the line.
 
 ```mermaid
 flowchart TD
-    browser["Browser"] -->|"same-origin /api/*, /setup/*"| hive["The Hive :3853<br/>portal + BFF proxy"]
+    browser["Browser"] -->|"same-origin /api/*, /setup/*"| hive["Hive :3853<br/>portal + BFF proxy"]
     hive -->|"loopback proxy"| comb["Honeycomb :3850<br/>memory workload"]
-    hive -->|"loopback proxy"| nectar["Hivenectar :3854<br/>source graph workload"]
+    hive -->|"loopback proxy"| nectar["Nectar :3854<br/>hive graph workload"]
     hive -->|"fleet status"| doctor["Doctor :3852<br/>supervisor status page"]
 ```
 
-The browser never talks to the back daemons directly. The Hive resolves each request's owner from Doctor's registry, guards every resolved base as loopback-only, pins redirects so a daemon can't bounce a proxied fetch off the machine, and forwards your session headers verbatim without keeping any credential of its own.
+The browser never talks to the back daemons directly. Hive resolves each request's owner from Doctor's registry, guards every resolved base as loopback-only, pins redirects so a daemon can't bounce a proxied fetch off the machine, and forwards your session headers verbatim without keeping any credential of its own.
 
 <img src="assets/brand/divider-minor.svg" width="100%" height="3">
 
@@ -202,24 +202,24 @@ Here's the thing about a stack of loopback daemons: individually they're clean, 
 
 One front door collapses that. Your credentials cross exactly one boundary, enforced by a server you control, instead of being sprayed across browser tabs that each talk to a different origin. Your bookmark bar holds one entry. When something breaks at 2 a.m., you don't run a mental port scan; you open the one page and the sick daemon is the red row.
 
-And there's a quieter payoff: the stack starts feeling like one product. Honeycomb, Hivenectar, and Doctor stay sharply separated where it counts, in process boundaries and data ownership, while you experience them as a single coherent surface. Separation of concerns for the machine, one front door for the human. That's the trade The Hive makes, and it's the right one.
+And there's a quieter payoff: the stack starts feeling like one product. Honeycomb, Nectar, and Doctor stay sharply separated where it counts, in process boundaries and data ownership, while you experience them as a single coherent surface. Separation of concerns for the machine, one front door for the human. That's the trade Hive makes, and it's the right one.
 
 <img src="assets/brand/divider-minor.svg" width="100%" height="3">
 
 ## 🎛️ Other interfaces
 
-Straight talk: The Hive ships two surfaces, and that's it for now.
+Straight talk: Hive ships two surfaces, and that's it for now.
 
 - **Dashboard.** The web portal at `http://127.0.0.1:3853`. This is the product.
-- **HTTP portal API.** The Hive's own loopback endpoints: `GET /health` for cheap liveness (status, uptime, version) and `GET /api/fleet-status` for fleet health, plus the proxied `/api/*` and `/setup/*` surfaces of the daemons behind it.
+- **HTTP portal API.** Hive's own loopback endpoints: `GET /health` for cheap liveness (status, uptime, version) and `GET /api/fleet-status` for fleet health, plus the proxied `/api/*` and `/setup/*` surfaces of the daemons behind it.
 
-No MCP server, no SDK, and none pretending. The workload daemons own those surfaces; The Hive owns the door.
+No MCP server, no SDK, and none pretending. The workload daemons own those surfaces; Hive owns the door.
 
 <img src="assets/brand/divider-minor.svg" width="100%" height="3">
 
 <h2 align="center"><a href="https://ideas.theapiary.sh">📍 Status & Roadmap</a></h2>
 
-The Hive is **pre-release (v0.1.0)**. The portal daemon, the migrated dashboard, the server-side BFF proxy, and the service-unit plus registry work are in active development under PRD-001 and PRD-002, with the readiness splash, landing gate, and health rail lined up behind them. We document what's real and flag what's in flight; the roadmap and idea board live at [ideas.theapiary.sh](https://ideas.theapiary.sh).
+Hive is **pre-release (v0.1.0)**. The portal daemon, the migrated dashboard, the server-side BFF proxy, and the service-unit plus registry work are in active development under PRD-001 and PRD-002, with the readiness splash, landing gate, and health rail lined up behind them. We document what's real and flag what's in flight; the roadmap and idea board live at [ideas.theapiary.sh](https://ideas.theapiary.sh).
 
 <img src="assets/brand/divider-minor.svg" width="100%" height="3">
 
@@ -245,7 +245,7 @@ Node `>= 22`, TypeScript, Hono on the server, React on the dashboard. The proxy 
 
 ## License
 
-The Hive is licensed under the **GNU Affero General Public License v3.0 or later** ([AGPL-3.0-or-later](LICENSE)).
+Hive is licensed under the **GNU Affero General Public License v3.0 or later** ([AGPL-3.0-or-later](LICENSE)).
 
 Use it commercially or privately, free of charge. In return: keep the copyright and license notices intact, and if you modify it, your changes ship under the same AGPL license with source available. The "Affero" part is the point: run a modified version as a network service and you owe its source to the users who interact with it. No locking a fork behind a SaaS wall.
 

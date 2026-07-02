@@ -1,17 +1,17 @@
 /**
- * thehive server-side API proxy: the BFF (backend-for-frontend) federation layer.
+ * hive server-side API proxy: the BFF (backend-for-frontend) federation layer.
  *
- * The dashboard browser talks ONLY to thehive's own origin (same-origin `/api/*` and
- * `/setup/*`). thehive's SERVER resolves the daemon that owns each request from hivedoctor's
+ * The dashboard browser talks ONLY to hive's own origin (same-origin `/api/*` and
+ * `/setup/*`). hive's SERVER resolves the daemon that owns each request from doctor's
  * registry, then fetches that daemon over loopback and streams the response straight back.
  * This replaces the earlier client-side federation (the browser fetching each workload
  * daemon's origin directly via `/api/daemon-bases`), which required the workload daemons to
  * emit CORS headers and exposed their ports to a browser context.
  *
- * Auth model: TRANSPARENT PASS-THROUGH. thehive forwards the browser's own request headers
+ * Auth model: TRANSPARENT PASS-THROUGH. hive forwards the browser's own request headers
  * (session headers + any auth) verbatim to the workload daemon; it stores no credential of its
  * own. This preserves honeycomb's existing loopback + local-mode + session-header posture and
- * keeps team/hybrid auth working without thehive becoming an auth authority.
+ * keeps team/hybrid auth working without hive becoming an auth authority.
  *
  * SECURITY (SSRF): the daemon base is resolved through {@link resolveDaemonBases}, which drops
  * any non-loopback `healthUrl` from the registry and only ever hands back loopback origins. The
@@ -29,7 +29,7 @@ import { resolveDaemonBases } from "./registry.js";
 export type ProxyFetch = (input: string, init: RequestInit) => Promise<Response>;
 
 export interface CreateApiProxyOptions {
-  /** Override the hivedoctor registry file path the daemon bases are resolved from. */
+  /** Override the doctor registry file path the daemon bases are resolved from. */
   readonly registryPath?: string;
   /** The fetch implementation used to reach the workload daemon (defaults to the global `fetch`). */
   readonly fetchImpl?: ProxyFetch;
@@ -96,8 +96,8 @@ function forwardResponseHeaders(source: Headers): Headers {
 }
 
 /**
- * Build the same-origin API proxy handler. Register it on thehive's Hono app for `/api/*` and
- * `/setup/*` (AFTER the thehive-owned routes like `/health` and `/api/fleet-status`, so those
+ * Build the same-origin API proxy handler. Register it on hive's Hono app for `/api/*` and
+ * `/setup/*` (AFTER the hive-owned routes like `/health` and `/api/fleet-status`, so those
  * win). It resolves the owning daemon per request, forwards method + headers + body over
  * loopback, and streams the upstream response back. Any failure (network error, non-loopback
  * base, redirect) degrades to a fail-soft 502 so one daemon being down never blanks the page.

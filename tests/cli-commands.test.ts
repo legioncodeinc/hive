@@ -41,7 +41,7 @@ function createFakeService(overrides: Partial<Record<"install" | "uninstall", Se
 }
 
 async function withTempDir(run: (dir: string) => Promise<void> | void): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "thehive-cli-telemetry-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "hive-cli-telemetry-test-"));
   try {
     await run(dir);
   } finally {
@@ -65,19 +65,19 @@ function telemetryDeps(dir: string, recorder: FetchRecorder, overrides: Partial<
 const silentOut = (): void => {};
 
 describe("install-service firing point", () => {
-  it("fires thehive_installed after a successful install, once per machine", () => {
+  it("fires hive_installed after a successful install, once per machine", () => {
     return withTempDir(async (dir) => {
       const recorder = createFetchRecorder();
       const deps = {
         service: createFakeService(),
-        registry: { registryPath: join(dir, "hivedoctor.daemons.json") },
+        registry: { registryPath: join(dir, "doctor.daemons.json") },
         telemetry: telemetryDeps(dir, recorder),
         out: silentOut
       };
 
       const code = await runInstallServiceCommand("/tmp/cli.js", deps);
       expect(code).toBe(0);
-      expect(recorder.calls.map((call) => call.body["event"])).toEqual(["thehive_installed"]);
+      expect(recorder.calls.map((call) => call.body["event"])).toEqual(["hive_installed"]);
 
       // Re-install on the same machine: the ledger dedupes, no second event.
       const again = await runInstallServiceCommand("/tmp/cli.js", deps);
@@ -91,7 +91,7 @@ describe("install-service firing point", () => {
       const recorder = createFetchRecorder();
       const code = await runInstallServiceCommand("/tmp/cli.js", {
         service: createFakeService({ install: { ok: false, message: "boom" } }),
-        registry: { registryPath: join(dir, "hivedoctor.daemons.json") },
+        registry: { registryPath: join(dir, "doctor.daemons.json") },
         telemetry: telemetryDeps(dir, recorder),
         out: silentOut
       });
@@ -105,7 +105,7 @@ describe("install-service firing point", () => {
       const throwing = createFetchRecorder(() => Promise.reject(new Error("network down")));
       const code = await runInstallServiceCommand("/tmp/cli.js", {
         service: createFakeService(),
-        registry: { registryPath: join(dir, "hivedoctor.daemons.json") },
+        registry: { registryPath: join(dir, "doctor.daemons.json") },
         telemetry: telemetryDeps(dir, throwing),
         out: silentOut
       });
@@ -115,7 +115,7 @@ describe("install-service firing point", () => {
 });
 
 describe("uninstall-service firing point", () => {
-  it("fires thehive_uninstalled (undeduped) and keeps the verb exit code", () => {
+  it("fires hive_uninstalled (undeduped) and keeps the verb exit code", () => {
     return withTempDir(async (dir) => {
       const recorder = createFetchRecorder();
       const deps = {
@@ -125,7 +125,7 @@ describe("uninstall-service firing point", () => {
       };
       const code = await runUninstallServiceCommand("/tmp/cli.js", deps);
       expect(code).toBe(0);
-      expect(recorder.calls.map((call) => call.body["event"])).toEqual(["thehive_uninstalled"]);
+      expect(recorder.calls.map((call) => call.body["event"])).toEqual(["hive_uninstalled"]);
 
       // A reinstall/uninstall cycle fires it again (no dedupe on uninstall).
       await runUninstallServiceCommand("/tmp/cli.js", deps);
@@ -142,7 +142,7 @@ describe("uninstall-service firing point", () => {
         out: silentOut
       });
       expect(code).toBe(1);
-      expect(recorder.calls.map((call) => call.body["event"])).toEqual(["thehive_uninstalled"]);
+      expect(recorder.calls.map((call) => call.body["event"])).toEqual(["hive_uninstalled"]);
     });
   });
 
@@ -177,8 +177,8 @@ describe("start firing points (first_run + updated)", () => {
       startOptions: {
         serveFn: (() => fakeServeFn()) as never,
         lockPaths: {
-          lockFilePath: join(dir, "locks", "thehive.lock"),
-          pidFilePath: join(dir, "locks", "thehive.pid")
+          lockFilePath: join(dir, "locks", "hive.lock"),
+          pidFilePath: join(dir, "locks", "hive.pid")
         }
       },
       telemetry: telemetryDeps(dir, recorder, telemetryOverrides),
@@ -186,17 +186,17 @@ describe("start firing points (first_run + updated)", () => {
     };
   }
 
-  it("fires thehive_first_run on the first successful start, once per machine", () => {
+  it("fires hive_first_run on the first successful start, once per machine", () => {
     return withTempDir(async (dir) => {
       const recorder = createFetchRecorder();
       const code = await runStartCommand(startDeps(dir, recorder));
       expect(code).toBe(0);
-      expect(recorder.calls.map((call) => call.body["event"])).toEqual(["thehive_first_run"]);
+      expect(recorder.calls.map((call) => call.body["event"])).toEqual(["hive_first_run"]);
       expect(loadLedger(join(dir, "state")).lastSeenVersion).toBe("1.0.0");
     });
   });
 
-  it("fires thehive_updated when the persisted version differs from the current one", () => {
+  it("fires hive_updated when the persisted version differs from the current one", () => {
     return withTempDir(async (dir) => {
       const recorder = createFetchRecorder();
       const first = await runStartCommand(startDeps(dir, recorder, { version: "1.0.0" }));
@@ -205,7 +205,7 @@ describe("start firing points (first_run + updated)", () => {
 
       const upgraded = await runStartCommand(startDeps(dir, recorder, { version: "1.1.0" }));
       expect(upgraded).toBe(0);
-      expect(recorder.calls.map((call) => call.body["event"])).toEqual(["thehive_first_run", "thehive_updated"]);
+      expect(recorder.calls.map((call) => call.body["event"])).toEqual(["hive_first_run", "hive_updated"]);
       expect(loadLedger(join(dir, "state")).lastSeenVersion).toBe("1.1.0");
 
       // Same version again: nothing further fires.
@@ -228,7 +228,7 @@ describe("register verb", () => {
   it("emits no telemetry at all", () => {
     return withTempDir(async (dir) => {
       const code = await runRegisterCommand({
-        registry: { registryPath: join(dir, "hivedoctor.daemons.json") },
+        registry: { registryPath: join(dir, "doctor.daemons.json") },
         out: silentOut
       });
       expect(code).toBe(0);

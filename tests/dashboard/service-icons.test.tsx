@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * the-hive PRD-004b — the bee-status SVG set + the single shared state→icon mapping.
+ * hive PRD-004b — the bee-status SVG set + the single shared state→icon mapping.
  */
 
 import { cleanup, render } from "@testing-library/react";

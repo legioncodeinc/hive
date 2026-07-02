@@ -29,7 +29,7 @@ export type SetupAuthFetchInit = {
 export type SetupAuthFetchImpl = (input: string, init?: SetupAuthFetchInit) => Promise<Response>;
 
 export interface FetchSetupAuthenticatedOptions {
-  /** Override the hivedoctor registry file path the honeycomb base is resolved from. */
+  /** Override the doctor registry file path the honeycomb base is resolved from. */
   readonly registryPath?: string;
   /**
    * Abort signal forwarded to the underlying fetch, so a disconnected client (the gate passes
@@ -53,7 +53,7 @@ export async function fetchSetupAuthenticated(
   const base = resolveDaemonBases({ registryPath: options.registryPath }).honeycomb;
   // Defense in depth, mirroring proxy.ts / fleet-status.ts: resolveDaemonBases only ever returns
   // loopback origins, but a future change to base resolution must never turn this into an
-  // off-loopback fetch that could leak the request (or its redirect) off thehive's trust boundary.
+  // off-loopback fetch that could leak the request (or its redirect) off hive's trust boundary.
   if (!isLoopbackBaseUrl(base)) return false;
 
   try {

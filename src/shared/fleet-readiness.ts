@@ -3,7 +3,7 @@ export type FleetHealth = "ok" | "degraded" | "unreachable" | "unknown";
 export type FleetDaemonStatus = {
   readonly name: string;
   readonly health: FleetHealth;
-  /** Opaque pass-through of hivedoctor's per-daemon escalation record; thehive does not interpret it. */
+  /** Opaque pass-through of doctor's per-daemon escalation record; hive does not interpret it. */
   readonly escalation: unknown;
 };
 

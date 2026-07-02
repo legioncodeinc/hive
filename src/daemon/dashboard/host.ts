@@ -1,7 +1,7 @@
 /**
  * The viewable dashboard HOST — PRD-001b Wave 2.
  *
- * Adapted from honeycomb `src/daemon/runtime/dashboard/host.ts`. thehive is a standalone Hono
+ * Adapted from honeycomb `src/daemon/runtime/dashboard/host.ts`. hive is a standalone Hono
  * process that serves the migrated React SPA at the ROOT (`/`), not under `/dashboard`. It serves
  * the INDEX SHELL of the real React app bundled production-clean by esbuild
  * (`src/dashboard/web/main.tsx` → `dist/daemon/dashboard/app.js`). The shell is `<div id="root">`
@@ -11,7 +11,7 @@
  * NO `unpkg`/CDN React, NO in-browser `@babel/standalone`, NO `type="text/babel"`: the shell
  * references ONLY same-origin loopback assets the host serves, and carries NO token/secret.
  *
- * ── The routes this host registers (thehive serves at the root) ───────────────
+ * ── The routes this host registers (hive serves at the root) ───────────────
  *   GET /app.js                       → the esbuild bundle (React + ReactDOM + the app)
  *   GET /styles.css                   → the concatenated design-system CSS
  *   GET /honeycomb-memory-cluster.svg → the brand mark
@@ -54,7 +54,7 @@ export const DASHBOARD_LOGO_PATH = "/honeycomb-memory-cluster.svg" as const;
 export const DASHBOARD_FONT_PATH = "/fonts/:name" as const;
 
 /**
- * The asset base the app resolves host-served assets under. thehive serves the mark at the ROOT
+ * The asset base the app resolves host-served assets under. hive serves the mark at the ROOT
  * (`/honeycomb-memory-cluster.svg`), so the base is empty — the app's `${assetBase}/…svg`
  * resolves to `/…svg`. main.tsx sanitizes this DOM-read value; an empty string is the safe default.
  */
@@ -103,7 +103,7 @@ export function renderShell(): string {
 		"<head>",
 		'<meta charset="utf-8">',
 		'<meta name="viewport" content="width=device-width, initial-scale=1">',
-		"<title>The Hive — Dashboard</title>",
+		"<title>Hive — Dashboard</title>",
 		`<link rel="stylesheet" href="${DASHBOARD_CSS_PATH}">`,
 		`<link rel="icon" href="${DASHBOARD_LOGO_PATH}">`,
 		`<style>${LAYOUT_CSS}</style>`,
@@ -117,7 +117,7 @@ export function renderShell(): string {
 }
 
 /**
- * Attach the FOUR static-asset routes (app JS, CSS, logo, fonts) onto thehive's Hono app. These
+ * Attach the FOUR static-asset routes (app JS, CSS, logo, fonts) onto hive's Hono app. These
  * are specific, fixed paths — register them BEFORE {@link mountDashboardShellFallback}'s catch-all
  * so they win. The asset routes serve no secret/token (a not-yet-built bundle 404s rather than
  * 500s), and — per PRD-003a — they are also EXEMPT from the portal landing gate (`gate.ts`): the
@@ -163,7 +163,7 @@ export function mountDashboardAssets(app: Hono, options: MountDashboardHostOptio
 }
 
 /**
- * Attach the SPA shell CATCH-ALL onto thehive's Hono app (PRD-003a g-AC-1 / g-AC-2). Register this
+ * Attach the SPA shell CATCH-ALL onto hive's Hono app (PRD-003a g-AC-1 / g-AC-2). Register this
  * LAST — after the asset routes above, `/health`, `/api/fleet-status`, and the `/api/*` `/setup/*`
  * BFF proxy — so those specific routes win; `*` then serves the identical shell for every gated
  * page path the portal gate (`gate.ts`) let through, PLUS the two gate-exempt screens (`/buzzing`,
@@ -182,7 +182,7 @@ export function mountDashboardShellFallback(app: Hono): void {
 }
 
 /**
- * Attach the viewable dashboard host onto thehive's Hono app: the four static-asset routes plus
+ * Attach the viewable dashboard host onto hive's Hono app: the four static-asset routes plus
  * the shell catch-all, in the safe order. Call this ONLY when nothing else needs to be registered
  * in between (e.g. a standalone test `Hono()`); `server.ts` calls {@link mountDashboardAssets} and
  * {@link mountDashboardShellFallback} separately so `/health`, `/api/fleet-status`, and the BFF

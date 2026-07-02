@@ -1,10 +1,10 @@
 {
   "name": "@legioncodeinc/hive",
   "version": "0.1.0",
-  "description": "The Hive portal daemon",
+  "description": "Hive portal daemon",
   "license": "AGPL-3.0-or-later",
   "type": "module",
-  "//publishConfig": "PRD-001c: minimum fix needed for a valid scoped-package publish, mirroring honeycomb/hivedoctor. `access: public` is required because scoped packages default to restricted; `provenance` pairs with release.yaml's `id-token: write` OIDC identity.",
+  "//publishConfig": "PRD-001c: minimum fix needed for a valid scoped-package publish, mirroring honeycomb/doctor. `access: public` is required because scoped packages default to restricted; `provenance` pairs with release.yaml's `id-token: write` OIDC identity.",
   "publishConfig": {
     "access": "public",
     "provenance": true
@@ -14,7 +14,7 @@
   },
   "main": "dist/cli.js",
   "bin": {
-    "thehive": "dist/cli.js"
+    "hive": "dist/cli.js"
   },
   "files": [
     "dist"

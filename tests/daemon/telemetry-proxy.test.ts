@@ -1,6 +1,6 @@
 /**
- * the-hive PRD-004/PRD-005 — the server-side fleet-telemetry SSE relay (`telemetry-proxy.ts`).
- * hr-AC-6/sd-AC-6: the browser only ever reaches this same-origin relay, never hivedoctor's
+ * hive PRD-004/PRD-005 — the server-side fleet-telemetry SSE relay (`telemetry-proxy.ts`).
+ * hr-AC-6/sd-AC-6: the browser only ever reaches this same-origin relay, never doctor's
  * `:3852` directly. Exercised through a bare Hono app (`app.request(...)`, no real sockets),
  * matching this repo's existing `tests/daemon/*` style.
  */
@@ -8,11 +8,11 @@
 import { Hono } from "hono";
 
 import { createTelemetryStreamHandler, type TelemetryFetch } from "../../src/daemon/telemetry-proxy.js";
-import { HIVEDOCTOR_EVENTS_URL } from "../../src/shared/constants.js";
+import { DOCTOR_EVENTS_URL } from "../../src/shared/constants.js";
 
-function appWith(fetchImpl: TelemetryFetch, hivedoctorEventsUrl?: string): Hono {
+function appWith(fetchImpl: TelemetryFetch, doctorEventsUrl?: string): Hono {
 	const app = new Hono();
-	app.get("/api/telemetry/stream", createTelemetryStreamHandler({ fetchImpl, hivedoctorEventsUrl }));
+	app.get("/api/telemetry/stream", createTelemetryStreamHandler({ fetchImpl, doctorEventsUrl }));
 	return app;
 }
 
@@ -28,40 +28,40 @@ function sseStreamResponse(frames: readonly string[]): Response {
 }
 
 describe("createTelemetryStreamHandler", () => {
-	it("connects to hivedoctor's REAL fixed events URL, never a derived/registry-sourced one", async () => {
+	it("connects to doctor's REAL fixed events URL, never a derived/registry-sourced one", async () => {
 		const seen: string[] = [];
 		const fetchImpl: TelemetryFetch = async (url) => {
 			seen.push(url);
 			return sseStreamResponse(["event: fleet-telemetry\ndata: {}\n\n"]);
 		};
 
-		const res = await appWith(fetchImpl).request("http://thehive.local/api/telemetry/stream");
+		const res = await appWith(fetchImpl).request("http://hive.local/api/telemetry/stream");
 		expect(res.status).toBe(200);
-		expect(seen).toEqual([HIVEDOCTOR_EVENTS_URL]);
+		expect(seen).toEqual([DOCTOR_EVENTS_URL]);
 	});
 
 	it("streams the upstream SSE bytes through unchanged (never buffered/re-serialized)", async () => {
 		const frame = "event: fleet-telemetry\ndata: {\"asOf\":\"2026-07-01T12:00:00.000Z\",\"services\":[],\"logs\":[]}\n\n";
 		const fetchImpl: TelemetryFetch = async () => sseStreamResponse([frame]);
 
-		const res = await appWith(fetchImpl).request("http://thehive.local/api/telemetry/stream");
+		const res = await appWith(fetchImpl).request("http://hive.local/api/telemetry/stream");
 		expect(res.status).toBe(200);
 		expect(res.headers.get("content-type")).toBe("text/event-stream");
 		const body = await res.text();
 		expect(body).toBe(frame);
 	});
 
-	it("fails soft with a 502 (no body) when hivedoctor is unreachable", async () => {
+	it("fails soft with a 502 (no body) when doctor is unreachable", async () => {
 		const fetchImpl: TelemetryFetch = async () => {
 			throw new Error("ECONNREFUSED");
 		};
-		const res = await appWith(fetchImpl).request("http://thehive.local/api/telemetry/stream");
+		const res = await appWith(fetchImpl).request("http://hive.local/api/telemetry/stream");
 		expect(res.status).toBe(502);
 	});
 
-	it("fails soft with a 502 when hivedoctor responds non-2xx", async () => {
+	it("fails soft with a 502 when doctor responds non-2xx", async () => {
 		const fetchImpl: TelemetryFetch = async () => new Response(null, { status: 500 });
-		const res = await appWith(fetchImpl).request("http://thehive.local/api/telemetry/stream");
+		const res = await appWith(fetchImpl).request("http://hive.local/api/telemetry/stream");
 		expect(res.status).toBe(502);
 	});
 
@@ -71,7 +71,7 @@ describe("createTelemetryStreamHandler", () => {
 			seen.push(url);
 			return sseStreamResponse([]);
 		};
-		const res = await appWith(fetchImpl, "http://evil.example.com/events").request("http://thehive.local/api/telemetry/stream");
+		const res = await appWith(fetchImpl, "http://evil.example.com/events").request("http://hive.local/api/telemetry/stream");
 		expect(res.status).toBe(502);
 		expect(seen).toEqual([]);
 	});
@@ -82,7 +82,7 @@ describe("createTelemetryStreamHandler", () => {
 			receivedSignal = init?.signal;
 			return sseStreamResponse([]);
 		};
-		await appWith(fetchImpl).request("http://thehive.local/api/telemetry/stream");
+		await appWith(fetchImpl).request("http://hive.local/api/telemetry/stream");
 		expect(receivedSignal).toBeDefined();
 	});
 
@@ -92,7 +92,7 @@ describe("createTelemetryStreamHandler", () => {
 			receivedRedirect = init?.redirect;
 			return sseStreamResponse([]);
 		};
-		await appWith(fetchImpl).request("http://thehive.local/api/telemetry/stream");
+		await appWith(fetchImpl).request("http://hive.local/api/telemetry/stream");
 		expect(receivedRedirect).toBe("error");
 	});
 });

@@ -1,5 +1,5 @@
 /**
- * PRD-004c — the status-derivation table (sd-AC-1..9). Pure-function tests: no live hivedoctor,
+ * PRD-004c — the status-derivation table (sd-AC-1..9). Pure-function tests: no live doctor,
  * no SSE, no fetch. Also covers PRD-004b's state-set contract (svg-AC-6, via `isServiceState`).
  */
 
@@ -125,8 +125,8 @@ describe("source-agnostic normalization (sd-AC-6/sd-AC-7)", () => {
 	});
 
 	it("sd-AC-7: switching from SSE to REST does not spuriously change state when the underlying condition is unchanged", () => {
-		const okModel: FleetServiceModel = { name: "hivenectar", health: "ok", lastSeen: new Date(NOW).toISOString(), metrics: {}, deeplake: null, telemetryFault: null };
-		const okDaemon: FleetDaemonStatus = { name: "hivenectar", health: "ok", escalation: null };
+		const okModel: FleetServiceModel = { name: "nectar", health: "ok", lastSeen: new Date(NOW).toISOString(), metrics: {}, deeplake: null, telemetryFault: null };
+		const okDaemon: FleetDaemonStatus = { name: "nectar", health: "ok", escalation: null };
 		const firstActiveAt = NOW - 60_000;
 
 		const viaSse = deriveServiceState({ signal: fromFleetServiceModel(okModel), now: NOW, firstActiveAt });

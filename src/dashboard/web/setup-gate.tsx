@@ -2,7 +2,7 @@
  * The `/login` route's GUIDED-SETUP content — PRD-050b (b-AC-3 / b-AC-6) · PRD-003b (l-AC-1
  * through l-AC-8, relocating this view from a pre-mount React gate to its own path).
  *
- * `/login` is served by thehive's server ONLY when the portal gate (`gate.ts`, PRD-003a) has
+ * `/login` is served by hive's server ONLY when the portal gate (`gate.ts`, PRD-003a) has
  * already determined the operator is NOT logged in (or the operator landed here directly — `/login`
  * is gate-exempt, l-AC-3). So this module no longer decides "pre-auth vs authenticated" itself —
  * that decision is the server's. {@link LoginScreen} renders ONE of:
@@ -18,7 +18,7 @@
  * While on `/login` this screen polls `setupState()` on an interval, exactly like the retired
  * pre-mount gate did. The instant the login flow writes the shared credential, the next poll
  * reports `authenticated: true`; instead of swapping to a client-rendered `<Shell>` (the old
- * behavior), this screen does a HARD navigation (`window.location.assign("/")`) so thehive's
+ * behavior), this screen does a HARD navigation (`window.location.assign("/")`) so hive's
  * server gate re-validates health+auth and serves the authoritative next screen. This keeps the
  * gate — not this component — as the single source of truth for "where does an authenticated
  * operator land" (ADR-0004), and correctly falls back to `/buzzing` instead of the dashboard if
@@ -420,7 +420,7 @@ export function LoginScreen({ client, assetBase = "assets" }: LoginScreenProps =
 	React.useEffect(() => {
 		if (state.authenticated) {
 			// l-AC-7 / l-AC-8: auth flipped true. A HARD navigation (not a client-side component swap)
-			// so thehive's server gate (gate.ts) re-validates health+auth for the new request and serves
+			// so hive's server gate (gate.ts) re-validates health+auth for the new request and serves
 			// the authoritative next screen — `/` (the dashboard) if the fleet is still healthy, or
 			// `/buzzing` in the (rare) case it degraded in the interim. This is deliberately NOT a
 			// `usePathRoute().navigate` client-side swap: there is no mounted Shell here to swap into,

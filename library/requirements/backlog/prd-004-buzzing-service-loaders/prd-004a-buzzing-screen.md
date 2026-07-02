@@ -4,22 +4,22 @@
 
 ## Overview
 
-This sub-PRD delivers the `/buzzing` screen: the per-service loading grid an operator sees whenever the gate ([`prd-003`](../prd-003-portal-landing-gate-and-routing/prd-003-portal-landing-gate-and-routing-index.md)) routes them there because the fleet is not yet healthy. Per the-hive [`ADR-0004`](../../../knowledge/private/architecture/ADR-0004-portal-landing-gate-and-path-based-routing.md), it reads the service registration and per-service health from hivedoctor and renders one tile per registered service, so the operator sees exactly which service is not up.
+This sub-PRD delivers the `/buzzing` screen: the per-service loading grid an operator sees whenever the gate ([`prd-003`](../prd-003-portal-landing-gate-and-routing/prd-003-portal-landing-gate-and-routing-index.md)) routes them there because the fleet is not yet healthy. Per hive [`ADR-0004`](../../../knowledge/private/architecture/ADR-0004-portal-landing-gate-and-path-based-routing.md), it reads the service registration and per-service health from doctor and renders one tile per registered service, so the operator sees exactly which service is not up.
 
-It is the addressable successor to PRD-002's `ReadinessSplash` (`the-hive/src/dashboard/web`), relocated to the `/buzzing` route by [`prd-003c`](../prd-003-portal-landing-gate-and-routing/prd-003c-hash-to-path-migration.md). This sub-PRD owns the screen's structure and lifecycle; the SVG per state is [`prd-004b`](./prd-004b-bee-status-svg-set.md) and the telemetry-to-state derivation is [`prd-004c`](./prd-004c-status-derivation.md).
+It is the addressable successor to PRD-002's `ReadinessSplash` (`hive/src/dashboard/web`), relocated to the `/buzzing` route by [`prd-003c`](../prd-003-portal-landing-gate-and-routing/prd-003c-hash-to-path-migration.md). This sub-PRD owns the screen's structure and lifecycle; the SVG per state is [`prd-004b`](./prd-004b-bee-status-svg-set.md) and the telemetry-to-state derivation is [`prd-004c`](./prd-004c-status-derivation.md).
 
 ## Goals
 
-- Render one tile per service in hivedoctor's registration set, keyed by registered service identity.
+- Render one tile per service in doctor's registration set, keyed by registered service identity.
 - Show each tile's current status state (from [`prd-004c`](./prd-004c-status-derivation.md)) using the matching bee SVG (from [`prd-004b`](./prd-004b-bee-status-svg-set.md)).
-- Update tiles in near-real-time from the hivedoctor SSE stream, falling back to the fleet-status projection when the stream is unavailable.
+- Update tiles in near-real-time from the doctor SSE stream, falling back to the fleet-status projection when the stream is unavailable.
 - Transition to the app when the fleet becomes ready, echoing today's `ReadinessSplash` dismissal.
 - Never blank the screen or drop tiles when a single service degrades or disappears.
 
 ## Non-Goals
 
 - The bee SVG art and the visual mapping of each state - [`prd-004b`](./prd-004b-bee-status-svg-set.md).
-- The rule that maps hivedoctor telemetry to one of the five states - [`prd-004c`](./prd-004c-status-derivation.md).
+- The rule that maps doctor telemetry to one of the five states - [`prd-004c`](./prd-004c-status-derivation.md).
 - The gate that routes here and the `/buzzing` exemption - [`prd-003`](../prd-003-portal-landing-gate-and-routing/prd-003-portal-landing-gate-and-routing-index.md).
 - The persistent health rail and `/health` page - [`prd-005`](../prd-005-health-rail-and-page/prd-005-health-rail-and-page-index.md).
 
@@ -33,7 +33,7 @@ It is the addressable successor to PRD-002's `ReadinessSplash` (`the-hive/src/da
 
 | ID | Criterion |
 |---|---|
-| bz-AC-1 | Given hivedoctor's registration set, when `/buzzing` renders, then it shows exactly one tile per registered service, keyed by the registered service identity, with no registered service omitted. |
+| bz-AC-1 | Given doctor's registration set, when `/buzzing` renders, then it shows exactly one tile per registered service, keyed by the registered service identity, with no registered service omitted. |
 | bz-AC-2 | Given a registered service with no runtime status reported yet, when `/buzzing` renders, then that service still gets a tile (in `starting`, per [`prd-004c`](./prd-004c-status-derivation.md)) rather than being absent. |
 | bz-AC-3 | Given each tile, when it renders, then it displays the service's current status state via the corresponding bee SVG ([`prd-004b`](./prd-004b-bee-status-svg-set.md)). |
 
@@ -43,7 +43,7 @@ It is the addressable successor to PRD-002's `ReadinessSplash` (`the-hive/src/da
 
 | ID | Criterion |
 |---|---|
-| bz-AC-4 | Given the hivedoctor SSE stream is connected, when a service's state changes, then only the affected tile updates, in near-real-time, without a full-screen reload. |
+| bz-AC-4 | Given the doctor SSE stream is connected, when a service's state changes, then only the affected tile updates, in near-real-time, without a full-screen reload. |
 | bz-AC-5 | Given the SSE stream is unavailable or drops, when `/buzzing` needs tile state, then it falls back to the `GET /api/fleet-status` projection (PRD-002a) and continues rendering tiles rather than blanking. |
 | bz-AC-6 | Given the SSE stream reconnects after a drop, when it resumes, then the screen resumes live updates without a manual refresh. |
 
@@ -75,15 +75,15 @@ It is the addressable successor to PRD-002's `ReadinessSplash` (`the-hive/src/da
 
 ### Two sources, one view-model
 
-Tiles render from a single view-model fed preferentially by the SSE stream (live) and, when the stream is down, by the fleet-status projection (fail-soft). Both are consumed through thehive's server per [`ADR-0002`](../../../knowledge/private/architecture/ADR-0002-server-side-bff-proxy-for-dashboard-federation.md); the browser never contacts hivedoctor directly. The derivation from either source into the five states is [`prd-004c`](./prd-004c-status-derivation.md).
+Tiles render from a single view-model fed preferentially by the SSE stream (live) and, when the stream is down, by the fleet-status projection (fail-soft). Both are consumed through hive's server per [`ADR-0002`](../../../knowledge/private/architecture/ADR-0002-server-side-bff-proxy-for-dashboard-federation.md); the browser never contacts doctor directly. The derivation from either source into the five states is [`prd-004c`](./prd-004c-status-derivation.md).
 
 ## Related
 
 - [`prd-004-buzzing-service-loaders-index.md`](./prd-004-buzzing-service-loaders-index.md) - module scope and the locked state model.
 - [`prd-004b-bee-status-svg-set.md`](./prd-004b-bee-status-svg-set.md) - the SVG each tile state renders.
-- [`prd-004c-status-derivation.md`](./prd-004c-status-derivation.md) - how each tile's state is derived from hivedoctor telemetry.
+- [`prd-004c-status-derivation.md`](./prd-004c-status-derivation.md) - how each tile's state is derived from doctor telemetry.
 - [`ADR-0004-portal-landing-gate-and-path-based-routing`](../../../knowledge/private/architecture/ADR-0004-portal-landing-gate-and-path-based-routing.md) - `/buzzing` reads registration + per-service health and renders per-service loading state.
-- hivedoctor [`ADR-0001-hive-telemetry-transport-and-single-source-of-truth`](../../../../../hivedoctor/library/knowledge/private/architecture/ADR-0001-hive-telemetry-transport-and-single-source-of-truth.md) - the SSE stream feeding live tile updates.
-- the-hive [`prd-003c-hash-to-path-migration`](../prd-003-portal-landing-gate-and-routing/prd-003c-hash-to-path-migration.md) - relocates `ReadinessSplash` to this route.
-- the-hive [`prd-002a-fleet-status-proxy`](../../in-work/prd-002-portal-readiness-splash/prd-002a-fleet-status-proxy.md) - `GET /api/fleet-status` and `isFleetReady()` reused here.
-- the-hive [`prd-002b-readiness-splash-ui`](../../in-work/prd-002-portal-readiness-splash/prd-002b-readiness-splash-ui.md) - the `ReadinessSplash` component this screen succeeds.
+- doctor [`ADR-0001-hive-telemetry-transport-and-single-source-of-truth`](../../../../../doctor/library/knowledge/private/architecture/ADR-0001-hive-telemetry-transport-and-single-source-of-truth.md) - the SSE stream feeding live tile updates.
+- hive [`prd-003c-hash-to-path-migration`](../prd-003-portal-landing-gate-and-routing/prd-003c-hash-to-path-migration.md) - relocates `ReadinessSplash` to this route.
+- hive [`prd-002a-fleet-status-proxy`](../../in-work/prd-002-portal-readiness-splash/prd-002a-fleet-status-proxy.md) - `GET /api/fleet-status` and `isFleetReady()` reused here.
+- hive [`prd-002b-readiness-splash-ui`](../../in-work/prd-002-portal-readiness-splash/prd-002b-readiness-splash-ui.md) - the `ReadinessSplash` component this screen succeeds.

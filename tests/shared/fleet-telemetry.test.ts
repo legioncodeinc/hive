@@ -1,5 +1,5 @@
 /**
- * Shared fleet-telemetry shape + defensive-parse tests (mirrors hivedoctor's Contract C).
+ * Shared fleet-telemetry shape + defensive-parse tests (mirrors doctor's Contract C).
  */
 
 import { FLEET_TELEMETRY_EVENT_NAME, parseFleetTelemetryEvent } from "../../src/shared/fleet-telemetry.js";
@@ -20,7 +20,7 @@ const VALID_EVENT = {
 };
 
 describe("FLEET_TELEMETRY_EVENT_NAME", () => {
-	it("is the one SSE event name hivedoctor's stream emits", () => {
+	it("is the one SSE event name doctor's stream emits", () => {
 		expect(FLEET_TELEMETRY_EVENT_NAME).toBe("fleet-telemetry");
 	});
 });
@@ -47,19 +47,19 @@ describe("parseFleetTelemetryEvent", () => {
 		expect(parseFleetTelemetryEvent(JSON.stringify(broken))).toBeNull();
 	});
 
-	it("accepts a schema-tolerant metrics set with a totally different key set (hivenectar's five keys)", () => {
-		const hivenectarEvent = {
+	it("accepts a schema-tolerant metrics set with a totally different key set (nectar's five keys)", () => {
+		const nectarEvent = {
 			asOf: "2026-07-01T12:00:00.000Z",
 			services: [
 				{
-					name: "hivenectar",
+					name: "nectar",
 					health: "ok",
 					lastSeen: "2026-07-01T11:59:59.000Z",
 					metrics: {
 						filesRegistered: 10,
 						nectarsMinted: 2,
 						descriptionsGenerated: 2,
-						sourceGraphVersions: 1,
+						hiveGraphVersions: 1,
 						embeddingsComputed: 100,
 					},
 					deeplake: null,
@@ -68,7 +68,7 @@ describe("parseFleetTelemetryEvent", () => {
 			],
 			logs: [],
 		};
-		const parsed = parseFleetTelemetryEvent(JSON.stringify(hivenectarEvent));
+		const parsed = parseFleetTelemetryEvent(JSON.stringify(nectarEvent));
 		expect(parsed?.services[0]?.metrics.embeddingsComputed).toBe(100);
 	});
 });

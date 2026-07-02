@@ -1,7 +1,7 @@
 import { normalizePlatform, resolveServicePlan, SERVICE_LABEL, SYSTEMD_UNIT_NAME, WINDOWS_TASK_NAME } from "../../src/service/platform.js";
 import { fixedEnv } from "./helpers.js";
 
-describe("thehive service platform resolution", () => {
+describe("hive service platform resolution", () => {
   it("d-AC-1 maps macOS to launchd with a user LaunchAgent path", () => {
     const plan = resolveServicePlan(fixedEnv({ platform: "darwin", home: "/Users/t" }));
     expect(plan.manager).toBe("launchd");
