@@ -41,7 +41,9 @@ describe("LoginStep", () => {
 
 		await waitFor(() => expect(screen.getByTestId("onboarding-login-code").textContent).toBe("ABCD-1234"));
 		expect(screen.getByTestId("onboarding-login-verification-link").getAttribute("href")).toBe("https://deeplake.ai/device");
-		expect(onboardingClient.sendEvent).toHaveBeenCalledWith("login_shown");
+		// login_shown fires in a post-grant effect tick; await it rather than asserting synchronously
+		// (the synchronous form races the effect on slower runners, e.g. Windows CI).
+		await waitFor(() => expect(onboardingClient.sendEvent).toHaveBeenCalledWith("login_shown"));
 	});
 
 	it("ob-AC-14: prefers verification_uri_complete over verification_uri when both are present", async () => {
