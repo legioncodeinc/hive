@@ -219,7 +219,7 @@ No MCP server, no SDK, and none pretending. The workload daemons own those surfa
 
 <h2 align="center"><a href="https://ideas.theapiary.sh">📍 Status & Roadmap</a></h2>
 
-Hive is **pre-release (v0.1.0)**. The portal daemon, the migrated dashboard, the server-side BFF proxy, and the service-unit plus registry work are in active development under PRD-001 and PRD-002, with the readiness splash, landing gate, and health rail lined up behind them. We document what's real and flag what's in flight; the roadmap and idea board live at [ideas.theapiary.sh](https://ideas.theapiary.sh).
+Hive is **pre-release (v0.2.x)**. The portal daemon, the migrated dashboard, the server-side BFF proxy, the OS service units and registry wiring, the portal gate, the fleet readiness surface, and the Hive Graph page (PRD-015) have all landed. We document what's real and flag what's in flight; the roadmap and idea board live at [ideas.theapiary.sh](https://ideas.theapiary.sh).
 
 <img src="assets/brand/divider-minor.svg" width="100%" height="3">
 
