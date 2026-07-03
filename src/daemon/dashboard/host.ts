@@ -54,6 +54,14 @@ export const DASHBOARD_LOGO_PATH = "/honeycomb-memory-cluster.svg" as const;
 export const DASHBOARD_FONT_PATH = "/fonts/:name" as const;
 
 /**
+ * The same-origin path prefix the host serves the product brand marks under (PRD-009a). `:name` is
+ * validated by a safe-name regex in `web-assets.ts` `brandAsset()` (leaf `*.svg` only, no traversal),
+ * so anything unsafe 404s. `/assets/` is gate-exempt (`gate.ts`) so the onboarding cards load their
+ * marks even when the shell has redirected the browser to a gated screen.
+ */
+export const DASHBOARD_BRAND_PATH = "/assets/brand/:name" as const;
+
+/**
  * The asset base the app resolves host-served assets under. hive serves the mark at the ROOT
  * (`/honeycomb-memory-cluster.svg`), so the base is empty — the app's `${assetBase}/…svg`
  * resolves to `/…svg`. main.tsx sanitizes this DOM-read value; an empty string is the safe default.
@@ -159,6 +167,15 @@ export function mountDashboardAssets(app: Hono, options: MountDashboardHostOptio
 			"content-type": asset.contentType,
 			"cache-control": "public, max-age=31536000, immutable",
 		});
+	});
+
+	// GET /assets/brand/<file>.svg — the product brand marks (PRD-009a). `:name` is validated by a
+	// safe-name regex in `brandAsset()` (leaf `*.svg` only, no `..`, no separators); an unsafe or
+	// missing name 404s. The marks carry no secret; a modest revalidating cache is plenty over loopback.
+	app.get(DASHBOARD_BRAND_PATH, (c) => {
+		const asset = assets.brandAsset(c.req.param("name"));
+		if (asset === null) return c.text("brand asset not found", 404);
+		return c.body(asset.body, 200, { "content-type": asset.contentType, "cache-control": "public, max-age=3600" });
 	});
 }
 

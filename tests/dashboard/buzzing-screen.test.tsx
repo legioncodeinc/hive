@@ -52,6 +52,13 @@ describe("BuzzingScreen", () => {
 		expect(screen.getByTestId("buzzing-tile-state-honeycomb").textContent).toBe("starting");
 	});
 
+	it("rs-AC-6: supervisor unreachable with no registered services shows the waiting-on-doctor state", async () => {
+		registeredNames = [];
+		render(<BuzzingScreen assetBase="assets" pollMs={10} onReady={() => {}} />);
+		await waitFor(() => expect(screen.getByTestId("buzzing-empty")).toBeTruthy());
+		expect(screen.getByTestId("buzzing-empty").textContent).toMatch(/waiting on doctor/i);
+	});
+
 	it("bz-AC-7/bz-AC-8: one service failing flips only its own tile; the rest stay visible", async () => {
 		fleetStatusResponse = {
 			supervisor: "reachable",
@@ -125,5 +132,34 @@ describe("BuzzingScreen", () => {
 		await waitFor(() => expect(screen.getByTestId("buzzing-screen")).toBeTruthy());
 		await new Promise((resolve) => setTimeout(resolve, 60));
 		expect(onReady).not.toHaveBeenCalled();
+	});
+
+	it("rs-AC-4 polls GET /api/fleet-status on an interval between 1000ms and 2000ms", async () => {
+		vi.useFakeTimers();
+		const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+			const url = requestUrl(input);
+			if (url.includes("/api/registered-services")) return jsonResponse({ names: registeredNames });
+			if (url.includes("/api/fleet-status")) return jsonResponse(fleetStatusResponse);
+			return jsonResponse({}, false);
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(<BuzzingScreen assetBase="assets" onReady={() => {}} />);
+		await vi.advanceTimersByTimeAsync(0);
+		const callsAfterMount = fetchMock.mock.calls.filter(([input]) => requestUrl(input).includes("/api/fleet-status")).length;
+		expect(callsAfterMount).toBeGreaterThanOrEqual(1);
+
+		await vi.advanceTimersByTimeAsync(999);
+		const callsBeforeMin = fetchMock.mock.calls.filter(([input]) => requestUrl(input).includes("/api/fleet-status")).length;
+
+		await vi.advanceTimersByTimeAsync(601);
+		const callsAfterMin = fetchMock.mock.calls.filter(([input]) => requestUrl(input).includes("/api/fleet-status")).length;
+		expect(callsAfterMin).toBeGreaterThan(callsBeforeMin);
+
+		await vi.advanceTimersByTimeAsync(1000);
+		const callsAfterMax = fetchMock.mock.calls.filter(([input]) => requestUrl(input).includes("/api/fleet-status")).length;
+		expect(callsAfterMax).toBeGreaterThan(callsAfterMin);
+
+		vi.useRealTimers();
 	});
 });

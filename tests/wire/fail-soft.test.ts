@@ -69,4 +69,48 @@ describe("wire same-origin fetch + fail-soft behavior", () => {
 
     await expect(wire.sessions()).resolves.toEqual([]);
   });
+
+  it("c-AC-3 a honeycomb endpoint failure does not affect a concurrent nectar hive-graph fetch", async () => {
+    const nectarStatusBody = {
+      queueDepth: 0,
+      describeStatus: {
+        pending: 0,
+        described: 1,
+        failed: 0,
+        "skipped-too-large": 0,
+        "skipped-binary": 0,
+        "skipped-deleted": 0
+      },
+      costSpentUsd: 0,
+      degraded: false
+    };
+
+    const fetchImpl = vi.fn(async (input: Parameters<FetchLike>[0]) => {
+      const url = requestUrl(input);
+      if (url === ENDPOINTS.kpis) throw new Error("honeycomb kpis down");
+      if (url === ENDPOINTS.hiveGraphStatus) return jsonResponse(nectarStatusBody);
+      return jsonResponse({}, 404);
+    }) as unknown as FetchLike;
+
+    const wire = createWireClient({ fetchImpl });
+
+    await expect(wire.kpis()).resolves.toEqual(EMPTY_KPIS);
+    await expect(wire.hiveGraphStatus()).resolves.toMatchObject({ unreachable: false, queueDepth: 0 });
+  });
+
+  it("c-AC-3 a nectar hive-graph failure does not affect a concurrent honeycomb settings fetch", async () => {
+    const fetchImpl = vi.fn(async (input: Parameters<FetchLike>[0]) => {
+      const url = requestUrl(input);
+      if (url === ENDPOINTS.hiveGraphStatus) throw new Error("nectar status down");
+      if (url === ENDPOINTS.settings) {
+        return jsonResponse({ orgId: "org", orgName: "Org", workspace: "workspace", settings: {} });
+      }
+      return jsonResponse({}, 404);
+    }) as unknown as FetchLike;
+
+    const wire = createWireClient({ fetchImpl });
+
+    await expect(wire.hiveGraphStatus()).resolves.toMatchObject({ unreachable: true });
+    await expect(wire.settings()).resolves.toMatchObject({ orgId: "org", workspace: "workspace" });
+  });
 });

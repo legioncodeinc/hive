@@ -26,7 +26,9 @@ function countFiles(dir: string): number {
 
 describe("dashboard copy-map", () => {
   it("b-AC-5 migrated all honeycomb web/ files plus PRD-002b/004/005 readiness+health modules and PRD-003c's boot-route", () => {
-    expect(countFiles(WEB_DIR)).toBe(36);
+    // 36 from the original migration + the PRD-009b `onboarding/` feature-folder files
+    // (contracts, the wire client, copy, hooks, the six components, and the resume-selection store).
+    expect(countFiles(WEB_DIR)).toBe(49);
   });
 
   it("b-AC-5 includes the shell + infra files (21) and the pages (13)", () => {
@@ -56,7 +58,8 @@ describe("dashboard copy-map", () => {
       // PRD-005a: the always-present top health rail.
       "health-rail.tsx",
       "setup-gate.tsx",
-      "boot-route.ts"
+      "boot-route.ts",
+      "route-daemon-owner.ts"
     ]) {
       expect(existsSync(join(WEB_DIR, file))).toBe(true);
     }

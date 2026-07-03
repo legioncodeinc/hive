@@ -1,6 +1,6 @@
 # Landing Gate And Routing
 
-> Category: Architecture | Version: 1.0 | Date: July 2026 | Status: Active | Author: Mario Aldayuz
+> Category: Architecture | Version: 1.1 | Date: July 2026 | Status: Active | Author: Mario Aldayuz
 
 Read this if you touch `src/daemon/gate.ts`, `src/daemon/server.ts` route registration, or the client boot path: it explains the health-first-auth-second gate, the exact route table, and the redirect semantics.
 
@@ -97,4 +97,4 @@ The shell catch-all serves one byte-identical shell for every authorized path (`
 
 ## Implementation status
 
-PRD-003 (gate, `/login` device-flow screen, hash-to-path migration) is implemented on main and covered by `tests/daemon/gate.test.ts`, `tests/dashboard/boot-route.test.ts`, `tests/dashboard/router.test.tsx`, and `tests/dashboard/login-screen.test.tsx`. The `/buzzing` content (PRD-004) and the health rail and `/health` page (PRD-005) are also implemented on main; see [../frontend/buzzing-and-health-rail.md](../frontend/buzzing-and-health-rail.md) for the paperwork caveat (the PRD folders still sit in `library/requirements/backlog/` with no QA close-out recorded).
+PRD-003 (gate, `/login` device-flow screen, hash-to-path migration) is shipped and QA-verified on main, covered by `tests/daemon/gate.test.ts`, `tests/dashboard/boot-route.test.ts`, `tests/dashboard/router.test.tsx`, and `tests/dashboard/login-screen.test.tsx`, and exercised in live cold-boot and logged-out scenarios. The `/buzzing` content (PRD-004) and the health rail and `/health` page (PRD-005) are shipped alongside it; see [../frontend/buzzing-and-health-rail.md](../frontend/buzzing-and-health-rail.md) for the full health-surface detail. The gate behavior described above is production behavior, not a plan.

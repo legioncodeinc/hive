@@ -61,6 +61,16 @@ const FONT_ALLOW = new Set<string>(FONT_FILES);
 /** The same-origin path hive serves the fonts under (origin-rooted; see {@link rewriteFontUrls}). */
 const FONT_ROUTE_PREFIX = "/fonts/";
 
+/**
+ * The on-disk dir (under `assets/`) the product brand marks live in, and the safe-name pattern the
+ * host route enforces (PRD-009a). Only a leaf `*.svg` filename drawn from a conservative charset is
+ * served; anything with a path separator, a `..`, or a non-`.svg` extension is rejected (404). This
+ * is the "allowlist .svg filenames, no path traversal" contract the onboarding UI's product cards
+ * load their marks through (`/assets/brand/doctor-mark.svg`, etc.).
+ */
+const BRAND_DIR = "brand";
+const BRAND_SVG_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*\.svg$/;
+
 /** Map a font filename to its `content-type` by extension (`.woff2` → `font/woff2`, `.ttf` → `font/ttf`). */
 function fontContentType(name: string): string {
 	return name.endsWith(".woff2") ? "font/woff2" : "font/ttf";
@@ -177,6 +187,8 @@ export interface WebAssets {
 	appJs(): ServedAsset | null;
 	/** A brand font's bytes + content type for an allow-listed `name`, or `null` (→ 404) otherwise. */
 	font(name: string): ServedBinaryAsset | null;
+	/** A brand SVG for a safe leaf `*.svg` `name` under `assets/brand/`, or `null` (→ 404) otherwise. */
+	brandAsset(name: string): ServedAsset | null;
 }
 
 /**
@@ -222,6 +234,14 @@ export function createWebAssets(options: WebAssetsOptions = {}): WebAssets {
 			if (bundleDir === null) return null;
 			const js = readSoft(join(bundleDir, DASHBOARD_APP_BUNDLE));
 			return js === null ? null : { body: js, contentType: "text/javascript; charset=utf-8" };
+		},
+		brandAsset(name: string): ServedAsset | null {
+			if (assetsDir === null) return null;
+			// Safe leaf filename ONLY: no separators, no `..`, `.svg` extension. No attacker-controlled
+			// path component reaches `join` — a rejected name never touches the filesystem.
+			if (name.includes("..") || !BRAND_SVG_NAME_RE.test(name)) return null;
+			const svg = readSoft(join(assetsDir, BRAND_DIR, name));
+			return svg === null ? null : { body: svg, contentType: "image/svg+xml" };
 		},
 	};
 }

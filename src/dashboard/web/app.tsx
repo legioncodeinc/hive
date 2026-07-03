@@ -39,10 +39,17 @@ import { usePathRoute } from "./router.js";
 import { PAGE_MAX_WIDTH, usePoll, type PageProps } from "./page-frame.js";
 import { FirstRunBindCTA } from "./needs-project.js";
 import { ScopeProvider, useScopeSwitcher } from "./scope-context.js";
+import { DEFAULT_DAEMON_BASES, type DaemonName } from "../../shared/daemon-routing.js";
 import { createWireClient, EMPTY_SETTINGS, type HealthReasonsWire, type SettingsWire, type WireClient } from "./wire.js";
+import { resolveRouteDaemonOwner } from "./route-daemon-owner.js";
 
-/** How often the shell probes `/health` for coarse liveness (ms). */
+/** How often the shell probes per-owner liveness (ms). */
 const HEALTH_POLL_MS = 5000;
+
+const INITIAL_DAEMON_UP: Record<DaemonName, boolean> = Object.freeze({
+	honeycomb: true,
+	nectar: true,
+});
 /** The narrow-viewport breakpoint that auto-collapses the sidebar (mirrors host.ts's media rule). */
 const NARROW_BREAKPOINT = 900 as const;
 
@@ -98,7 +105,7 @@ export function Shell({ client, assetBase = "assets" }: ShellProps = {}): React.
 	const { route, navigate } = usePathRoute();
 
 	// ── shell-owned state ──
-	const [daemonUp, setDaemonUp] = React.useState(true);
+	const [daemonUpByOwner, setDaemonUpByOwner] = React.useState<Record<DaemonName, boolean>>(INITIAL_DAEMON_UP);
 	// The shell owns the SINGLE `/health` poll; `reasons` flow DOWN to the home's subsystem strip via
 	// PageProps so the page never polls `/health` a second time (the former double-poll, now deduped).
 	const [healthReasons, setHealthReasons] = React.useState<HealthReasonsWire | null>(null);
@@ -108,7 +115,15 @@ export function Shell({ client, assetBase = "assets" }: ShellProps = {}): React.
 	// both an explicit user choice and the viewport, preferring the user's choice once they toggle.
 	const [collapsed, setCollapsed] = React.useState(false);
 
-	const daemonUrl = settings.settings.port ? `http://127.0.0.1:${settings.settings.port}` : "http://127.0.0.1:3850";
+	const routeOwner = resolveRouteDaemonOwner(route);
+	const pageDaemonUp = daemonUpByOwner[routeOwner];
+	const honeycombUp = daemonUpByOwner.honeycomb;
+	const daemonUrl =
+		routeOwner === "nectar"
+			? DEFAULT_DAEMON_BASES.nectar
+			: settings.settings.port
+				? `http://127.0.0.1:${settings.settings.port}`
+				: DEFAULT_DAEMON_BASES.honeycomb;
 
 	/** Hydrate the org/workspace identity for the sidebar sub-line (the shell's slice of settings). */
 	const hydrateIdentity = React.useCallback(async (): Promise<void> => {
@@ -124,16 +139,17 @@ export function Shell({ client, assetBase = "assets" }: ShellProps = {}): React.
 	// effect already hydrates once) — not on every healthy 5s tick. Null = no probe resolved yet.
 	const prevDaemonUpRef = React.useRef<boolean | null>(null);
 
-	// D-5: the shell owns the /health LIVENESS poll + the daemon-down swap. On RECOVERY (down→up) re-hydrate
-	// the identity (the active page re-hydrates itself on remount). Via `usePoll` so it inherits the shared
-	// background-tab pause (a hidden dashboard stops probing) and stops on unmount. `reasons` are captured
-	// here and passed DOWN — the page's former duplicate /health poll is gone.
+	// D-5 / c-AC-3: the shell owns per-OWNER liveness polls and gates ONLY the active route's owner.
+	// Honeycomb uses `/health`; nectar uses a lightweight hive-graph status probe (nectar-routed).
+	// On honeycomb RECOVERY (down→up) re-hydrate the identity. Via `usePoll` for background-tab pause.
 	usePoll(async () => {
-		const { up, reasons } = await wire.health();
-		setDaemonUp(up);
-		setHealthReasons(reasons);
-		if (up && prevDaemonUpRef.current === false) void hydrateIdentity();
-		prevDaemonUpRef.current = up;
+		const [honeycombProbe, nectarStatus] = await Promise.all([wire.health(), wire.hiveGraphStatus()]);
+		const nextHoneycombUp = honeycombProbe.up;
+		const nextNectarUp = !nectarStatus.unreachable;
+		setDaemonUpByOwner({ honeycomb: nextHoneycombUp, nectar: nextNectarUp });
+		setHealthReasons(honeycombProbe.reasons);
+		if (nextHoneycombUp && prevDaemonUpRef.current === false) void hydrateIdentity();
+		prevDaemonUpRef.current = nextHoneycombUp;
 	}, HEALTH_POLL_MS);
 
 	// 037a AC-6: auto-collapse under the narrow breakpoint. Tracks the viewport via matchMedia; the
@@ -185,7 +201,7 @@ export function Shell({ client, assetBase = "assets" }: ShellProps = {}): React.
 
 	// The PageProps every routed page receives (D-7). One shared wire, the liveness flag, the asset
 	// base, and the shell-owned pollinating pulse.
-	const pageProps: PageProps = { wire, daemonUp, assetBase, pollinating, healthReasons };
+	const pageProps: PageProps = { wire, daemonUp: pageDaemonUp, assetBase, pollinating, healthReasons };
 
 	return (
 		// PRD-049e: the ScopeProvider owns the switchable Org→Workspace→Project selection + the
@@ -199,7 +215,7 @@ export function Shell({ client, assetBase = "assets" }: ShellProps = {}): React.
 				entries={ROUTES}
 				activeRoute={route}
 				onNavigate={navigate}
-				daemonUp={daemonUp}
+				daemonUp={honeycombUp}
 				identity={identity}
 				assetBase={assetBase}
 				collapsed={collapsed}
@@ -229,7 +245,7 @@ export function Shell({ client, assetBase = "assets" }: ShellProps = {}): React.
 
 				{/* D-5: daemon-down → the content region swaps for the banner; the sidebar stays mounted.
 				    Retry re-probes; a reachable result restores the active page (it re-hydrates on remount). */}
-				{daemonUp ? (
+				{pageDaemonUp ? (
 					<Outlet route={route} pageProps={pageProps} navigate={navigate} />
 				) : (
 					<div style={{ flex: 1, minWidth: 0, padding: "28px 28px 48px" }}>
@@ -237,10 +253,17 @@ export function Shell({ client, assetBase = "assets" }: ShellProps = {}): React.
 							<ConnectivityBanner
 								url={daemonUrl}
 								onRetry={() => {
-									void wire.health().then(({ up }) => {
-										setDaemonUp(up);
-										if (up) void hydrateIdentity();
-									});
+									void (async (): Promise<void> => {
+										if (routeOwner === "nectar") {
+											const status = await wire.hiveGraphStatus();
+											const up = !status.unreachable;
+											setDaemonUpByOwner((prev) => ({ ...prev, nectar: up }));
+										} else {
+											const { up } = await wire.health();
+											setDaemonUpByOwner((prev) => ({ ...prev, honeycomb: up }));
+											if (up) void hydrateIdentity();
+										}
+									})();
 								}}
 							/>
 						</div>

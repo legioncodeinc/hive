@@ -4,7 +4,7 @@
  * `ReadinessSplash`→`SetupGate` nested client gate the server-side gate replaced, PRD-003a).
  */
 
-import { BUZZING_PATH, LOGIN_PATH, resolveBootScreen } from "../../src/dashboard/web/boot-route.js";
+import { BUZZING_PATH, LOGIN_PATH, ONBOARDING_PATH, resolveBootScreen } from "../../src/dashboard/web/boot-route.js";
 
 describe("resolveBootScreen", () => {
 	it("m-AC-7 resolves /buzzing to the buzzing screen", () => {
@@ -15,6 +15,11 @@ describe("resolveBootScreen", () => {
 	it("m-AC-8 resolves /login to the login screen", () => {
 		expect(resolveBootScreen(LOGIN_PATH)).toBe("login");
 		expect(resolveBootScreen("/login")).toBe("login");
+	});
+
+	it("ob-AC-1 resolves /onboarding to the onboarding screen", () => {
+		expect(resolveBootScreen(ONBOARDING_PATH)).toBe("onboarding");
+		expect(resolveBootScreen("/onboarding")).toBe("onboarding");
 	});
 
 	it("m-AC-6 resolves every other path (including `/` and every registry route) to the shell", () => {

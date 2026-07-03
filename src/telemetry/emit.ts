@@ -118,11 +118,20 @@ export const LEDGER_FILENAME = "telemetry.json" as const;
  */
 export const ALLOWED_PROPERTY_KEYS = ["package", "version", "os", "arch", "node"] as const;
 
+/** Funnel-only property keys extending the lifecycle allow-list (PRD-009c tm-AC-4). */
+export const FUNNEL_PROPERTY_KEYS = ["mode", "product", "failure_stage"] as const;
+
 /** One allow-listed property key. */
 export type AllowedPropertyKey = (typeof ALLOWED_PROPERTY_KEYS)[number];
 
+/** One funnel-specific property key. */
+export type FunnelPropertyKey = (typeof FUNNEL_PROPERTY_KEYS)[number];
+
 /** The allow-listed property bag: the EXACT shape that may leave the machine. */
 export type AllowedProperties = Record<AllowedPropertyKey, string>;
+
+/** The full telemetry property bag: lifecycle keys plus optional closed funnel keys. */
+export type TelemetryProperties = AllowedProperties & Partial<Record<FunnelPropertyKey, string>>;
 
 /**
  * Assemble the allow-listed payload: the package name, the build version, and coarse platform facts
@@ -138,16 +147,71 @@ export function buildAllowedProperties(version: string): AllowedProperties {
   };
 }
 
+/**
+ * Merge validated funnel extras into the base allow-listed payload. Unknown keys are dropped; invalid
+ * enum values are dropped. Lifecycle events pass no extras.
+ */
+export function buildTelemetryProperties(version: string, extras: FunnelExtras = {}): TelemetryProperties {
+  const base = buildAllowedProperties(version);
+  const out: TelemetryProperties = { ...base };
+  if (extras.mode !== undefined && FUNNEL_MODES.has(extras.mode)) out.mode = extras.mode;
+  if (extras.product !== undefined && FUNNEL_PRODUCTS.has(extras.product)) out.product = extras.product;
+  if (extras.failure_stage !== undefined && FUNNEL_FAILURE_STAGES.has(extras.failure_stage)) {
+    out.failure_stage = extras.failure_stage;
+  }
+  return out;
+}
+
 // ----------------------------------------------------------------------------
 // The lifecycle event names.
 // ----------------------------------------------------------------------------
 
-/** The four hive lifecycle events. This union is the whole event vocabulary of this module. */
+/** The four hive lifecycle events. */
 export type HiveTelemetryEvent =
   | "hive_installed"
   | "hive_uninstalled"
   | "hive_first_run"
   | "hive_updated";
+
+/** Onboarding funnel events (PRD-009c). Emitted daemon-side through this same chokepoint. */
+export type OnboardingFunnelEvent =
+  | "onboarding_started"
+  | "mode_selected"
+  | "login_shown"
+  | "dashboard_reached"
+  | "product_install_started"
+  | "product_install_completed"
+  | "product_install_failed"
+  | "health_check_passed"
+  | "login_completed";
+
+/** The closed event vocabulary that may egress through {@link emitTelemetry}. */
+export type TelemetryEvent = HiveTelemetryEvent | OnboardingFunnelEvent;
+
+/** Closed funnel `mode` values (tm-AC-4). */
+export type FunnelMode = "standard" | "advanced";
+
+/** Closed funnel product slugs for install events (tm-AC-4). */
+export type FunnelProduct = "doctor" | "honeycomb" | "nectar";
+
+/** Closed failure-stage discriminators on `product_install_failed` (tm-AC-4). */
+export type FunnelFailureStage = "resolving" | "downloading" | "linking" | "registering_service";
+
+/** Optional funnel extras validated before they join the allow-listed payload. */
+export interface FunnelExtras {
+  readonly mode?: FunnelMode;
+  readonly product?: FunnelProduct;
+  readonly failure_stage?: FunnelFailureStage;
+}
+
+const FUNNEL_MODES = new Set<FunnelMode>(["standard", "advanced"]);
+const FUNNEL_PRODUCTS = new Set<FunnelProduct>(["doctor", "honeycomb", "nectar"]);
+const FUNNEL_FAILURE_STAGES = new Set<FunnelFailureStage>([
+  "resolving",
+  "downloading",
+  "linking",
+  "registering_service"
+]);
 
 // ----------------------------------------------------------------------------
 // The dedupe ledger (a small JSON file in the state dir).
@@ -300,7 +364,7 @@ export interface EmitOutcome {
   /** When `sent` is false, why. Absent when `sent` is true. */
   readonly skipped?: EmitSkipReason;
   /** The allow-listed payload that was built (present whether or not it was sent). */
-  readonly properties: AllowedProperties;
+  readonly properties: TelemetryProperties;
 }
 
 /** The per-emit options. */
@@ -316,8 +380,8 @@ export interface EmitOptions {
 /** The PostHog capture body shape: exactly `{ api_key, event, properties, distinct_id }`. */
 interface CaptureBody {
   readonly api_key: string;
-  readonly event: HiveTelemetryEvent;
-  readonly properties: AllowedProperties;
+  readonly event: TelemetryEvent;
+  readonly properties: TelemetryProperties;
   readonly distinct_id: string;
 }
 
@@ -332,14 +396,15 @@ interface CaptureBody {
  * verb's exit code: it resolves an {@link EmitOutcome} the caller may inspect or ignore.
  */
 export async function emitTelemetry(
-  event: HiveTelemetryEvent,
+  event: TelemetryEvent,
   opts: EmitOptions = {},
-  deps: EmitDeps = {}
+  deps: EmitDeps = {},
+  extras: FunnelExtras = {}
 ): Promise<EmitOutcome> {
   const env = deps.env ?? process.env;
   const key = deps.posthogKey ?? POSTHOG_KEY;
   const version = deps.version ?? HIVE_VERSION;
-  const properties = buildAllowedProperties(version);
+  const properties = buildTelemetryProperties(version, extras);
 
   // Gate 1: empty build key means hard-disabled (unkeyed dev build). No IO, no network.
   if (key.length === 0) return { sent: false, skipped: "disabled", properties };
@@ -387,8 +452,8 @@ export async function emitTelemetry(
  * body is exactly `{ api_key, event, properties, distinct_id }`.
  */
 async function postCapture(
-  event: HiveTelemetryEvent,
-  properties: AllowedProperties,
+  event: TelemetryEvent,
+  properties: TelemetryProperties,
   distinctId: string,
   key: string,
   deps: EmitDeps
