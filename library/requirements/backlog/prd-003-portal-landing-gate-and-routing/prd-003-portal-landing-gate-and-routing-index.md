@@ -80,7 +80,7 @@ flowchart TD
 
 ## Overlap and supersession
 
-- **Supersedes** honeycomb [`prd-068-portal-daemon-boot-shell`](../../../../../honeycomb/library/requirements/backlog/prd-068-portal-daemon-boot-shell/prd-068-portal-daemon-boot-shell-index.md) and honeycomb [`prd-070-first-browser-load-experience`](../../../../../honeycomb/library/requirements/backlog/prd-070-first-browser-load-experience/prd-070-first-browser-load-experience-index.md). Both were framed while the portal still lived inside honeycomb; ADR-0001 and ADR-0002 moved the always-on portal to hive, so the boot shell and the first-browser-load experience are hive's, decided by ADR-0004 and delivered here.
+- **Supersedes** honeycomb [`prd-068-portal-daemon-boot-shell`](../../../../../honeycomb/library/requirements/archive/prd-068-portal-daemon-boot-shell/prd-068-portal-daemon-boot-shell-index.md) and honeycomb [`prd-070-first-browser-load-experience`](../../../../../honeycomb/library/requirements/archive/prd-070-first-browser-load-experience/prd-070-first-browser-load-experience-index.md). Both were framed while the portal still lived inside honeycomb; ADR-0001 and ADR-0002 moved the always-on portal to hive, so the boot shell and the first-browser-load experience are hive's, decided by ADR-0004 and delivered here.
 - **Refines** PRD-002's `ReadinessSplash` concept: the splash becomes the addressable `/buzzing` route this PRD guarantees, with its rendering delivered by [`prd-004`](../prd-004-buzzing-service-loaders/prd-004-buzzing-service-loaders-index.md).
 
 ---
@@ -98,4 +98,4 @@ flowchart TD
 - hive [`prd-004-buzzing-service-loaders`](../prd-004-buzzing-service-loaders/prd-004-buzzing-service-loaders-index.md) - the `/buzzing` screen this PRD makes routable.
 - hive [`prd-005-health-rail-and-page`](../prd-005-health-rail-and-page/prd-005-health-rail-and-page-index.md) - the health rail and `/health` page served under this route model.
 - doctor PRD-001 (telemetry transport + SSE) and PRD-002 (service registration), forthcoming under [`doctor/library/requirements/backlog/`](../../../../../doctor/library/requirements/backlog/) - the implementations of the doctor ADRs above.
-- Superseded: honeycomb [`prd-068-portal-daemon-boot-shell`](../../../../../honeycomb/library/requirements/backlog/prd-068-portal-daemon-boot-shell/prd-068-portal-daemon-boot-shell-index.md), honeycomb [`prd-070-first-browser-load-experience`](../../../../../honeycomb/library/requirements/backlog/prd-070-first-browser-load-experience/prd-070-first-browser-load-experience-index.md).
+- Superseded: honeycomb [`prd-068-portal-daemon-boot-shell`](../../../../../honeycomb/library/requirements/archive/prd-068-portal-daemon-boot-shell/prd-068-portal-daemon-boot-shell-index.md), honeycomb [`prd-070-first-browser-load-experience`](../../../../../honeycomb/library/requirements/archive/prd-070-first-browser-load-experience/prd-070-first-browser-load-experience-index.md).

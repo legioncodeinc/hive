@@ -2,11 +2,12 @@
 ai_description: |
   This folder contains all planned product and feature work (PRDs).
   Sub-folders: backlog/ (queued, not started), in-work/ (actively
-  being implemented), completed/ (shipped), reports/ (routine code scans).
+  being implemented), completed/ (shipped), archive/ (superseded,
+  reference only), reports/ (routine code scans).
   Lifecycle = location: move entire PRD folders between states.
   PRD folder naming: prd-<###>-<kebab-slug>/
   PRD numbers are repo-local sequential. Take max+1 from all prd-* folders
-  across backlog/, in-work/, and completed/.
+  across backlog/, in-work/, completed/, and archive/.
   Never write PRD content outside of a prd-<###>-<slug>/ folder.
   Do NOT put IRDs here — those go in issues/ (peer of requirements/).
 human_description: |
@@ -30,6 +31,7 @@ Product and feature work, organized by lifecycle state.
 | `backlog/` | Queued | PRDs planned but not yet started |
 | `in-work/` | Active | PRDs currently being implemented |
 | `completed/` | Shipped | Entire PRD folder moves here when work ships |
+| `archive/` | Superseded | Reference-only PRDs superseded before implementation (numbers stay burned) |
 | `reports/` | Evergreen | Routine code-scan and QA reports not tied to a PRD |
 
 ## PRD folder structure
