@@ -6,6 +6,8 @@ Read this if you operate hive or touch `src/lock.ts`, `src/install/registry.ts`,
 
 **Related:**
 - [system-overview.md](./system-overview.md)
+- [../operations/cli-and-runbook.md](../operations/cli-and-runbook.md)
+- [../operations/on-disk-footprint.md](../operations/on-disk-footprint.md)
 - [../infrastructure/build-and-release.md](../infrastructure/build-and-release.md)
 - [../security/trust-boundaries.md](../security/trust-boundaries.md)
 - [../../../requirements/in-work/prd-001-hive-portal-daemon/prd-001d-service-unit-and-registration.md](../../../requirements/in-work/prd-001-hive-portal-daemon/prd-001d-service-unit-and-registration.md)

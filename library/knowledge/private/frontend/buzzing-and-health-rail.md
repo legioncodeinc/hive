@@ -6,7 +6,9 @@ Read this if you work on the fleet-health UI: the `/buzzing` readiness screen, t
 
 **Related:**
 - [dashboard-surface.md](./dashboard-surface.md)
+- [fleet-telemetry-client.md](./fleet-telemetry-client.md)
 - [portal-readiness-splash.md](./portal-readiness-splash.md)
+- [../architecture/shared-contracts-and-routing.md](../architecture/shared-contracts-and-routing.md)
 - [../architecture/landing-gate-and-routing.md](../architecture/landing-gate-and-routing.md)
 - [../../../requirements/backlog/prd-004-buzzing-service-loaders/prd-004-buzzing-service-loaders-index.md](../../../requirements/backlog/prd-004-buzzing-service-loaders/prd-004-buzzing-service-loaders-index.md)
 - [../../../requirements/backlog/prd-005-health-rail-and-page/prd-005-health-rail-and-page-index.md](../../../requirements/backlog/prd-005-health-rail-and-page/prd-005-health-rail-and-page-index.md)

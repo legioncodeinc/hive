@@ -3,7 +3,7 @@
 > **Status:** Active · **Date:** 2026-07-01
 > **Supersedes:** none · **Refines:** nectar `ADR-0004` decision #3 (dashboard ownership + reuse mechanism)
 > **Owners:** platform, hive, honeycomb
-> **Related:** [`../../../requirements/backlog/prd-001-hive-portal-daemon/prd-001-hive-portal-daemon-index.md`](../../../requirements/backlog/prd-001-hive-portal-daemon/prd-001-hive-portal-daemon-index.md), [`../../../requirements/backlog/prd-001-hive-portal-daemon/prd-001b-dashboard-migration-and-copy-map.md`](../../../requirements/backlog/prd-001-hive-portal-daemon/prd-001b-dashboard-migration-and-copy-map.md), [nectar ADR-0003](../../../../../nectar/library/knowledge/private/architecture/ADR-0003-three-daemon-topology-and-hive-portal.md), [nectar ADR-0004](../../../../../nectar/library/knowledge/private/architecture/ADR-0004-hive-portal-daemon-role-and-boundaries.md)
+> **Related:** [`../../../requirements/in-work/prd-001-hive-portal-daemon/prd-001-hive-portal-daemon-index.md`](../../../requirements/in-work/prd-001-hive-portal-daemon/prd-001-hive-portal-daemon-index.md), [`../../../requirements/in-work/prd-001-hive-portal-daemon/prd-001b-dashboard-migration-and-copy-map.md`](../../../requirements/in-work/prd-001-hive-portal-daemon/prd-001b-dashboard-migration-and-copy-map.md), [nectar ADR-0003](../../../../../nectar/library/knowledge/private/architecture/ADR-0003-three-daemon-topology-and-hive-portal.md), [nectar ADR-0004](../../../../../nectar/library/knowledge/private/architecture/ADR-0004-hive-portal-daemon-role-and-boundaries.md)
 
 ## Context
 
@@ -37,7 +37,7 @@ honeycomb stops serving the dashboard. Its unprotected `/` SPA mount (`honeycomb
 
 hive takes ownership of the dashboard by **copying** the `honeycomb/src/dashboard/web/` code into `hive` and owning it thereafter. It does not import honeycomb's module at runtime, and it does not maintain a live fork. Because Decision A retires honeycomb's copy, there is no second live copy to diverge from: this is a one-time ownership transfer paired with source retirement, not an ongoing dual-maintenance fork.
 
-The file-by-file copy-map (dispositions, modifications, retirements) is owned by [`prd-001b-dashboard-migration-and-copy-map.md`](../../../requirements/backlog/prd-001-hive-portal-daemon/prd-001b-dashboard-migration-and-copy-map.md). In summary, of the 36 files under `honeycomb/src/dashboard/**`:
+The file-by-file copy-map (dispositions, modifications, retirements) is owned by [`prd-001b-dashboard-migration-and-copy-map.md`](../../../requirements/in-work/prd-001-hive-portal-daemon/prd-001b-dashboard-migration-and-copy-map.md). In summary, of the 36 files under `honeycomb/src/dashboard/**`:
 
 - **24 copy verbatim** to hive (12 `web/` shell/infra files + 12 `web/pages/` files; all origin-agnostic, hydrate through the injected `wire`).
 - **4 copy with modification** (`wire.ts` moves from single-origin to federated aggregation, plus `app.tsx`, `main.tsx`, `setup-gate.tsx`).
@@ -102,8 +102,8 @@ This is the fork ADR-0004 already rejected, and it is rejected again for a stron
 
 ## References
 
-- [`prd-001-hive-portal-daemon-index.md`](../../../requirements/backlog/prd-001-hive-portal-daemon/prd-001-hive-portal-daemon-index.md) - the module that implements Decisions A + B.
-- [`prd-001b-dashboard-migration-and-copy-map.md`](../../../requirements/backlog/prd-001-hive-portal-daemon/prd-001b-dashboard-migration-and-copy-map.md) - the file-by-file copy-map summarized here.
+- [`prd-001-hive-portal-daemon-index.md`](../../../requirements/in-work/prd-001-hive-portal-daemon/prd-001-hive-portal-daemon-index.md) - the module that implements Decisions A + B.
+- [`prd-001b-dashboard-migration-and-copy-map.md`](../../../requirements/in-work/prd-001-hive-portal-daemon/prd-001b-dashboard-migration-and-copy-map.md) - the file-by-file copy-map summarized here.
 - [nectar ADR-0003](../../../../../nectar/library/knowledge/private/architecture/ADR-0003-three-daemon-topology-and-hive-portal.md) - the topology this ADR leaves unchanged.
 - [nectar ADR-0004](../../../../../nectar/library/knowledge/private/architecture/ADR-0004-hive-portal-daemon-role-and-boundaries.md) - the role ADR whose decision #3 mechanism this refines.
 - `honeycomb/src/daemon/runtime/server.ts:73-108` - the `/api/*` groups and the `/` dashboard mount (retired by Decision A).

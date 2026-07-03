@@ -1,12 +1,18 @@
 # Portal readiness splash (pinned product note)
 
-> Category: Architecture | Version: 1.1 | Date: July 2026 | Status: Active
+> Category: Architecture | Version: 1.2 | Date: July 2026 | Status: Superseded (historical product note)
 
-Until required workload daemons are reachable, hive portal must show a **readiness splash** (service health grid, "waiting…", motion) instead of guided setup or dashboard pages. This note pins that intent; it is not implemented in PRD-001 Wave 1.
+The pre-implementation product note that pinned the readiness-splash intent: until required workload daemons are reachable, the portal must show fleet readiness instead of guided setup or dashboard pages. Kept for provenance; the mechanisms below are the pre-PRD-002 sketch, not the shipped code.
 
-**Decision (locked): Option B** — the portal uses **doctor as the single fleet-health source** via the status page API, not direct per-daemon `/health` probes from hive.
+**Where this landed (read these instead for current behavior):** the intent shipped, but not in the shape sketched below. There is no nested `ReadinessSplash`/`SetupGate` React tree and no client-side federation; the shipped implementation is the server-side landing gate in `src/daemon/gate.ts` (health first, auth second, per hive ADR-0004) plus the `/buzzing` screen (`src/dashboard/web/buzzing-screen.tsx`). The `/api/daemon-bases` client-federation endpoint referenced below was retired by the BFF proxy (hive ADR-0002). The per-daemon status the sketch asked doctor for arrived as doctor's `services[]` model and the `fleet-telemetry` SSE stream. Current docs: [`buzzing-and-health-rail.md`](buzzing-and-health-rail.md), [`../architecture/landing-gate-and-routing.md`](../architecture/landing-gate-and-routing.md), [`../architecture/bff-proxy-federation.md`](../architecture/bff-proxy-federation.md).
 
-**Related:** [ADR-0004 decision #1](../../../../../nectar/library/knowledge/private/architecture/ADR-0004-hive-portal-daemon-role-and-boundaries.md), [`prd-001-hive-portal-daemon-index.md`](../../../requirements/in-work/prd-001-hive-portal-daemon/prd-001-hive-portal-daemon-index.md), [`qa-report-prd-001-hive-portal-daemon.md`](../../../requirements/in-work/prd-001-hive-portal-daemon/qa/qa-report-prd-001-hive-portal-daemon.md) (Warning: honeycomb-scoped `daemonUp` gate), `doctor/src/status-page/server.ts` (`GET :3852/status.json`)
+**Decision (locked, still true): Option B.** The portal uses **doctor as the single fleet-health source** via the status page API, not direct per-daemon `/health` probes from hive.
+
+**Related:** [`buzzing-and-health-rail.md`](buzzing-and-health-rail.md), [`fleet-telemetry-client.md`](fleet-telemetry-client.md), [`../architecture/landing-gate-and-routing.md`](../architecture/landing-gate-and-routing.md), [ADR-0004 (hive)](../architecture/ADR-0004-portal-landing-gate-and-path-based-routing.md), [ADR-0004 decision #1 (nectar)](../../../../../nectar/library/knowledge/private/architecture/ADR-0004-hive-portal-daemon-role-and-boundaries.md), [`prd-001-hive-portal-daemon-index.md`](../../../requirements/in-work/prd-001-hive-portal-daemon/prd-001-hive-portal-daemon-index.md), [`qa-report-prd-001-hive-portal-daemon.md`](../../../requirements/in-work/prd-001-hive-portal-daemon/qa/qa-report-prd-001-hive-portal-daemon.md) (Warning: honeycomb-scoped `daemonUp` gate)
+
+---
+
+Everything below this line is the original pinned note, preserved as written. Section headings that say "today" describe the pre-PRD-002 state of the code, not the current state.
 
 ---
 

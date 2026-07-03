@@ -5,6 +5,10 @@
 Read this if you work on the React SPA under `src/dashboard/web/` or the daemon host under `src/daemon/dashboard/`: it inventories the pages, explains how assets are built and served, and traces how data reaches a panel.
 
 **Related:**
+- [spa-architecture.md](./spa-architecture.md)
+- [wire-and-data-fetch.md](./wire-and-data-fetch.md)
+- [pages-inventory-deep-dive.md](./pages-inventory-deep-dive.md)
+- [hive-graph-and-graph-pages.md](./hive-graph-and-graph-pages.md)
 - [portal-readiness-splash.md](./portal-readiness-splash.md)
 - [buzzing-and-health-rail.md](./buzzing-and-health-rail.md)
 - [../architecture/copy-and-own-provenance.md](../architecture/copy-and-own-provenance.md)

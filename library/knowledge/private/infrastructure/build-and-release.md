@@ -5,8 +5,11 @@
 Read this if you build, test, or ship hive: the tsc + esbuild pipeline, the test suite's shape, the OIDC release workflow, and where the npm publish actually stands.
 
 **Related:**
+- [release-train-and-manifest.md](./release-train-and-manifest.md)
 - [../architecture/system-overview.md](../architecture/system-overview.md)
 - [../frontend/dashboard-surface.md](../frontend/dashboard-surface.md)
+- [../operations/cli-and-runbook.md](../operations/cli-and-runbook.md)
+- [../telemetry/telemetry-egress.md](../telemetry/telemetry-egress.md)
 - [../security/trust-boundaries.md](../security/trust-boundaries.md)
 - [ADR-0001](../architecture/ADR-0001-retire-honeycomb-dashboard-and-copy-and-own-into-hive.md)
 ---

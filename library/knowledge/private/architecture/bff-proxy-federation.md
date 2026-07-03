@@ -7,8 +7,10 @@ Read this if you touch `src/daemon/proxy.ts`, `src/daemon/registry.ts`, or `src/
 **Related:**
 - [system-overview.md](./system-overview.md)
 - [landing-gate-and-routing.md](./landing-gate-and-routing.md)
+- [shared-contracts-and-routing.md](./shared-contracts-and-routing.md)
 - [../security/trust-boundaries.md](../security/trust-boundaries.md)
 - [../frontend/dashboard-surface.md](../frontend/dashboard-surface.md)
+- [../integrations/workload-endpoint-inventory.md](../integrations/workload-endpoint-inventory.md)
 - [ADR-0002](./ADR-0002-server-side-bff-proxy-for-dashboard-federation.md)
 - [ADR-0003](./ADR-0003-future-sse-streaming-for-dashboard-freshness.md)
 ---

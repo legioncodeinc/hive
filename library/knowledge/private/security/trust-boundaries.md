@@ -7,7 +7,10 @@ Read this before changing anything that fetches, redirects, serves a file, or fo
 **Related:**
 - [../architecture/bff-proxy-federation.md](../architecture/bff-proxy-federation.md)
 - [../architecture/landing-gate-and-routing.md](../architecture/landing-gate-and-routing.md)
+- [../architecture/shared-contracts-and-routing.md](../architecture/shared-contracts-and-routing.md)
 - [../architecture/doctor-registration-and-lifecycle.md](../architecture/doctor-registration-and-lifecycle.md)
+- [../integrations/workload-endpoint-inventory.md](../integrations/workload-endpoint-inventory.md)
+- [../telemetry/telemetry-egress.md](../telemetry/telemetry-egress.md)
 - [../../../requirements/in-work/prd-001-hive-portal-daemon/qa/security-report.md](../../../requirements/in-work/prd-001-hive-portal-daemon/qa/security-report.md)
 - [ADR-0002](../architecture/ADR-0002-server-side-bff-proxy-for-dashboard-federation.md)
 - [ADR-0004](../architecture/ADR-0004-portal-landing-gate-and-path-based-routing.md)

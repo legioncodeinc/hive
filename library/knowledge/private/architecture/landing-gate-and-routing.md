@@ -7,7 +7,9 @@ Read this if you touch `src/daemon/gate.ts`, `src/daemon/server.ts` route regist
 **Related:**
 - [system-overview.md](./system-overview.md)
 - [bff-proxy-federation.md](./bff-proxy-federation.md)
+- [shared-contracts-and-routing.md](./shared-contracts-and-routing.md)
 - [../frontend/buzzing-and-health-rail.md](../frontend/buzzing-and-health-rail.md)
+- [../frontend/spa-architecture.md](../frontend/spa-architecture.md)
 - [../security/trust-boundaries.md](../security/trust-boundaries.md)
 - [../../../requirements/backlog/prd-003-portal-landing-gate-and-routing/prd-003-portal-landing-gate-and-routing-index.md](../../../requirements/backlog/prd-003-portal-landing-gate-and-routing/prd-003-portal-landing-gate-and-routing-index.md)
 - [ADR-0004](./ADR-0004-portal-landing-gate-and-path-based-routing.md)
