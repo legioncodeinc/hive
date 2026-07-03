@@ -17,6 +17,7 @@ import { createPortalGate } from "./gate.js";
 import { createApiProxy, type ProxyFetch } from "./proxy.js";
 import { resolveRegisteredServiceNames } from "./registry.js";
 import { createTelemetryStreamHandler, type TelemetryFetch } from "./telemetry-proxy.js";
+import { createInstallerService, type InstallerServiceOptions } from "./installer/index.js";
 import type { SetupAuthFetchImpl } from "./setup-auth.js";
 
 export interface CreateHiveOptions {
@@ -34,6 +35,11 @@ export interface CreateHiveOptions {
   readonly doctorEventsUrl?: string;
   /** The fetch used by the telemetry relay to reach doctor's SSE stream (defaults to the global `fetch`). */
   readonly telemetryStreamFetch?: TelemetryFetch;
+  /**
+   * PRD-009a: installer-service seams (manifest fetch, spawn, token/npm-prefix resolution, fs).
+   * A test injects fakes here so the onboarding endpoints never touch the network or real npm.
+   */
+  readonly installer?: InstallerServiceOptions;
 }
 
 export interface StartHiveOptions extends CreateHiveOptions {
@@ -139,6 +145,13 @@ export function createHive(options: CreateHiveOptions = {}): HiveInstance {
       fetchImpl: options.telemetryStreamFetch
     })
   );
+
+  // PRD-009a: the onboarding installer service (detection, install start, SSE progress, health,
+  // completion, funnel-event stub). Registered BEFORE the generic `/api/*` proxy so these specific
+  // `/api/onboarding/*` routes win (same registration-order discipline as `/api/fleet-status`). Its
+  // health check reuses the SAME fleet-status fetch + doctor URL the gate uses; a test can override
+  // any installer seam (manifest fetch, spawn, token/npm-prefix, fs) via `options.installer`.
+  createInstallerService({ fleetStatusFetch, doctorStatusUrl, ...options.installer }).register(app);
 
   // Server-side federation (BFF): every other `/api/*` and `/setup/*` request is proxied over
   // loopback to the workload daemon that owns it (honeycomb or nectar), resolved from

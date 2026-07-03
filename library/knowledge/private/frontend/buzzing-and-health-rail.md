@@ -1,6 +1,6 @@
 # Buzzing Screen And Health Rail
 
-> Category: Frontend | Version: 1.0 | Date: July 2026 | Status: Active | Author: Mario Aldayuz
+> Category: Frontend | Version: 1.1 | Date: July 2026 | Status: Active | Author: Mario Aldayuz
 
 Read this if you work on the fleet-health UI: the `/buzzing` readiness screen, the always-present health rail, the `/health` page, and the SSE pipeline that feeds all three from doctor.
 
@@ -16,9 +16,9 @@ Read this if you work on the fleet-health UI: the `/buzzing` readiness screen, t
 - [ADR-0004](../architecture/ADR-0004-portal-landing-gate-and-path-based-routing.md)
 ---
 
-## Status honesty, up front
+## Status, up front
 
-PRD-004 (buzzing loaders) and PRD-005 (health rail + page) still sit in `library/requirements/backlog/` with empty `qa/` folders, but their implementations are on main with test coverage (`tests/dashboard/buzzing-screen.test.tsx`, `health-rail.test.tsx`, `health-page.test.tsx`, `service-icons.test.tsx`, `use-fleet-telemetry*.test.*`, `tests/daemon/telemetry-proxy.test.ts`, `tests/shared/service-status.test.ts`). The code is ahead of the PRD paperwork: treat the behavior below as shipped, and treat the missing QA close-out reports (and the PRD folders' backlog location) as the open work. Doctor's side of the contract is also live: `doctor/src/ingestion/sse.ts` emits the `fleet-telemetry` event this pipeline consumes.
+PRD-004 (buzzing loaders) and PRD-005 (health rail + page) are shipped, QA-verified, and fully tested in live scenarios, with test coverage across `tests/dashboard/buzzing-screen.test.tsx`, `health-rail.test.tsx`, `health-page.test.tsx`, `service-icons.test.tsx`, `use-fleet-telemetry*.test.*`, `tests/daemon/telemetry-proxy.test.ts`, and `tests/shared/service-status.test.ts`. Every behavior below is production behavior. Doctor's side of the contract is live too: `doctor/src/ingestion/sse.ts` emits the `fleet-telemetry` event this pipeline consumes, and the end-to-end path from a booting fleet to a settled dashboard has been exercised on real machines.
 
 ## The SSE pipeline
 

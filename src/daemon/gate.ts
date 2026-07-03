@@ -44,8 +44,15 @@ const BUZZING_ROUTE = "/buzzing" as const;
 /** The fixed redirect target for a logged-out operator (g-AC-4). A hard-coded literal, never derived. */
 const LOGIN_ROUTE = "/login" as const;
 
-/** The only two gate-exempt SCREENS (g-AC-7 / g-AC-8): always served directly, never redirected. */
-export const GATE_EXEMPT_ROUTES = [BUZZING_ROUTE, LOGIN_ROUTE] as const;
+/**
+ * The onboarding installer screen (PRD-009). Gate-exempt like `/buzzing` and `/login`: on first run
+ * the fleet is by definition unhealthy and the operator unauthenticated, so `/onboarding` must serve
+ * its SPA shell directly rather than being redirected by the health-then-auth precedence.
+ */
+const ONBOARDING_ROUTE = "/onboarding" as const;
+
+/** The gate-exempt SCREENS (g-AC-7 / g-AC-8): always served directly, never redirected. */
+export const GATE_EXEMPT_ROUTES = [BUZZING_ROUTE, LOGIN_ROUTE, ONBOARDING_ROUTE] as const;
 
 /**
  * hive's OWN liveness route + the bundled SPA asset routes — never a page navigation to gate.
@@ -55,8 +62,13 @@ export const GATE_EXEMPT_ROUTES = [BUZZING_ROUTE, LOGIN_ROUTE] as const;
  */
 const GATE_EXEMPT_INFRA_PATHS = new Set<string>(["/app.js", "/styles.css", "/honeycomb-memory-cluster.svg"]);
 
-/** Path PREFIXES that are data-plane traffic (the BFF proxy, fonts), never a gated page route. */
-const GATE_EXEMPT_INFRA_PREFIXES = ["/api/", "/setup/", "/fonts/"] as const;
+/**
+ * Path PREFIXES that are data-plane / static-asset traffic (the BFF proxy, fonts, and the brand
+ * SVG assets under `/assets/`), never a gated page route. `/assets/` is exempt (PRD-009a) so the
+ * onboarding product-mark SVGs load even when the shell has redirected the browser to a gated
+ * screen, exactly like the other bundled asset routes.
+ */
+const GATE_EXEMPT_INFRA_PREFIXES = ["/api/", "/setup/", "/fonts/", "/assets/"] as const;
 
 /**
  * hive's own machine-liveness path. Ambiguous on purpose (PRD-005b): a health-probe/monitoring

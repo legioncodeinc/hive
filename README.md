@@ -16,7 +16,7 @@
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@legioncodeinc/hive"><img src="https://img.shields.io/npm/v/@legioncodeinc/hive?style=flat-square&color=E8722A&label=version" alt="npm version"></a>
-  <img src="https://img.shields.io/badge/harnesses-6-E8722A?style=flat-square" alt="6 harnesses">
+  <img src="https://img.shields.io/badge/harnesses-3%20supported%20%7C%203%20in%20progress-E8722A?style=flat-square" alt="3 harnesses supported, 3 in progress">
   <img src="https://img.shields.io/badge/OS-windows%20%7C%20macos%20%7C%20linux-6E6A62?style=flat-square" alt="Windows, macOS, Linux">
 </p>
 
@@ -219,7 +219,7 @@ No MCP server, no SDK, and none pretending. The workload daemons own those surfa
 
 <h2 align="center"><a href="https://ideas.theapiary.sh">📍 Status & Roadmap</a></h2>
 
-Hive is **pre-release (v0.2.x)**. The portal daemon, the migrated dashboard, the server-side BFF proxy, the OS service units and registry wiring, the portal gate, the fleet readiness surface, and the Hive Graph page (PRD-015) have all landed. We document what's real and flag what's in flight; the roadmap and idea board live at [ideas.theapiary.sh](https://ideas.theapiary.sh).
+Hive is **production ready (v0.2.x)** and fully tested in live scenarios. The whole PRD program has shipped: the portal daemon, the migrated dashboard, the server-side BFF proxy, the OS service units and registry wiring, the portal gate, the fleet readiness surface, the Hive Graph page, and the onboarding installer. We document what's shipped; the roadmap and idea board for what comes next live at [ideas.theapiary.sh](https://ideas.theapiary.sh).
 
 <img src="assets/brand/divider-minor.svg" width="100%" height="3">
 

@@ -1,6 +1,6 @@
 # Release Train And Manifest
 
-> Category: Infrastructure | Version: 1.0 | Date: July 2026 | Status: Active | Author: Mario Aldayuz
+> Category: Infrastructure | Version: 1.1 | Date: July 2026 | Status: Active | Author: Mario Aldayuz
 
 Read this if you cut a hive release or need to understand where hive sits in the fleet's combined release train: it explains the superproject's `hive-release.json` manifest, hive's `published: false` status and the one-time npm bootstrap it is waiting on, and how a hive tag relates to the fleet pin.
 
@@ -71,4 +71,4 @@ The two are decoupled on purpose. A hive publish makes a version installable; a 
 
 ## What this means for hive today
 
-Hive is code-complete and CI-covered on `main` but not yet on npm. The dashboard changes ship as hive releases and touch nothing else in the fleet, which is the whole velocity/stability split the portal exists for (see [../architecture/system-overview.md](../architecture/system-overview.md)): a UI change is a hive tag, never a supervisor release. The manifest is where the fleet records that a given hive version was tested alongside a specific honeycomb, doctor, and nectar, so when hive does bootstrap onto npm, the first thing that changes operationally is that its `published` flag flips to `true` and CI starts resolving its pin against the registry like the other published products.
+Hive is production ready and CI-covered on `main`, with its full portal PRD program shipped and tested in live scenarios. It is published to npm: `@legioncodeinc/hive` resolves on the public registry (the trusted-publisher bootstrap below is complete), and `hive-release.json` pins it `published: true`, so CI resolves its pin against the registry like the other three products. The dashboard changes ship as hive releases and touch nothing else in the fleet, which is the whole velocity/stability split the portal exists for (see [../architecture/system-overview.md](../architecture/system-overview.md)): a UI change is a hive tag, never a supervisor release. The manifest is where the fleet records that a given hive version was tested alongside a specific honeycomb, doctor, and nectar.

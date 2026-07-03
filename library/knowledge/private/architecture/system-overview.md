@@ -1,6 +1,6 @@
 # Hive System Overview
 
-> Category: Architecture | Version: 1.0 | Date: July 2026 | Status: Active | Author: Mario Aldayuz
+> Category: Architecture | Version: 1.1 | Date: July 2026 | Status: Active | Author: Mario Aldayuz
 
 Read this first if you work on any part of hive: it explains why the portal daemon exists, where it sits in the Apiary fleet, and what happens from OS boot to a rendered dashboard.
 
@@ -108,4 +108,4 @@ Every domain above has a deeper doc in this knowledge base; start from the Relat
 
 ## Program state
 
-PRD-001 (portal daemon) and PRD-002 (readiness splash) are implemented and QA-verified on main (PRD-001: 26 of 27 ACs verified, the release-train AC closed later by `ci.yaml` + `release.yaml`; PRD-002: 19 of 19). PRD-003 (landing gate + path routing), PRD-004 (buzzing loaders), and PRD-005 (health rail + page) are implemented on main with full test coverage, though their PRD folders still sit in `library/requirements/backlog/` and their `qa/` folders are empty: the code is ahead of the paperwork. The `@legioncodeinc/hive` package is `published: false` in the superproject's `hive-release.json`, pending the one-time manual npm bootstrap the release workflow documents. See [../infrastructure/build-and-release.md](../infrastructure/build-and-release.md).
+Hive is production ready and fully tested in live scenarios: the whole portal PRD program has shipped and is QA-verified on main. PRD-001 (portal daemon), PRD-002 (readiness splash), PRD-003 (landing gate + path routing), PRD-004 (buzzing loaders), PRD-005 (health rail + page), and PRD-009 (onboarding installer) are all implemented, tested, and verified, with the CI and release train (`ci.yaml` + `release.yaml`) closing out the independent-release-train acceptance criterion. Every domain in this knowledge base describes shipped, exercised behavior rather than intended behavior. The `@legioncodeinc/hive` package carries a `published: false` pin in the superproject's `hive-release.json`, which reflects only the one-time trusted-publisher npm bootstrap the release workflow documents, not the maturity of the code. See [../infrastructure/build-and-release.md](../infrastructure/build-and-release.md).
