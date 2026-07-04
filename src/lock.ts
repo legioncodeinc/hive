@@ -10,14 +10,18 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 import { DaemonAlreadyRunningError } from "./errors.js";
+import { type FleetRootDeps } from "./shared/apiary-root.js";
 import { HIVE_LOCK_PATH, HIVE_PID_PATH } from "./shared/constants.js";
+import { resolveLegacyHiveLockPath, resolveLegacyHivePidPath } from "./shared/legacy-paths.js";
 
 export interface LockPaths {
   readonly lockFilePath: string;
   readonly pidFilePath: string;
 }
 
-export function resolveLockPaths(paths: Partial<LockPaths> = {}): LockPaths {
+export interface LockPathOptions extends Partial<LockPaths>, FleetRootDeps {}
+
+export function resolveLockPaths(paths: LockPathOptions = {}): LockPaths {
   return {
     lockFilePath: paths.lockFilePath ?? HIVE_LOCK_PATH,
     pidFilePath: paths.pidFilePath ?? HIVE_PID_PATH
@@ -47,9 +51,42 @@ export function readPidFile(path: string): number | null {
   }
 }
 
-export function acquireSingleInstanceLock(paths: Partial<LockPaths> = {}): LockPaths {
+function assertLegacyLockNotHeldByLiveDaemon(deps: FleetRootDeps = {}): void {
+  const legacyLockPath = resolveLegacyHiveLockPath(deps);
+  if (!existsSync(legacyLockPath)) return;
+  const existingPid = readPidFile(legacyLockPath);
+  if (existingPid !== null && isPidAlive(existingPid)) {
+    throw new DaemonAlreadyRunningError(existingPid, legacyLockPath);
+  }
+}
+
+/**
+ * mg-AC-6: genuinely best-effort. `force: true` suppresses only ENOENT; an EBUSY/EPERM (a file
+ * held open on Windows, a permissions oddity in the legacy dir) must never abort the always-on
+ * portal's boot, so each removal is individually swallowed. A leftover stale pair is retried on
+ * the next boot.
+ */
+function removeStaleLegacyLockArtifacts(deps: FleetRootDeps = {}): void {
+  try {
+    rmSync(resolveLegacyHiveLockPath(deps), { force: true });
+  } catch {
+    // Best-effort cleanup only.
+  }
+  try {
+    rmSync(resolveLegacyHivePidPath(deps), { force: true });
+  } catch {
+    // Best-effort cleanup only.
+  }
+}
+
+export function acquireSingleInstanceLock(paths: LockPathOptions = {}): LockPaths {
+  assertLegacyLockNotHeldByLiveDaemon(paths);
+
   const resolved = resolveLockPaths(paths);
-  mkdirSync(dirname(resolved.lockFilePath), { recursive: true });
+  // mg-AC-4 parity: when this mkdir is the FIRST creator of the hive state dir (a no-op-injected
+  // migration seam, or a standalone caller), it must apply the same 0o700 the migration applies,
+  // so the dir that later holds the 0600 onboarding token is never left at umask-default modes.
+  mkdirSync(dirname(resolved.lockFilePath), { recursive: true, mode: 0o700 });
   const pid = String(process.pid);
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -82,6 +119,7 @@ export function acquireSingleInstanceLock(paths: Partial<LockPaths> = {}): LockP
       throw error;
     }
 
+    removeStaleLegacyLockArtifacts(paths);
     return resolved;
   }
 

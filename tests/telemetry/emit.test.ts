@@ -160,8 +160,48 @@ describe("telemetry payload shape", () => {
   });
 });
 
+describe("state-dir constants (rr-AC-6)", () => {
+  it("rr-AC-6 HIVE_STATE_DIR is <fleetRoot>/hive and the onboarding surfaces follow it", async () => {
+    const { resolveHiveStateDir, resolveSharedInstallIdPath } = await import("../../src/shared/apiary-root.js");
+    const { HIVE_STATE_DIR, SHARED_INSTALL_ID_PATH } = await import("../../src/telemetry/emit.js");
+    const { ONBOARDING_TOKEN_PATH } = await import("../../src/daemon/installer/config.js");
+    const { DEFAULT_ONBOARDING_LEDGER_DIR } = await import("../../src/telemetry/onboarding-session-ledger.js");
+
+    expect(HIVE_STATE_DIR).toBe(resolveHiveStateDir());
+    expect(SHARED_INSTALL_ID_PATH).toBe(resolveSharedInstallIdPath());
+    expect(ONBOARDING_TOKEN_PATH).toBe(join(HIVE_STATE_DIR, "onboarding-token"));
+    expect(DEFAULT_ONBOARDING_LEDGER_DIR).toBe(HIVE_STATE_DIR);
+  });
+});
+
 describe("distinct_id preference", () => {
-  it("prefers the shared ~/.honeycomb/install-id file when present", () => {
+  it("mg-AC-8 prefers the fleet-root install-id, then legacy shared install-id", () => {
+    return withTempDir(async (dir) => {
+      const fleetPath = join(dir, "fleet-install-id");
+      const legacyPath = join(dir, "legacy-install-id");
+      writeFileSync(legacyPath, "legacy-funnel-id\n", "utf8");
+
+      const recorder = createFetchRecorder();
+      const deps = keyedDeps(dir, recorder, {
+        sharedInstallIdPath: fleetPath,
+        legacySharedInstallIdPath: legacyPath
+      });
+
+      writeFileSync(fleetPath, "fleet-funnel-id\n", "utf8");
+      await emitTelemetry("hive_installed", {}, deps);
+      expect(recorder.calls[0].body["distinct_id"]).toBe("fleet-funnel-id");
+
+      rmSync(fleetPath, { force: true });
+      const legacyOnly = keyedDeps(dir, createFetchRecorder(), {
+        sharedInstallIdPath: fleetPath,
+        legacySharedInstallIdPath: legacyPath
+      });
+      const legacyId = resolveDistinctId(legacyOnly);
+      expect(legacyId).toBe("legacy-funnel-id");
+    });
+  });
+
+  it("prefers the shared install-id file when present", () => {
     return withTempDir(async (dir) => {
       const sharedPath = join(dir, "shared-install-id");
       writeFileSync(sharedPath, "shared-funnel-id-123\n", "utf8");

@@ -17,9 +17,8 @@
  *
  * The payload is BUILT FROM A CLOSED ALLOW-LIST: exactly `{package, version, os, arch, node}`. There
  * is no free-form property path, so a leak is structurally impossible. `distinct_id` prefers the
- * shared `~/.honeycomb/install-id` written by the honeycomb installer (correlates the funnel across
- * products); when absent, a UUID is generated once and persisted in hive's own state dir
- * (`~/.honeycomb/hive/`, mode 0o700).
+ * fleet-root install-id, then the legacy shared install-id during the compatibility window, then a
+ * UUID persisted in hive's state dir (mode 0o700).
  *
  * Fail-soft everywhere: the POST is wrapped in a 2s AbortController timeout and a try/catch that
  * swallows EVERYTHING (timeout, network error, 4xx, 5xx, ledger IO). `emitTelemetry` resolves to a
@@ -34,7 +33,9 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { arch, platform } from "node:os";
 import { join } from "node:path";
 
-import { HONEYCOMB_HOME_DIR, HIVE_VERSION } from "../shared/constants.js";
+import { HIVE_VERSION } from "../shared/constants.js";
+import { resolveHiveStateDir, resolveSharedInstallIdPath } from "../shared/apiary-root.js";
+import { LEGACY_SHARED_INSTALL_ID_PATH } from "../shared/legacy-paths.js";
 
 // ----------------------------------------------------------------------------
 // Build-injected destination (esbuild `define`; empty key means hard-disabled).
@@ -89,17 +90,15 @@ export function isOptedOut(env: NodeJS.ProcessEnv = process.env): boolean {
 // ----------------------------------------------------------------------------
 
 /**
- * hive's own state dir. hive already keeps per-product state under
- * `~/.honeycomb/hive/` (the staged Windows service unit lives there), so the telemetry install-id
- * fallback and the dedupe ledger live beside it. Created lazily with mode 0o700.
+ * hive's own state dir under the fleet root (`<apiary>/hive/`). Created lazily with mode 0o700.
  */
-export const HIVE_STATE_DIR = join(HONEYCOMB_HOME_DIR, "hive");
+export const HIVE_STATE_DIR = resolveHiveStateDir();
 
 /**
- * The shared install-id written by the honeycomb installer. When present, its contents are used as
+ * The fleet-root shared install-id written by the installer. When present, its contents are used as
  * `distinct_id` so hive's lifecycle events correlate with the installer funnel.
  */
-export const SHARED_INSTALL_ID_PATH = join(HONEYCOMB_HOME_DIR, "install-id");
+export const SHARED_INSTALL_ID_PATH = resolveSharedInstallIdPath();
 
 /** Filename of hive's own generated install-id inside {@link HIVE_STATE_DIR}. */
 export const INSTALL_ID_FILENAME = "install-id" as const;
@@ -266,9 +265,10 @@ export function saveLedger(stateDir: string, ledger: TelemetryLedger): void {
 
 /**
  * Resolve the anonymized `distinct_id`, in preference order:
- *   1. The shared `~/.honeycomb/install-id` (honeycomb installer funnel correlation), when present.
- *   2. hive's own previously generated id at `${stateDir}/install-id`.
- *   3. A fresh UUID, persisted best-effort at `${stateDir}/install-id` (dir mode 0o700).
+ *   1. The fleet-root `install-id` (mg-AC-8), when present.
+ *   2. The legacy shared install-id (legacy-window read; see legacy-paths.ts), when present.
+ *   3. hive's own previously generated id at `${stateDir}/install-id`.
+ *   4. A fresh UUID, persisted best-effort at `${stateDir}/install-id` (dir mode 0o700).
  * Never an email, account id, hostname, or path. Never throws: a persist failure still returns the
  * generated id (that emit just will not correlate with later ones).
  */
@@ -278,7 +278,15 @@ export function resolveDistinctId(deps: EmitDeps = {}): string {
     const shared = readFileSync(sharedPath, "utf8").trim();
     if (shared.length > 0) return shared;
   } catch {
-    // No shared install-id: fall through to hive's own id.
+    // No fleet-root install-id: fall through to legacy shared id.
+  }
+
+  const legacySharedPath = deps.legacySharedInstallIdPath ?? LEGACY_SHARED_INSTALL_ID_PATH;
+  try {
+    const legacyShared = readFileSync(legacySharedPath, "utf8").trim();
+    if (legacyShared.length > 0) return legacyShared;
+  } catch {
+    // No legacy shared install-id: fall through to hive's own id.
   }
 
   const stateDir = deps.stateDir ?? HIVE_STATE_DIR;
@@ -337,6 +345,8 @@ export interface EmitDeps {
   readonly stateDir?: string;
   /** Override the shared install-id path (tests point this at a temp file). */
   readonly sharedInstallIdPath?: string;
+  /** Override the legacy shared install-id path (tests point this at a temp file). */
+  readonly legacySharedInstallIdPath?: string;
   /** The bounded POST timeout in ms (defaults to {@link DEFAULT_EMIT_TIMEOUT_MS}). */
   readonly timeoutMs?: number;
   /** The clock stamping ledger entries (defaults to `new Date().toISOString()`). */

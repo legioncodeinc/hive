@@ -8,6 +8,7 @@ import {
   registerHiveWithDoctor,
   type RegistryFs
 } from "../../src/install/registry.js";
+import { resolveHiveRegistryPidPath } from "../../src/shared/apiary-root.js";
 
 async function withTempDir(run: (dir: string) => Promise<void> | void): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "hive-registry-test-"));
@@ -29,6 +30,7 @@ describe("hive registry writer", () => {
       };
       const hive = parsed.daemons.find((entry) => entry["name"] === "hive");
       expect(hive).toEqual(buildHiveRegistryEntry());
+      expect(hive?.["pidPath"]).toBe(resolveHiveRegistryPidPath());
     });
   });
 
@@ -67,6 +69,35 @@ describe("hive registry writer", () => {
       const matches = parsed.daemons.filter((entry) => entry["name"] === "hive");
       expect(matches).toHaveLength(1);
       expect(matches[0]).toEqual(buildHiveRegistryEntry());
+    });
+  });
+
+  it("rc-AC-1 preserves other products' entries and unknown root keys byte-for-byte", () => {
+    return withTempDir((dir) => {
+      const registryPath = join(dir, "registry.json");
+      const honeycombEntry = {
+        name: "honeycomb",
+        healthUrl: "http://127.0.0.1:3850/health",
+        pidPath: "/opt/state/honeycomb.pid",
+        probeIntervalMs: 15_000,
+        customVendorField: "kept-verbatim"
+      };
+      const unknownRootValue = { schemaVersion: 3, notes: ["doctor-owned", "hive must not drop this"] };
+      writeFileSync(
+        registryPath,
+        JSON.stringify({ daemons: [honeycombEntry], unknownRootKey: unknownRootValue }, null, 2),
+        "utf8"
+      );
+
+      registerHiveWithDoctor({ registryPath });
+
+      const parsed = JSON.parse(readFileSync(registryPath, "utf8")) as {
+        daemons: Array<Record<string, unknown>>;
+        unknownRootKey: unknown;
+      };
+      expect(parsed.daemons.find((entry) => entry["name"] === "honeycomb")).toEqual(honeycombEntry);
+      expect(parsed.unknownRootKey).toEqual(unknownRootValue);
+      expect(parsed.daemons.find((entry) => entry["name"] === "hive")).toEqual(buildHiveRegistryEntry());
     });
   });
 

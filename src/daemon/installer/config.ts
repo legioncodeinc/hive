@@ -9,10 +9,11 @@
 
 import { createRequire } from "node:module";
 import { existsSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
 import { platform as osPlatform } from "node:process";
 
-import { HIVE_VERSION, HONEYCOMB_HOME_DIR } from "../../shared/constants.js";
+import { HIVE_VERSION } from "../../shared/constants.js";
+import { resolveOnboardingTokenPath } from "../../shared/apiary-root.js";
+import { LEGACY_ONBOARDING_TOKEN_PATH } from "../../shared/legacy-paths.js";
 import { createNodeSpawn, type SpawnFn } from "./spawn.js";
 
 /** The primary fleet manifest URL served by the install site (MV-2). */
@@ -26,7 +27,7 @@ export const MANIFEST_FALLBACK_URL =
   "https://raw.githubusercontent.com/legioncodeinc/the-apiary/main/hive-release.json" as const;
 
 /** The bootstrap-minted one-time onboarding token file (mode 0600), read lazily per request (is-AC-9). */
-export const ONBOARDING_TOKEN_PATH = join(HONEYCOMB_HOME_DIR, "hive", "onboarding-token");
+export const ONBOARDING_TOKEN_PATH = resolveOnboardingTokenPath();
 
 /** The bounded timeout for the single network manifest fetch before falling back to the snapshot. */
 export const MANIFEST_TIMEOUT_MS = 5000 as const;
@@ -46,6 +47,8 @@ export interface InstallerConfig {
   readonly manifestTimeoutMs: number;
   /** The onboarding token file path (read lazily, deleted on completion). */
   readonly tokenPath: string;
+  /** Legacy-window onboarding token path (mg-AC-9 dual read). */
+  readonly legacyTokenPath: string;
   /** Existence check (a fake map in tests). */
   readonly fileExists: (path: string) => boolean;
   /** UTF-8 read returning `null` on any error (a fake map in tests). */
@@ -104,6 +107,7 @@ export function createInstallerConfig(overrides: Partial<InstallerConfig> = {}):
     manifestFetch: overrides.manifestFetch ?? ((input, init) => fetch(input, init)),
     manifestTimeoutMs: overrides.manifestTimeoutMs ?? MANIFEST_TIMEOUT_MS,
     tokenPath: overrides.tokenPath ?? ONBOARDING_TOKEN_PATH,
+    legacyTokenPath: overrides.legacyTokenPath ?? LEGACY_ONBOARDING_TOKEN_PATH,
     fileExists: overrides.fileExists ?? ((path) => existsSync(path)),
     readTextFile: overrides.readTextFile ?? defaultReadTextFile,
     deleteFile: overrides.deleteFile ?? defaultDeleteFile,

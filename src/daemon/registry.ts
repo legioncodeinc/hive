@@ -1,11 +1,15 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { z } from "zod";
 
-import { HONEYCOMB_HOME_DIR } from "../shared/constants.js";
+import { resolveFleetRegistryPath } from "../shared/apiary-root.js";
+import { readRegistryBody } from "../shared/registry-paths.js";
 import { isLoopbackBaseUrl, normalizeDaemonBases, type DaemonBases, type DaemonName } from "../shared/daemon-routing.js";
 
-export const DOCTOR_REGISTRY_PATH = join(HONEYCOMB_HOME_DIR, "doctor.daemons.json");
+/**
+ * Informational only: the fleet-root registry location snapshotted at module load. Readers must
+ * go through {@link readRegistryBody} (which applies the new-then-legacy window chain per call),
+ * never read this constant's path directly.
+ */
+export const DOCTOR_REGISTRY_PATH = resolveFleetRegistryPath();
 
 const RegistryEntrySchema = z.object({
   name: z.string().min(1),
@@ -111,24 +115,19 @@ export interface ResolveRegisteredServiceNamesOptions {
  * shows no tiles until the fleet-status/SSE feed enumerates services some other way).
  */
 export function resolveRegisteredServiceNames(options: ResolveRegisteredServiceNamesOptions = {}): readonly string[] {
-  const registryPath = options.registryPath ?? DOCTOR_REGISTRY_PATH;
-  const readFile = options.readFile ?? ((path: string): string => readFileSync(path, "utf8"));
-
-  try {
-    return parseRegisteredServiceNames(readFile(registryPath));
-  } catch {
-    return [];
-  }
+  const raw = readRegistryBody(options);
+  if (raw === null) return [];
+  return parseRegisteredServiceNames(raw);
 }
 
 export function resolveDaemonBases(options: ResolveDaemonBasesOptions = {}): DaemonBases {
-  const registryPath = options.registryPath ?? DOCTOR_REGISTRY_PATH;
-  const readFile = options.readFile ?? ((path: string): string => readFileSync(path, "utf8"));
-
-  try {
-    return normalizeDaemonBases(parseDoctorRegistry(readFile(registryPath)));
-  } catch {
+  const raw = readRegistryBody(options);
+  if (raw === null) {
     // Missing or unreadable registry means no daemon has registered yet. Use documented loopback defaults.
     return normalizeDaemonBases();
   }
+
+  return normalizeDaemonBases(parseDoctorRegistry(raw));
 }
+
+export { readRegistryBody } from "../shared/registry-paths.js";

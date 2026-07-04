@@ -15,6 +15,7 @@ import type { PageProps } from "../page-frame.js";
 import { isTabHidden, PageFrame } from "../page-frame.js";
 import type { ProjectionDerivedEntry, ProjectionFileEntry } from "../hive-graph-projection.js";
 import { NeedsProjectSelection } from "../needs-project.js";
+import { FolderPicker } from "../folder-picker.js";
 import { useScope } from "../scope-context.js";
 import {
 	GraphCanvasFull,
@@ -39,11 +40,193 @@ import {
 	type HiveGraphHitWire,
 	type HiveGraphSearchResultWire,
 	type HiveGraphStatusResultWire,
+	type NectarProjectRowWire,
+	type NectarProjectsWire,
+	type SetNectarBroodingBody,
+	type WireClient,
+	EMPTY_NECTAR_PROJECTS,
 } from "../wire.js";
 import type { ViewTransform } from "./graph.js";
 
 /** Poll interval for graph + status widgets (mirrors Memory Graph discipline). */
 const HIVE_GRAPH_POLL_MS = 8000;
+
+const SURFACE: React.CSSProperties = {
+	padding: 16,
+	background: "var(--bg-surface)",
+	border: "1px solid var(--border-default)",
+	borderRadius: "var(--radius-lg)",
+};
+
+function broodingLabel(state: NectarProjectRowWire["brooding"]): string {
+	switch (state) {
+		case "active":
+			return "brooding";
+		case "paused":
+			return "paused";
+		case "global-paused":
+			return "global-paused";
+		default: {
+			const _exhaustive: never = state;
+			return _exhaustive;
+		}
+	}
+}
+
+function broodingBadgeTone(state: NectarProjectRowWire["brooding"]): "verified" | "neutral" | "warning" {
+	switch (state) {
+		case "active":
+			return "verified";
+		case "paused":
+			return "neutral";
+		case "global-paused":
+			return "warning";
+		default: {
+			const _exhaustive: never = state;
+			return _exhaustive;
+		}
+	}
+}
+
+/** PRD-019c — nectar active projects + brooding controls (polls `GET /api/hive-graph/projects`). */
+function NectarProjectsPanel({ wire }: { wire: WireClient }): React.JSX.Element {
+	const [projectsWire, setProjectsWire] = React.useState<NectarProjectsWire>(EMPTY_NECTAR_PROJECTS);
+	const [hydrated, setHydrated] = React.useState(false);
+	const [busyKey, setBusyKey] = React.useState<string | null>(null);
+	const inFlightRef = React.useRef(false);
+
+	const reList = React.useCallback(async (): Promise<void> => {
+		const next = await wire.nectarProjects();
+		setProjectsWire(next);
+		setHydrated(true);
+	}, [wire]);
+
+	React.useEffect(() => {
+		let alive = true;
+		const tick = async (): Promise<void> => {
+			if (!alive || isTabHidden()) return;
+			await reList();
+		};
+		void tick();
+		const id = setInterval(() => void tick(), HIVE_GRAPH_POLL_MS);
+		return () => {
+			alive = false;
+			clearInterval(id);
+		};
+	}, [reList]);
+
+	const runBroodingWrite = React.useCallback(
+		async (body: SetNectarBroodingBody, busy: string): Promise<void> => {
+			if (inFlightRef.current || projectsWire.unreachable) return;
+			inFlightRef.current = true;
+			setBusyKey(busy);
+			try {
+				const ack = await wire.setNectarBrooding(body);
+				if (!ack.unreachable) {
+					setProjectsWire(ack);
+				}
+				await reList();
+			} finally {
+				inFlightRef.current = false;
+				setBusyKey(null);
+			}
+		},
+		[wire, reList, projectsWire.unreachable],
+	);
+
+	const onBound = React.useCallback((): void => {
+		void reList();
+	}, [reList]);
+
+	const controlsDisabled = !hydrated || projectsWire.unreachable || busyKey !== null;
+
+	return (
+		<Panel
+			title="Nectar projects"
+			right={
+				<Button
+					variant="secondary"
+					size="sm"
+					data-testid="nectar-global-brooding-toggle"
+					disabled={controlsDisabled}
+					onClick={() =>
+						void runBroodingWrite(
+							{ global: projectsWire.globalBrooding === "on" ? "paused" : "on" },
+							"global",
+						)
+					}
+				>
+					{projectsWire.globalBrooding === "on" ? "Pause all brooding" : "Resume all brooding"}
+				</Button>
+			}
+		>
+			{projectsWire.unreachable ? (
+				<div
+					data-testid="nectar-projects-unreachable"
+					style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--severity-critical)" }}
+				>
+					Nectar is unreachable — project brooding controls are disabled.
+				</div>
+			) : !hydrated ? (
+				<span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-tertiary)" }}>loading…</span>
+			) : projectsWire.projects.length === 0 ? (
+				<div data-testid="nectar-needs-project" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+					<div style={{ fontSize: 14, color: "var(--text-secondary)" }}>
+						No active nectar projects yet. Pick a folder to activate brooding for a project directory.
+					</div>
+					<FolderPicker wire={wire} onBound={onBound} />
+				</div>
+			) : (
+				<div data-testid="nectar-projects-list" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+					{projectsWire.projects.map((project) => (
+						<div
+							key={project.projectId}
+							data-testid="nectar-project-row"
+							data-project-id={project.projectId}
+							style={{ ...SURFACE, display: "flex", flexDirection: "column", gap: 8 }}
+						>
+							<div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+								<span
+									data-testid="nectar-project-name"
+									style={{ fontFamily: "var(--font-mono)", fontSize: 14, fontWeight: 600, color: "var(--honey)" }}
+								>
+									{project.name !== "" ? project.name : project.projectId}
+								</span>
+								<Badge tone={broodingBadgeTone(project.brooding)} mono>
+									<span data-testid="nectar-brooding-badge">{broodingLabel(project.brooding)}</span>
+								</Badge>
+								<span style={{ flex: 1 }} />
+								<Button
+									variant="ghost"
+									size="sm"
+									data-testid="nectar-brooding-toggle"
+									disabled={controlsDisabled}
+									onClick={() =>
+										void runBroodingWrite(
+											{
+												projectId: project.projectId,
+												brooding: project.brooding === "active" ? "off" : "on",
+											},
+											project.projectId,
+										)
+									}
+								>
+									{project.brooding === "active" ? "Turn off brooding" : "Turn on brooding"}
+								</Button>
+							</div>
+							<span
+								data-testid="nectar-project-path"
+								style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-tertiary)", wordBreak: "break-all" }}
+							>
+								{project.path}
+							</span>
+						</div>
+					))}
+				</div>
+			)}
+		</Panel>
+	);
+}
 
 function clamp(n: number, lo: number, hi: number): number {
 	return Math.min(hi, Math.max(lo, n));
@@ -373,10 +556,12 @@ export function HiveGraphPage({ wire }: PageProps): React.JSX.Element {
 
 	return (
 		<PageFrame title="Hive Graph" eyebrow={project === undefined ? "hive graph" : eyebrow}>
-			{project === undefined ? (
-				<NeedsProjectSelection surface="Hive Graph" />
-			) : (
-				<div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+			<div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+				<NectarProjectsPanel wire={wire} />
+				{project === undefined ? (
+					<NeedsProjectSelection surface="Hive Graph" />
+				) : (
+					<>
 					<Panel title="Pipeline status" right={<HiveGraphBuildButton onBuild={() => wire.hiveGraphBuild()} />}>
 						<StatusWidgets status={status} />
 					</Panel>
@@ -502,8 +687,9 @@ export function HiveGraphPage({ wire }: PageProps): React.JSX.Element {
 							</div>
 						</>
 					)}
-				</div>
-			)}
+				</>
+				)}
+			</div>
 		</PageFrame>
 	);
 }

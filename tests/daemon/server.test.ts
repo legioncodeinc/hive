@@ -147,8 +147,48 @@ describe("hive daemon server", () => {
       .mockName("serveFn") as unknown as StartHiveOptions["serveFn"];
 
     await withTempLockPaths(async (lockPaths) => {
-      const started = startHive({ serveFn, lockPaths });
+      let registered = 0;
+      const started = startHive({
+        serveFn,
+        lockPaths,
+        migrateState: () => {},
+        registerWithDoctor: () => {
+          registered += 1;
+        }
+      });
       expect(serveFn).toHaveBeenCalledTimes(1);
+      // rc-AC-2: the registry upsert runs in the same boot, after the lock+pid write.
+      expect(registered).toBe(1);
+      await started.stop();
+    });
+  });
+
+  it("rc-AC-2 boot order is migrate, then lock+pid write, then registry upsert, then listen", async () => {
+    await withTempLockPaths(async (lockPaths) => {
+      const events: string[] = [];
+      const serveFn = (() => {
+        events.push("serve");
+        return {
+          close(callback?: (error?: Error) => void): void {
+            callback?.();
+          }
+        };
+      }) as unknown as StartHiveOptions["serveFn"];
+
+      const started = startHive({
+        serveFn,
+        lockPaths,
+        migrateState: () => {
+          // Migration must run BEFORE the new pid file exists.
+          events.push(existsSync(lockPaths.pidFilePath) ? "migrate-after-pid" : "migrate");
+        },
+        registerWithDoctor: () => {
+          // The upsert must observe the pid file already written (no never-existed pidPath window).
+          events.push(existsSync(lockPaths.pidFilePath) ? "register-with-pid" : "register-without-pid");
+        }
+      });
+
+      expect(events).toEqual(["migrate", "register-with-pid", "serve"]);
       await started.stop();
     });
   });
@@ -232,7 +272,9 @@ describe("hive daemon server", () => {
         })
         .mockName("failingServeFn") as unknown as StartHiveOptions["serveFn"];
 
-      expect(() => startHive({ serveFn, lockPaths })).toThrow("bind failed");
+      expect(() =>
+        startHive({ serveFn, lockPaths, migrateState: () => {}, registerWithDoctor: () => {} })
+      ).toThrow("bind failed");
       expect(existsSync(lockPaths.lockFilePath)).toBe(false);
       expect(existsSync(lockPaths.pidFilePath)).toBe(false);
     });
