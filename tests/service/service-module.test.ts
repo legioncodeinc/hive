@@ -1,4 +1,5 @@
 import { createServiceModule } from "../../src/service/index.js";
+import { resolveStagedWindowsTaskPath } from "../../src/shared/apiary-root.js";
 import { fixedEnv, createMemoryFs, createRecordingRunner } from "./helpers.js";
 
 describe("hive service module", () => {
@@ -51,7 +52,10 @@ describe("hive service module", () => {
     });
 
     const result = await service.install();
-    const stagedPath = "C:\\Users\\t\\.apiary\\hive\\hive-task.xml";
+    // Derive the expected path from the SAME helper the code under test uses: the separator
+    // between joined segments is platform-native (path.join), so a hardcoded backslash fixture
+    // matches only on Windows and misses the memory-fs key on macOS/Linux CI.
+    const stagedPath = resolveStagedWindowsTaskPath({ home: "C:\\Users\\t", env: process.env });
 
     expect(result.ok).toBe(true);
     expect(fs.files.get(stagedPath)).toContain("<Task ");
