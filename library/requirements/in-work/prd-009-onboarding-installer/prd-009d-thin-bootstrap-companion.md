@@ -33,7 +33,7 @@ The human path shrinks to four moves: ensure Node (the existing fnm logic, uncha
 |---|---|
 | bs-AC-1 | Given the piped human path (no product-selection flags), when the script runs, then it performs exactly: ensure Node via the existing fnm logic, `npm i -g @legioncodeinc/hive` at the version pinned by `hive-release.json` (raw URL: `https://raw.githubusercontent.com/legioncodeinc/the-apiary/main/hive-release.json`), start the hive daemon, open the browser to the onboarding URL, and print the fallback line. It does not install honeycomb, doctor, or nectar. |
 | bs-AC-2 | Given the piped context (stdin not a TTY), when the script runs end to end, then no code path on the human path reads from stdin or presents an interactive prompt. |
-| bs-AC-3 | Given completion of the bootstrap, when the fallback prints, then it is exactly: `Click here if the portal doesn't open automatically: http://127.0.0.1:3853/onboarding` (the printed line carries the clean URL; the browser-open action carries the token variant). |
+| bs-AC-3 | Given completion of the bootstrap, when the fallback prints, then it is exactly: `Click here if the portal doesn't open automatically: http://127.0.0.1:3853/onboarding?t=<token>` (the printed line carries the SAME tokened URL the browser-open action uses). **Amended July 2026 (product decision):** the line originally carried a token-free URL, but a user following it landed on onboarding without the token and every installer API call was rejected, so the printed fallback was unusable exactly when it was needed. The token is single-session, loopback-only, and invalidated at onboarding completion, so echoing it was accepted as the lesser risk. |
 | bs-AC-4 | Given a machine where the browser cannot be opened (no display, no opener available), when the open step fails, then the script still prints the fallback line and exits successfully; the browser open is best-effort, the printed line is the contract. |
 
 ### US-2 - the token handoff
@@ -43,7 +43,7 @@ The human path shrinks to four moves: ensure Node (the existing fnm logic, uncha
 | ID | Criterion |
 |---|---|
 | bs-AC-5 | Given the bootstrap, when it prepares the daemon, then it mints a cryptographically random one-time onboarding token, hands it to the daemon through the agreed out-of-band seam ([`prd-009a`](./prd-009a-installer-service-and-security.md): a file under `~/.honeycomb/hive/` at mode `0600` written before daemon start), and embeds it in the opened URL as `/onboarding?t=<token>`. |
-| bs-AC-6 | Given the token, when the script's output and telemetry are inspected, then the token value is never echoed to stdout (the printed fallback line is token-free), never logged, and never included in any telemetry payload. |
+| bs-AC-6 | Given the token, when the script's output and telemetry are inspected, then the token value appears nowhere EXCEPT the single printed fallback line (see the bs-AC-3 amendment): it is never logged elsewhere and never included in any telemetry payload. |
 
 ### US-3 - the preserved headless path
 
