@@ -5,6 +5,8 @@ import {
   releaseSingleInstanceLock,
   type LockPaths
 } from "../lock.js";
+import { registerHiveWithDoctor } from "../install/registry.js";
+import { migrateHiveState } from "../shared/state-migration.js";
 import {
   DOCTOR_STATUS_URL,
   HIVE_HOST,
@@ -45,6 +47,17 @@ export interface CreateHiveOptions {
 export interface StartHiveOptions extends CreateHiveOptions {
   readonly lockPaths?: Partial<LockPaths>;
   readonly serveFn?: ServeFunction;
+  /**
+   * PRD-010b boot-migration seam. Defaults to the real {@link migrateHiveState}; tests MUST
+   * inject a no-op (or the suite-wide isolated home applies) so no test touches the real home.
+   */
+  readonly migrateState?: () => void;
+  /**
+   * rc-AC-2/mg-AC-7 registry-upsert seam, invoked AFTER the lock is acquired and the pid file is
+   * written (same boot, pinned ordering). Defaults to the real {@link registerHiveWithDoctor};
+   * tests inject a no-op or a recorder.
+   */
+  readonly registerWithDoctor?: () => void;
 }
 
 export interface HiveInstance {
@@ -175,8 +188,25 @@ export function createHive(options: CreateHiveOptions = {}): HiveInstance {
 
 export function startHive(options: StartHiveOptions = {}): StartedHive {
   const serveFn = options.serveFn ?? serve;
+  const migrateState = options.migrateState ?? ((): void => {
+    migrateHiveState();
+  });
+  const registerWithDoctor = options.registerWithDoctor ?? ((): void => {
+    registerHiveWithDoctor();
+  });
+
+  migrateState();
   const hive = createHive(options);
   const lockPaths = acquireSingleInstanceLock(options.lockPaths);
+
+  // rc-AC-2/mg-AC-7 ordering: the lock is held and the new pid file is written; NOW upsert the
+  // registry entry naming that pid path, in the same boot. Best-effort: boot never fails when the
+  // registry file is mid-move.
+  try {
+    registerWithDoctor();
+  } catch {
+    // Fail-soft by design.
+  }
 
   let server: ListeningServer;
   try {

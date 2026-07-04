@@ -1,6 +1,5 @@
-import { homedir } from "node:os";
-import { join } from "node:path";
 import packageJson from "../../package.json" with { type: "json" };
+import { resolveHiveLockPath, resolveHivePidPath } from "./apiary-root.js";
 
 export const HIVE_HOST = "127.0.0.1" as const;
 export const HIVE_PORT = 3853 as const;
@@ -17,6 +16,5 @@ export const DOCTOR_STATUS_URL = "http://127.0.0.1:3852/status.json" as const;
  */
 export const DOCTOR_EVENTS_URL = "http://127.0.0.1:3852/events" as const;
 
-export const HONEYCOMB_HOME_DIR = join(homedir(), ".honeycomb");
-export const HIVE_PID_PATH = join(HONEYCOMB_HOME_DIR, "hive.pid");
-export const HIVE_LOCK_PATH = join(HONEYCOMB_HOME_DIR, "hive.lock");
+export const HIVE_PID_PATH = resolveHivePidPath();
+export const HIVE_LOCK_PATH = resolveHiveLockPath();

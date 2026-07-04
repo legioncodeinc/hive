@@ -48,6 +48,9 @@ export const ENDPOINTS = Object.freeze({
 	hiveGraphStatus: "/api/hive-graph/status",
 	hiveGraphProjection: "/api/hive-graph/projection",
 	hiveGraphBuild: "/api/hive-graph/build",
+	// PRD-019b/c — nectar active-project set + brooding control (proxied to nectar :3854).
+	hiveGraphProjects: "/api/hive-graph/projects",
+	hiveGraphBrooding: "/api/hive-graph/projects/brooding",
 	// PRD-041b — the memory-graph view-model (the knowledge graph of memories/entities). Served off
 	// the diagnostics group (`/api/diagnostics/memory-graph`), mirroring `/api/graph`. Returns the SAME
 	// `GraphView` shape so the existing `GraphCanvas` renders it unchanged; `built:false` until PRD-008
@@ -921,6 +924,62 @@ export interface HiveGraphSearchResultWire extends HiveGraphSearchWire {
 	readonly unreachable: boolean;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PRD-019b/c — nectar projects + brooding wire shapes (`GET/POST .../projects*`).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Per-project effective brooding state returned by nectar's `GET /api/hive-graph/projects`. */
+export const NectarProjectBroodingSchema = z.enum(["active", "paused", "global-paused"]);
+
+export const NectarProjectCountsSchema = z
+	.object({
+		described: z.number().catch(0),
+		pending: z.number().catch(0),
+	})
+	.catch({ described: 0, pending: 0 });
+
+/** One active nectar project row (019b `GET /projects`). */
+export const NectarProjectRowSchema = z.object({
+	projectId: z.string().catch(""),
+	name: z.string().catch(""),
+	path: z.string().catch(""),
+	brooding: NectarProjectBroodingSchema.catch("active"),
+	watcher: z.string().catch(""),
+	counts: NectarProjectCountsSchema,
+});
+export type NectarProjectRowWire = z.infer<typeof NectarProjectRowSchema>;
+
+export const NectarProjectsBodySchema = z.object({
+	globalBrooding: z.enum(["on", "paused"]).catch("on"),
+	projects: z.array(NectarProjectRowSchema).catch([]),
+});
+export type NectarProjectsBodyWire = z.infer<typeof NectarProjectsBodySchema>;
+
+/** The nectar projects read-model the Hive Graph page polls (fail-soft `unreachable` flag). */
+export interface NectarProjectsWire extends NectarProjectsBodyWire {
+	readonly unreachable: boolean;
+}
+
+export const EMPTY_NECTAR_PROJECTS: NectarProjectsWire = Object.freeze({
+	globalBrooding: "on",
+	projects: [],
+	unreachable: false,
+});
+
+export const UNREACHABLE_NECTAR_PROJECTS: NectarProjectsWire = Object.freeze({
+	globalBrooding: "on",
+	projects: [],
+	unreachable: true,
+});
+
+/** Body for `POST /api/hive-graph/projects/brooding` (per-project or global). */
+export type SetNectarBroodingBody =
+	| { readonly projectId: string; readonly brooding: "on" | "off" }
+	| { readonly global: "on" | "paused" };
+
+/** The brooding toggle ack mirrors the persisted projects read-model (019b). */
+export type NectarBroodingAckWire = NectarProjectsWire;
+
 /**
  * The generous client-side timeout (ms) for `buildGraph()`. The build parses the WHOLE repo with
  * tree-sitter and can take many seconds to tens of seconds; a short default fetch timeout would abort
@@ -1765,6 +1824,17 @@ export interface WireClient {
 	 * 409 already_running, and success honestly — never throws into React.
 	 */
 	hiveGraphBuild(): Promise<HiveGraphBuildAck>;
+	/**
+	 * PRD-019c — read nectar's active-project set with brooding state (`GET /api/hive-graph/projects`).
+	 * Degrades to {@link UNREACHABLE_NECTAR_PROJECTS} when nectar is down (never throws).
+	 */
+	nectarProjects(): Promise<NectarProjectsWire>;
+	/**
+	 * PRD-019c — set per-project or global brooding (`POST /api/hive-graph/projects/brooding`).
+	 * Returns the persisted read-model on success; degrades to {@link UNREACHABLE_NECTAR_PROJECTS} on failure.
+	 * The caller re-lists after a successful write so the UI reflects nectar's truth, never optimistic-only.
+	 */
+	setNectarBrooding(body: SetNectarBroodingBody): Promise<NectarBroodingAckWire>;
 	/** PRD-032c — read the vault `setting` class + the provider→model catalog (`GET /api/settings`). */
 	vaultSettings(): Promise<VaultSettingsWire>;
 	/**
@@ -2384,6 +2454,34 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 				return FAILED_HIVE_GRAPH_BUILD_ACK;
 			} finally {
 				clearTimeout(timer);
+			}
+		},
+		async nectarProjects(): Promise<NectarProjectsWire> {
+			try {
+				const res = await fetchImpl(url(ENDPOINTS.hiveGraphProjects), {
+					headers: { accept: "application/json", ...DASHBOARD_SESSION_HEADERS },
+				});
+				if (!res.ok) return UNREACHABLE_NECTAR_PROJECTS;
+				const parsed = NectarProjectsBodySchema.safeParse(await res.json());
+				if (!parsed.success) return UNREACHABLE_NECTAR_PROJECTS;
+				return { ...parsed.data, unreachable: false };
+			} catch {
+				return UNREACHABLE_NECTAR_PROJECTS;
+			}
+		},
+		async setNectarBrooding(body: SetNectarBroodingBody): Promise<NectarBroodingAckWire> {
+			try {
+				const res = await fetchImpl(url(ENDPOINTS.hiveGraphBrooding), {
+					method: "POST",
+					headers: { "content-type": "application/json", accept: "application/json", ...DASHBOARD_SESSION_HEADERS },
+					body: JSON.stringify(body),
+				});
+				if (!res.ok) return UNREACHABLE_NECTAR_PROJECTS;
+				const parsed = NectarProjectsBodySchema.safeParse(await res.json());
+				if (!parsed.success) return UNREACHABLE_NECTAR_PROJECTS;
+				return { ...parsed.data, unreachable: false };
+			} catch {
+				return UNREACHABLE_NECTAR_PROJECTS;
 			}
 		},
 		async vaultSettings(): Promise<VaultSettingsWire> {

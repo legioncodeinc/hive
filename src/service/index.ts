@@ -2,6 +2,8 @@ import { execFile } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
+import { resolveStagedWindowsTaskPath } from "../shared/apiary-root.js";
+import { migrateHiveState } from "../shared/state-migration.js";
 import { installCommands, legacyUninstallCommands, uninstallCommands, type ServiceCommand } from "./commands.js";
 import {
   legacyUnitPath,
@@ -48,6 +50,11 @@ export interface ServiceModuleDeps {
   readonly fs?: ServiceFs;
   readonly uid?: number;
   readonly environment?: ServiceEnvironment;
+  /**
+   * PRD-010b migration seam run on `install()`. Defaults to the real {@link migrateHiveState}
+   * against the plan's home; tests MUST inject a no-op so a fake `home` never touches real disk.
+   */
+  readonly migrateState?: (environment: ServiceEnvironment) => void;
 }
 
 export function createExecFileRunner(): CommandRunner {
@@ -99,7 +106,7 @@ function liveUid(): number {
 }
 
 function stagedWindowsTaskPath(home: string): string {
-  return `${home}/.honeycomb/hive/hive-task.xml`;
+  return resolveStagedWindowsTaskPath({ home, env: process.env });
 }
 
 function scopePhrase(plan: ServicePlan): string {
@@ -140,6 +147,11 @@ export function createServiceModule(deps: ServiceModuleDeps): ServiceModule {
   const fs = deps.fs ?? createNodeServiceFs();
   const uid = deps.uid ?? liveUid();
   const environment = deps.environment ?? resolveServiceContext(deps.execPath);
+  const migrateState =
+    deps.migrateState ??
+    ((env: ServiceEnvironment): void => {
+      migrateHiveState({ home: env.home, env: process.env });
+    });
 
   function plan(): ServicePlan {
     return resolveServicePlan(environment);
@@ -156,6 +168,9 @@ export function createServiceModule(deps: ServiceModuleDeps): ServiceModule {
           message: `Could not register hive service: ${error instanceof Error ? error.message : "unknown error"}.`
         };
       }
+
+      // PRD-010b: converge hive state paths before rendering/registering the unit.
+      migrateState(environment);
 
       // Decision #32 migration: best-effort deregister the legacy `hive` unit and
       // remove its unit file, so a re-run never leaves two units racing over one daemon.

@@ -179,7 +179,10 @@ describe("start firing points (first_run + updated)", () => {
         lockPaths: {
           lockFilePath: join(dir, "locks", "hive.lock"),
           pidFilePath: join(dir, "locks", "hive.pid")
-        }
+        },
+        // Home isolation: no test may touch the real fleet root or registry.
+        migrateState: () => {},
+        registerWithDoctor: () => {}
       },
       telemetry: telemetryDeps(dir, recorder, telemetryOverrides),
       out: silentOut

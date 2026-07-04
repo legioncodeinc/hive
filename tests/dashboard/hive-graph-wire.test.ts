@@ -6,6 +6,7 @@ import {
 	ENDPOINTS,
 	EMPTY_GRAPH,
 	EMPTY_HIVE_GRAPH_STATUS,
+	EMPTY_NECTAR_PROJECTS,
 	createWireClient,
 	type FetchLike,
 } from "../../src/dashboard/web/wire.js";
@@ -114,5 +115,56 @@ describe("015 hive-graph wire methods", () => {
 		await expect(wire.hiveGraphBuild()).resolves.toEqual({ state: "unavailable", message: "not wired" });
 		await expect(wire.hiveGraphBuild()).resolves.toEqual({ state: "already_running", message: "busy" });
 		await expect(wire.hiveGraphBuild()).resolves.toEqual({ state: "accepted", message: "Build triggered" });
+	});
+});
+
+describe("019c nectar projects wire methods", () => {
+	it("c-AC-3 nectarProjects reads GET /api/hive-graph/projects", async () => {
+		const fetchImpl = vi.fn(async (input: Parameters<FetchLike>[0]) => {
+			expect(requestUrl(input)).toBe("/api/hive-graph/projects");
+			return jsonResponse({
+				globalBrooding: "on",
+				projects: [
+					{
+						projectId: "p1",
+						name: "my-repo",
+						path: "/home/user/my-repo",
+						brooding: "active",
+						watcher: "running",
+						counts: { described: 3, pending: 1 },
+					},
+				],
+			});
+		}) as unknown as FetchLike;
+
+		const wire = createWireClient({ fetchImpl });
+		const res = await wire.nectarProjects();
+		expect(res.unreachable).toBe(false);
+		expect(res.projects[0]?.brooding).toBe("active");
+		expect(res.projects[0]?.path).toBe("/home/user/my-repo");
+	});
+
+	it("c-AC-4 setNectarBrooding posts POST /api/hive-graph/projects/brooding", async () => {
+		const fetchImpl = vi.fn(async (input: Parameters<FetchLike>[0], init?: RequestInit) => {
+			expect(requestUrl(input)).toBe("/api/hive-graph/projects/brooding");
+			expect(init?.method).toBe("POST");
+			expect(JSON.parse(String(init?.body))).toEqual({ projectId: "p1", brooding: "off" });
+			return jsonResponse({
+				globalBrooding: "on",
+				projects: [{ projectId: "p1", name: "my-repo", path: "/repo", brooding: "paused", watcher: "stopped", counts: { described: 3, pending: 0 } }],
+			});
+		}) as unknown as FetchLike;
+
+		const wire = createWireClient({ fetchImpl });
+		const ack = await wire.setNectarBrooding({ projectId: "p1", brooding: "off" });
+		expect(ack.unreachable).toBe(false);
+		expect(ack.projects[0]?.brooding).toBe("paused");
+	});
+
+	it("c-AC-6 nectarProjects degrades to unreachable on nectar failure", async () => {
+		const fetchImpl = vi.fn(async () => jsonResponse({ error: "unreachable" }, 502)) as unknown as FetchLike;
+		const wire = createWireClient({ fetchImpl });
+		await expect(wire.nectarProjects()).resolves.toEqual({ ...EMPTY_NECTAR_PROJECTS, unreachable: true });
+		await expect(wire.setNectarBrooding({ global: "paused" })).resolves.toEqual({ ...EMPTY_NECTAR_PROJECTS, unreachable: true });
 	});
 });

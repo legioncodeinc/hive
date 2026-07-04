@@ -1,13 +1,17 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 
-import { HONEYCOMB_HOME_DIR } from "../shared/constants.js";
+import { resolveHiveRegistryPidPath } from "../shared/apiary-root.js";
+import { resolveRegistryWritePath } from "../shared/registry-paths.js";
 
-export const DOCTOR_REGISTRY_PATH = join(HONEYCOMB_HOME_DIR, "doctor.daemons.json");
+// NOTE: there is deliberately NO exported DOCTOR_REGISTRY_PATH constant on the write side.
+// The write target is window-dependent (`resolveRegistryWritePath()` answers differently before
+// and after the fleet root exists), so a module-load snapshot would hand future callers a stale
+// answer. Use the re-exported `resolveRegistryWritePath` function (bottom of this module) instead.
 
 export const HIVE_REGISTRY_NAME = "hive" as const;
 export const HIVE_REGISTRY_HEALTH_URL = "http://127.0.0.1:3853/health" as const;
-export const HIVE_REGISTRY_PID_PATH = "~/.honeycomb/hive.pid" as const;
+export const HIVE_REGISTRY_PID_PATH = resolveHiveRegistryPidPath();
 export const HIVE_REGISTRY_PROBE_INTERVAL_MS = 30_000 as const;
 export const HIVE_REGISTRY_STARTUP_GRACE_MS = 60_000 as const;
 export const HIVE_REGISTRY_RESTART_GIVE_UP_THRESHOLD = 3 as const;
@@ -52,7 +56,9 @@ export function createNodeRegistryFs(): RegistryFs {
       return readFileSync(path, "utf8");
     },
     mkdirp(path: string): void {
-      mkdirSync(path, { recursive: true });
+      // Match the 0o700 the state migration applies when it creates the fleet root, so whichever
+      // writer creates the directory first the result is the same user-private mode.
+      mkdirSync(path, { recursive: true, mode: 0o700 });
     },
     writeFile(path: string, content: string): void {
       writeFileSync(path, content, "utf8");
@@ -96,7 +102,7 @@ export function buildHiveRegistryEntry(): RegistryDaemonEntry {
   return {
     name: HIVE_REGISTRY_NAME,
     healthUrl: HIVE_REGISTRY_HEALTH_URL,
-    pidPath: HIVE_REGISTRY_PID_PATH,
+    pidPath: resolveHiveRegistryPidPath(),
     probeIntervalMs: HIVE_REGISTRY_PROBE_INTERVAL_MS,
     startupGraceMs: HIVE_REGISTRY_STARTUP_GRACE_MS,
     restartGiveUpThreshold: HIVE_REGISTRY_RESTART_GIVE_UP_THRESHOLD,
@@ -119,7 +125,7 @@ function nextTempPath(registryPath: string): string {
 }
 
 export function registerHiveWithDoctor(options: RegistryUpsertOptions = {}): RegistryUpsertResult {
-  const registryPath = options.registryPath ?? DOCTOR_REGISTRY_PATH;
+  const registryPath = options.registryPath ?? resolveRegistryWritePath();
   const fs = options.fs ?? createNodeRegistryFs();
   const parsed = readRegistryDocument(registryPath, fs);
   const nextDaemons = [...parsed.daemons];
@@ -150,3 +156,5 @@ export function registerHiveWithDoctor(options: RegistryUpsertOptions = {}): Reg
     updatedExistingEntry: index >= 0
   };
 }
+
+export { resolveRegistryWritePath } from "../shared/registry-paths.js";

@@ -6,7 +6,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 
 import { Shell } from "../../src/dashboard/web/app.js";
-import { EMPTY_SETTINGS, type HealthProbe, type HiveGraphStatusResultWire, type WireClient } from "../../src/dashboard/web/wire.js";
+import { EMPTY_SETTINGS, EMPTY_GRAPH, EMPTY_NECTAR_PROJECTS, type HealthProbe, type HiveGraphStatusResultWire, type WireClient } from "../../src/dashboard/web/wire.js";
 
 function jsonResponse(body: unknown, ok = true): Response {
 	return { ok, status: ok ? 200 : 500, json: async () => body } as Response;
@@ -37,6 +37,13 @@ function makeShellWire(options: { honeycombUp: boolean; nectarUp: boolean }): Wi
 	return {
 		health: vi.fn(async () => healthProbe),
 		hiveGraphStatus: vi.fn(async () => nectarStatus),
+		hiveGraphFileGraph: vi.fn(async () => ({ graph: EMPTY_GRAPH, files: {}, derived: {}, unreachable: !options.nectarUp })),
+		hiveGraphSearch: vi.fn(async () => ({ hits: [], sources: [], degraded: true, unreachable: !options.nectarUp })),
+		hiveGraphBuild: vi.fn(async () => ({ state: "unavailable", message: "test" })),
+		nectarProjects: vi.fn(async () => ({ ...EMPTY_NECTAR_PROJECTS, unreachable: !options.nectarUp })),
+		setNectarBrooding: vi.fn(async () => ({ ...EMPTY_NECTAR_PROJECTS, unreachable: !options.nectarUp })),
+		fsBrowse: vi.fn(async () => ({ path: "/home/user", parent: null, children: [], error: undefined })),
+		bindProject: vi.fn(async () => ({ bound: false, path: "", projectId: "", error: "unavailable" })),
 		settings: vi.fn(async () => EMPTY_SETTINGS),
 		scopeProjects: vi.fn(async () => []),
 		scopeOrgs: vi.fn(async () => []),
