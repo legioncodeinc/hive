@@ -12,6 +12,7 @@ import {
   MANIFEST_FALLBACK_URL,
   MANIFEST_URL
 } from "../../../src/daemon/installer/config.js";
+import { NPM_INSTALL_NETWORK_FLAGS } from "../../../src/daemon/installer/install-state.js";
 import {
   ALLOWED_PROPERTY_KEYS,
   FUNNEL_PROPERTY_KEYS,
@@ -426,7 +427,7 @@ describe("PRD-009 MV-2 manifest URL primary and fallback", () => {
         "https://primary.example/hive-release.json",
         "https://fallback.example/hive-release.json"
       ]);
-      expect(spawnCalls[0]?.args).toEqual([NPM_CLI, "install", "-g", "@legioncodeinc/doctor@0.2.1"]);
+      expect(spawnCalls[0]?.args).toEqual([NPM_CLI, "install", "-g", ...NPM_INSTALL_NETWORK_FLAGS, "@legioncodeinc/doctor@0.2.1"]);
     } finally {
       cleanup();
     }
@@ -465,7 +466,7 @@ describe("PRD-009 MV-2 manifest URL primary and fallback", () => {
       await request(app, "/api/onboarding/install", { method: "POST", body: { product: "doctor" } });
       await service.store.settled("doctor");
       expect(urls).toEqual(["https://primary.example/hive-release.json"]);
-      expect(spawnCalls[0]?.args).toEqual([NPM_CLI, "install", "-g", "@legioncodeinc/doctor@9.9.9"]);
+      expect(spawnCalls[0]?.args).toEqual([NPM_CLI, "install", "-g", ...NPM_INSTALL_NETWORK_FLAGS, "@legioncodeinc/doctor@9.9.9"]);
     } finally {
       cleanup();
     }

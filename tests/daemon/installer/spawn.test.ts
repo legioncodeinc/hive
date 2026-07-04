@@ -27,9 +27,9 @@ function fakeChild(options: FakeChildOptions): EventEmitter & { stdout: EventEmi
 
 describe("createNodeSpawn", () => {
   it("is-AC-6 spawns with an argv array and shell disabled", async () => {
-    let recorded: { command: string; args: readonly string[]; shell: unknown } | null = null;
+    let recorded: { command: string; args: readonly string[]; shell: unknown; env?: NodeJS.ProcessEnv } | null = null;
     const rawSpawn: RawSpawn = (command, args, options) => {
-      recorded = { command, args: [...args], shell: options.shell };
+      recorded = { command, args: [...args], shell: options.shell, env: options.env };
       return fakeChild({ code: 0 }) as unknown as ReturnType<RawSpawn>;
     };
 
@@ -40,6 +40,19 @@ describe("createNodeSpawn", () => {
     expect(recorded!.args).toEqual(["npm-cli.js", "install", "-g", "@scope/pkg@1.2.3"]);
     expect(recorded!.shell).toBe(false);
     expect(outcome.code).toBe(0);
+  });
+
+  it("prepends the spawned binary's directory to the child PATH (lifecycle scripts need `node`)", async () => {
+    let recordedEnv: NodeJS.ProcessEnv | undefined;
+    const rawSpawn: RawSpawn = (_command, _args, options) => {
+      recordedEnv = options.env;
+      return fakeChild({ code: 0 }) as unknown as ReturnType<RawSpawn>;
+    };
+
+    await createNodeSpawn(rawSpawn)("/path/to/node", ["npm-cli.js"]);
+
+    expect(recordedEnv).toBeDefined();
+    expect(recordedEnv!.PATH!.startsWith("/path/to")).toBe(true);
   });
 
   it("is-AC-17 bounds the captured stderr tail so a chatty child cannot grow memory", async () => {

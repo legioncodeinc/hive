@@ -65,15 +65,37 @@ export function resolvePackageBinJs(
  * so we can run `npm prefix -g` before the prefix is known. Falls back to `require.resolve`.
  */
 export function locateNpmCliJs(config: InstallerConfig): string | null {
+  // FIRST CHOICE: the npm co-located with hive's own global install. `require.resolve` walks up
+  // from this module (…/lib/node_modules/@legioncodeinc/hive/dist/…) into the SAME global
+  // node_modules tree hive was installed into, so this npm manages the SAME prefix — products land
+  // where the operator's PATH already finds hive. The execPath-relative candidates below are only
+  // layout heuristics and can pick a DIFFERENT prefix (e.g. Homebrew's bundled npm under
+  // libexec/ resolves `prefix -g` to the Cellar dir, silently installing products nowhere useful).
+  //
+  // npm's `exports` map exposes only `.` and `./package.json` — resolving `npm/bin/npm-cli.js`
+  // directly throws ERR_PACKAGE_PATH_NOT_EXPORTED — so resolve the exported package.json and
+  // derive the bin path from the package dir.
+  const npmPackageJson = config.requireResolve("npm/package.json");
+  if (npmPackageJson !== null) {
+    const viaPackage = join(dirname(npmPackageJson), "bin", "npm-cli.js");
+    if (config.fileExists(viaPackage)) return viaPackage;
+  }
+
   const execDir = dirname(config.execPath);
   const candidates =
     config.platform === "win32"
       ? [join(execDir, "node_modules", "npm", "bin", "npm-cli.js")]
-      : [join(dirname(execDir), "lib", "node_modules", "npm", "bin", "npm-cli.js")];
+      : [
+          join(dirname(execDir), "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+          // Homebrew node: npm ships under `libexec/`, not `lib/`, beside the Cellar-versioned
+          // binary (e.g. /opt/homebrew/Cellar/node/<ver>/libexec/lib/node_modules/npm).
+          join(dirname(execDir), "libexec", "lib", "node_modules", "npm", "bin", "npm-cli.js")
+        ];
 
   for (const candidate of candidates) {
     if (config.fileExists(candidate)) return candidate;
   }
+
   return config.requireResolve("npm/bin/npm-cli.js");
 }
 

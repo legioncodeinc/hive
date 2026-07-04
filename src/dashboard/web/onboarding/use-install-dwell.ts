@@ -1,15 +1,20 @@
 /**
- * The install card's MINIMUM DWELL hook, PRD-009b ob-AC-11. Each product card must display for a
- * minimum of ~30 seconds even when the install finishes sooner; a longer install simply holds the
- * card until its own terminal state. The dwell timer NEVER masks a failure, this hook only ever
- * gates the advance-on-SUCCESS path; a failed card renders its error immediately regardless of how
- * much dwell time has elapsed (the caller never calls this hook's `ready` with a failure in mind).
+ * The install card's MINIMUM DWELL hook, PRD-009b ob-AC-11 (revised). The card advances as soon as
+ * the install actually completes, held only long enough for the completed state to visibly register
+ * (a sub-second flash-through would read as broken); a longer install simply holds the card until
+ * its own terminal state. The dwell timer NEVER masks a failure, this hook only ever gates the
+ * advance-on-SUCCESS path; a failed card renders its error immediately regardless of how much
+ * dwell time has elapsed (the caller never calls this hook's `ready` with a failure in mind).
  */
 
 import React from "react";
 
-/** ob-AC-11's "~30 seconds" as a duration. Overridable so tests never wait 30 real seconds. */
-export const DEFAULT_MIN_DWELL_MS = 30_000;
+/**
+ * The minimum time a card stays up after mount before a SUCCESSFUL install may advance. Short by
+ * design: the real install time drives the pace (originally ~30s per ob-AC-11, cut down because
+ * holding a finished install visibly idle reads as slowness, not polish). Overridable in tests.
+ */
+export const DEFAULT_MIN_DWELL_MS = 2_000;
 
 export interface UseInstallDwellOptions {
 	/** Called exactly once, after `ready` has been true for the remaining minimum-dwell duration. */

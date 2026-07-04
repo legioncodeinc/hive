@@ -14,6 +14,7 @@
 
 import { spawn as nodeSpawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
+import { delimiter, dirname } from "node:path";
 
 /** The bounded tail we keep of each stream (is-AC-17: a bounded stderr excerpt, ~2 KB). */
 export const SPAWN_TAIL_LIMIT = 2048;
@@ -50,8 +51,20 @@ export type SpawnFn = (
 export type RawSpawn = (
   command: string,
   args: readonly string[],
-  options: { readonly shell: false; readonly signal?: AbortSignal }
+  options: { readonly shell: false; readonly signal?: AbortSignal; readonly env?: NodeJS.ProcessEnv }
 ) => ChildProcess;
+
+/**
+ * The child env: the daemon's env with the SPAWNED BINARY's directory prepended to PATH. Under a
+ * service manager (launchd/systemd) the daemon inherits a minimal PATH without node's bin dir,
+ * and npm >= 9 no longer prepends node's directory when running lifecycle scripts — so a package
+ * postinstall invoking plain `node` dies with `sh: node: command not found` (exit 127). The
+ * command here is always `process.execPath`, so prepending its dir puts the RIGHT node first.
+ */
+function childEnv(command: string): NodeJS.ProcessEnv {
+  const basePath = process.env.PATH ?? "";
+  return { ...process.env, PATH: `${dirname(command)}${delimiter}${basePath}` };
+}
 
 /** Keep only the last `limit` characters of `current + chunk` so a chatty child cannot grow memory. */
 function appendTail(current: string, chunk: string, limit: number): string {
@@ -71,7 +84,7 @@ export function createNodeSpawn(rawSpawn: RawSpawn = nodeSpawn as unknown as Raw
       let stderrTail = "";
 
       // The whole point of is-AC-6: an argv array and `shell: false`, never a shell string.
-      const child = rawSpawn(command, [...args], { shell: false, signal: options.signal });
+      const child = rawSpawn(command, [...args], { shell: false, signal: options.signal, env: childEnv(command) });
 
       child.stdout?.on("data", (data: unknown) => {
         const chunk = String(data);

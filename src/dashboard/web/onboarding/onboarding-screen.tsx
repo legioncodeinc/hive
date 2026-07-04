@@ -64,7 +64,7 @@ export interface OnboardingScreenProps {
 	readonly client?: OnboardingClient;
 	/** Test seam: inject a fake proxied setup wire client for the login step. */
 	readonly wire?: WireClient;
-	/** Test seam: override the ~30s install dwell (ob-AC-11). */
+	/** Test seam: override the brief install dwell (ob-AC-11, revised). */
 	readonly minDwellMs?: number;
 	/** Test seam: override the health-check poll interval. */
 	readonly healthPollMs?: number;
@@ -110,6 +110,56 @@ function ShortCircuitSummary({ onGoToDashboard }: { readonly onGoToDashboard: ()
 	);
 }
 
+/**
+ * The terminal "no token" screen. The one-time token rides the opened URL (`/onboarding?t=...`) and
+ * is held in memory only, so landing here without one (a refresh after the URL scrub, the printed
+ * fallback link, a bookmark) can never recover on its own — the operator re-runs the installer,
+ * which mints a fresh token and reopens the portal.
+ */
+function MissingTokenNotice(): React.JSX.Element {
+	return (
+		<div
+			data-testid="onboarding-missing-token"
+			style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: 32, background: "var(--bg-canvas)", textAlign: "center" }}
+		>
+			<div
+				style={{
+					display: "flex",
+					flexDirection: "column",
+					alignItems: "center",
+					gap: 18,
+					maxWidth: 480,
+					padding: "40px 32px",
+					background: "var(--bg-surface)",
+					border: "1px solid var(--border-default)",
+					borderRadius: "var(--radius-xl)",
+				}}
+			>
+				<h1 style={{ fontSize: "var(--text-xl)", fontWeight: 700, color: "var(--text-primary)", margin: 0, letterSpacing: "-0.02em" }}>
+					This setup link has expired
+				</h1>
+				<p style={{ fontFamily: "var(--font-sans)", fontSize: "var(--text-sm)", color: "var(--text-secondary)", margin: 0, lineHeight: 1.5 }}>
+					The setup page needs the one-time link the installer opens for you, and this visit did not carry
+					it (refreshing this page drops it too). Re-run the installer to get a fresh link:
+				</p>
+				<code
+					style={{
+						fontFamily: "var(--font-mono)",
+						fontSize: "var(--text-xs)",
+						color: "var(--text-primary)",
+						background: "var(--bg-canvas)",
+						border: "1px solid var(--border-default)",
+						borderRadius: "var(--radius-md)",
+						padding: "10px 14px",
+					}}
+				>
+					curl -fsSL https://get.theapiary.sh | sh
+				</code>
+			</div>
+		</div>
+	);
+}
+
 /** The brief pre-detection placeholder, visible only for the moment detect+health are in flight. */
 function LoadingPlaceholder(): React.JSX.Element {
 	return (
@@ -135,8 +185,11 @@ export function OnboardingScreen({
 	const token = useOnboardingToken();
 	// A test-injected client bypasses the token gate entirely (it never talks to the real token
 	// wiring); real usage waits for `useOnboardingToken` to resolve the `?t=` query param first.
-	const tokenReady = clientOverride !== undefined || token !== "";
-	const client = React.useMemo<OnboardingClient>(() => clientOverride ?? createOnboardingClient(token), [clientOverride, token]);
+	// A RESOLVED-ABSENT token (`""`) is terminal: without it every installer call 401s, so the
+	// screen shows recovery guidance below instead of spinning on the loading placeholder forever.
+	const tokenReady = clientOverride !== undefined || (token !== null && token !== "");
+	const tokenMissing = clientOverride === undefined && token === "";
+	const client = React.useMemo<OnboardingClient>(() => clientOverride ?? createOnboardingClient(token ?? ""), [clientOverride, token]);
 
 	const [phase, setPhase] = React.useState<Phase>({ kind: "loading" });
 	const [detection, setDetection] = React.useState<DetectResponse | null>(null);
@@ -214,6 +267,8 @@ export function OnboardingScreen({
 		clearSelection();
 		if (onAuthenticated !== undefined) onAuthenticated();
 	}, [onAuthenticated]);
+
+	if (tokenMissing) return <MissingTokenNotice />;
 
 	switch (phase.kind) {
 		case "loading":

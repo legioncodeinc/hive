@@ -10,15 +10,23 @@ import React from "react";
 
 const TOKEN_QUERY_PARAM = "t" as const;
 
-/** Read `?t=` once, strip it from the visible URL, and return the token (`""` until read / if absent). */
-export function useOnboardingToken(): string {
-	const [token, setToken] = React.useState("");
+/**
+ * Read `?t=` once, strip it from the visible URL, and return the token. Tri-state so the caller can
+ * distinguish "still resolving" from "resolved, absent": `null` until the mount effect has run,
+ * `""` when the URL carried no token (the caller shows recovery guidance rather than spinning
+ * forever), and the token string otherwise.
+ */
+export function useOnboardingToken(): string | null {
+	const [token, setToken] = React.useState<string | null>(null);
 
 	React.useEffect(() => {
 		if (typeof window === "undefined") return;
 		const params = new URLSearchParams(window.location.search);
 		const fromUrl = params.get(TOKEN_QUERY_PARAM);
-		if (fromUrl === null || fromUrl === "") return;
+		if (fromUrl === null || fromUrl === "") {
+			setToken("");
+			return;
+		}
 
 		setToken(fromUrl);
 

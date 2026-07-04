@@ -4,6 +4,7 @@
  * server-side from the manifest; the request carries only a slug.
  */
 
+import { NPM_INSTALL_NETWORK_FLAGS } from "../../../src/daemon/installer/install-state.js";
 import {
   DEFAULT_MANIFEST,
   Deferred,
@@ -58,7 +59,7 @@ describe("PRD-009a install allowlist + manifest pinning", () => {
 
     // is-AC-6: an argv array, first element the node binary, never a shell string.
     expect(spawnCalls[0].command).toBe(FAKE_NODE);
-    expect(spawnCalls[0].args).toEqual([NPM_CLI, "install", "-g", "@legioncodeinc/doctor@0.2.1"]);
+    expect(spawnCalls[0].args).toEqual([NPM_CLI, "install", "-g", ...NPM_INSTALL_NETWORK_FLAGS, "@legioncodeinc/doctor@0.2.1"]);
     // is-AC-4: nothing request-supplied reaches the child process.
     const serialized = JSON.stringify(spawnCalls[0]);
     expect(serialized).not.toContain("@evil/pkg");
@@ -118,7 +119,7 @@ describe("PRD-009a install allowlist + manifest pinning", () => {
     const res = await request(app, "/api/onboarding/install", { method: "POST", body: { product: "doctor" } });
     expect(res.status).toBe(202);
     await service.store.settled("doctor");
-    expect(spawnCalls[0].args).toEqual([NPM_CLI, "install", "-g", "@legioncodeinc/doctor@0.2.1"]);
+    expect(spawnCalls[0].args).toEqual([NPM_CLI, "install", "-g", ...NPM_INSTALL_NETWORK_FLAGS, "@legioncodeinc/doctor@0.2.1"]);
   });
 
   it("is-AC-15 short-circuits to installed (no spawn) when already at the pinned version", async () => {
@@ -152,7 +153,7 @@ describe("PRD-009a install allowlist + manifest pinning", () => {
 
     // Only the npm install has run; the second request attached to the in-flight state.
     expect(calls).toHaveLength(1);
-    expect(calls[0].args).toEqual([NPM_CLI, "install", "-g", "@legioncodeinc/doctor@0.2.1"]);
+    expect(calls[0].args).toEqual([NPM_CLI, "install", "-g", ...NPM_INSTALL_NETWORK_FLAGS, "@legioncodeinc/doctor@0.2.1"]);
 
     npm.resolve(outcome(0));
   });

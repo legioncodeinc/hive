@@ -16,8 +16,13 @@ function onboardingDaemon() {
   return createHive({
     fleetStatusFetch: unhealthyFleet,
     setupAuthFetch: loggedOut,
-    // Keep detection from resolving a real npm prefix (no child process in the test).
-    installer: { resolveNpmPrefix: async () => null }
+    installer: {
+      // Keep detection from resolving a real npm prefix (no child process in the test).
+      resolveNpmPrefix: async () => null,
+      // Hermetic token state: the default path is the REAL ~/.honeycomb/hive/onboarding-token,
+      // which exists on a machine mid-onboarding and would flip detect into 401-without-token.
+      tokenPath: "/nonexistent/hive-test/onboarding-token"
+    }
   });
 }
 

@@ -66,6 +66,18 @@ export interface InstallStateStore {
   settled(product: InstallableProduct): Promise<void>;
 }
 
+/**
+ * Network hardening flags for the npm install spawn. A flaky connection mid-download is the most
+ * common install failure (read ETIMEDOUT); npm's default retry posture is stingy, so raise it and
+ * let transient drops heal inside ONE attempt instead of surfacing as a failed card.
+ */
+export const NPM_INSTALL_NETWORK_FLAGS = [
+  "--fetch-retries=5",
+  "--fetch-retry-mintimeout=2000",
+  "--fetch-retry-maxtimeout=30000",
+  "--fetch-timeout=300000"
+] as const;
+
 /** Bound a spawn's error label + exit code + stderr tail into a single truthful summary (is-AC-17). */
 function summarizeFailure(label: string, code: number | null, stderrTail: string): string {
   const trimmed = stderrTail.trim();
@@ -139,7 +151,13 @@ export function createInstallStateStore(
       }
 
       setStage(state, "downloading");
-      const npm = await config.spawn(config.execPath, [npmCli, "install", "-g", target.target]);
+      const npm = await config.spawn(config.execPath, [
+        npmCli,
+        "install",
+        "-g",
+        ...NPM_INSTALL_NETWORK_FLAGS,
+        target.target
+      ]);
       if (npm.code !== 0) {
         fail(state, "downloading", summarizeFailure("npm install", npm.code, npm.stderrTail), product);
         return;

@@ -1,7 +1,8 @@
 /**
  * The per-product GUIDED INSTALL CARD, PRD-009b ob-AC-8/ob-AC-9/ob-AC-10/ob-AC-11/ob-AC-12. A
  * full-screen card carrying the product's logo, title, benefit copy, staged (never percent)
- * progress, and the npm-safety reassurance. Honors a minimum ~30s dwell on success (ob-AC-11) and
+ * progress, and the npm-safety reassurance. Honors a brief minimum dwell on success (ob-AC-11,
+ * revised: the real install time drives the pace, the dwell only prevents a flash-through) and
  * NEVER masks a failure behind that dwell (ob-AC-12), a `failed` stage renders its truthful error
  * plus a retry affordance the instant it arrives, regardless of elapsed dwell time.
  *
@@ -26,7 +27,7 @@ export interface InstallCardProps {
 	readonly assetBase: string;
 	/** Called once this product's install has both completed AND satisfied its minimum dwell. */
 	readonly onAdvance: () => void;
-	/** Overrides the default ~30s minimum dwell (ob-AC-11). A test injects a short window. */
+	/** Overrides the default brief minimum dwell (ob-AC-11, revised). A test injects a short window. */
 	readonly minDwellMs?: number;
 }
 

@@ -1,0 +1,2 @@
+{"class":"setting","op":"read_setting","scope":{"org":"local","workspace":"default"},"ts":"2026-07-03T22:30:10.952Z","outcome":"not_found","name":"embeddings.enabled"}
+{"class":"setting","op":"read_setting","scope":{"org":"local","workspace":"default"},"ts":"2026-07-03T22:31:02.751Z","outcome":"not_found","name":"embeddings.enabled"}

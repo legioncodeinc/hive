@@ -21,7 +21,11 @@
     "hive": "dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "assets/styles.css",
+    "assets/tokens",
+    "assets/logos",
+    "assets/brand"
   ],
   "scripts": {
     "build": "tsc && node esbuild.config.mjs",

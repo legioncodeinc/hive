@@ -100,12 +100,12 @@ describe("InstallCard", () => {
 		act(() => emit({ stage: "completed" }));
 
 		await act(async () => {
-			await vi.advanceTimersByTimeAsync(29_000);
+			await vi.advanceTimersByTimeAsync(1_500);
 		});
 		expect(onAdvance).not.toHaveBeenCalled();
 
 		await act(async () => {
-			await vi.advanceTimersByTimeAsync(1_500);
+			await vi.advanceTimersByTimeAsync(1_000);
 		});
 		expect(onAdvance).toHaveBeenCalledTimes(1);
 	});
