@@ -117,8 +117,12 @@ export const LEDGER_FILENAME = "telemetry.json" as const;
  */
 export const ALLOWED_PROPERTY_KEYS = ["package", "version", "os", "arch", "node"] as const;
 
-/** Funnel-only property keys extending the lifecycle allow-list (PRD-009c tm-AC-4). */
-export const FUNNEL_PROPERTY_KEYS = ["mode", "product", "failure_stage"] as const;
+/**
+ * Funnel-only property keys extending the lifecycle allow-list (PRD-009c tm-AC-4; `org_count` and
+ * `single_org_confirm` added by PRD-011a ts-AC-13 for `tenancy_selected`: a bucketed count and a
+ * flag, never an org/workspace id or name).
+ */
+export const FUNNEL_PROPERTY_KEYS = ["mode", "product", "failure_stage", "org_count", "single_org_confirm"] as const;
 
 /** One allow-listed property key. */
 export type AllowedPropertyKey = (typeof ALLOWED_PROPERTY_KEYS)[number];
@@ -158,6 +162,10 @@ export function buildTelemetryProperties(version: string, extras: FunnelExtras =
   if (extras.failure_stage !== undefined && FUNNEL_FAILURE_STAGES.has(extras.failure_stage)) {
     out.failure_stage = extras.failure_stage;
   }
+  if (extras.org_count !== undefined && FUNNEL_ORG_COUNTS.has(extras.org_count)) out.org_count = extras.org_count;
+  if (extras.single_org_confirm !== undefined && FUNNEL_SINGLE_ORG_CONFIRMS.has(extras.single_org_confirm)) {
+    out.single_org_confirm = extras.single_org_confirm;
+  }
   return out;
 }
 
@@ -172,11 +180,17 @@ export type HiveTelemetryEvent =
   | "hive_first_run"
   | "hive_updated";
 
-/** Onboarding funnel events (PRD-009c). Emitted daemon-side through this same chokepoint. */
+/**
+ * Onboarding funnel events (PRD-009c, extended by PRD-011a ts-AC-13 with the tenancy milestones).
+ * Emitted daemon-side through this same chokepoint.
+ */
 export type OnboardingFunnelEvent =
   | "onboarding_started"
   | "mode_selected"
   | "login_shown"
+  | "tenancy_shown"
+  | "tenancy_selected"
+  | "workspace_created"
   | "dashboard_reached"
   | "product_install_started"
   | "product_install_completed"
@@ -196,11 +210,19 @@ export type FunnelProduct = "doctor" | "honeycomb" | "nectar";
 /** Closed failure-stage discriminators on `product_install_failed` (tm-AC-4). */
 export type FunnelFailureStage = "resolving" | "downloading" | "linking" | "registering_service";
 
+/** Closed bucketed org-count values on `tenancy_selected` (PRD-011a ts-AC-13; never a raw count). */
+export type FunnelOrgCount = "single" | "few" | "many";
+
+/** Closed single-org-confirm flag on `tenancy_selected` (PRD-011a ts-AC-13). */
+export type FunnelSingleOrgConfirm = "true" | "false";
+
 /** Optional funnel extras validated before they join the allow-listed payload. */
 export interface FunnelExtras {
   readonly mode?: FunnelMode;
   readonly product?: FunnelProduct;
   readonly failure_stage?: FunnelFailureStage;
+  readonly org_count?: FunnelOrgCount;
+  readonly single_org_confirm?: FunnelSingleOrgConfirm;
 }
 
 const FUNNEL_MODES = new Set<FunnelMode>(["standard", "advanced"]);
@@ -211,6 +233,8 @@ const FUNNEL_FAILURE_STAGES = new Set<FunnelFailureStage>([
   "linking",
   "registering_service"
 ]);
+const FUNNEL_ORG_COUNTS = new Set<FunnelOrgCount>(["single", "few", "many"]);
+const FUNNEL_SINGLE_ORG_CONFIRMS = new Set<FunnelSingleOrgConfirm>(["true", "false"]);
 
 // ----------------------------------------------------------------------------
 // The dedupe ledger (a small JSON file in the state dir).

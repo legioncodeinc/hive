@@ -9,6 +9,7 @@ import { createHive } from "../../src/daemon/server.js";
 import { mountDashboardHost } from "../../src/daemon/dashboard/host.js";
 import type { FetchImpl as FleetFetchImpl } from "../../src/daemon/fleet-status.js";
 import type { SetupAuthFetchImpl } from "../../src/daemon/setup-auth.js";
+import type { SetupTenancyFetchImpl } from "../../src/daemon/setup-tenancy.js";
 import { Hono } from "hono";
 
 const healthyFleetStatusFetch: FleetFetchImpl = async () =>
@@ -27,11 +28,15 @@ const authenticatedSetupAuthFetch: SetupAuthFetchImpl = async () =>
     headers: { "content-type": "application/json" }
   });
 
+const selectedTenancyFetch: SetupTenancyFetchImpl = async () =>
+  new Response(JSON.stringify({ selected: true }), { status: 200, headers: { "content-type": "application/json" } });
+
 describe("dashboard host shell", () => {
   it("GET / returns HTML with #root and the app.js script (gate passes: healthy + authenticated)", async () => {
     const daemon = createHive({
       fleetStatusFetch: healthyFleetStatusFetch,
-      setupAuthFetch: authenticatedSetupAuthFetch
+      setupAuthFetch: authenticatedSetupAuthFetch,
+      setupTenancyFetch: selectedTenancyFetch
     });
 
     const response = await daemon.app.request("http://hive.local/");
@@ -47,7 +52,8 @@ describe("dashboard host shell", () => {
   it("serves the shell with an empty asset base (mark served at the root)", async () => {
     const daemon = createHive({
       fleetStatusFetch: healthyFleetStatusFetch,
-      setupAuthFetch: authenticatedSetupAuthFetch
+      setupAuthFetch: authenticatedSetupAuthFetch,
+      setupTenancyFetch: selectedTenancyFetch
     });
     const html = await (await daemon.app.request("http://hive.local/")).text();
     expect(html).toContain('data-asset-base=""');

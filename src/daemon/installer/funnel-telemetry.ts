@@ -27,11 +27,14 @@ import {
 } from "../../telemetry/onboarding-session-ledger.js";
 import type { InstallerConfig } from "./config.js";
 
-/** UI-reported funnel events validated at the event route (tm-AC-1). */
+/** UI-reported funnel events validated at the event route (tm-AC-1; PRD-011a ts-AC-13 tenancy set). */
 export const UI_FUNNEL_EVENTS = [
   "onboarding_started",
   "mode_selected",
   "login_shown",
+  "tenancy_shown",
+  "tenancy_selected",
+  "workspace_created",
   "dashboard_reached"
 ] as const;
 
@@ -42,13 +45,30 @@ const ModeSelectedBodySchema = z.object({
   properties: z.object({ mode: z.enum(["standard", "advanced"]) })
 });
 
+/**
+ * PRD-011a ts-AC-13: `tenancy_selected` carries ONLY a bucketed org count and the single-org-confirm
+ * flag (both closed enums; never an org/workspace id or name). Mirrors the UI emit in
+ * `src/dashboard/web/onboarding/tenancy-step.tsx`.
+ */
+const TenancySelectedBodySchema = z.object({
+  event: z.literal("tenancy_selected"),
+  properties: z.object({
+    orgCount: z.enum(["single", "few", "many"]),
+    singleOrgConfirm: z.enum(["true", "false"])
+  })
+});
+
 const SimpleUiEventBodySchema = z.object({
-  event: z.enum(["onboarding_started", "login_shown", "dashboard_reached"]),
+  event: z.enum(["onboarding_started", "login_shown", "tenancy_shown", "workspace_created", "dashboard_reached"]),
   properties: z.record(z.string(), z.string()).optional()
 });
 
 /** Closed zod schema for `POST /api/onboarding/event` bodies. */
-export const OnboardingEventBodySchema = z.union([ModeSelectedBodySchema, SimpleUiEventBodySchema]);
+export const OnboardingEventBodySchema = z.union([
+  ModeSelectedBodySchema,
+  TenancySelectedBodySchema,
+  SimpleUiEventBodySchema
+]);
 
 export type ParsedOnboardingEvent = z.infer<typeof OnboardingEventBodySchema>;
 
@@ -150,6 +170,18 @@ export function createFunnelTelemetry(deps: FunnelTelemetryDeps): FunnelTelemetr
           break;
         case "login_shown":
           emit("login_shown");
+          break;
+        case "tenancy_shown":
+          emit("tenancy_shown");
+          break;
+        case "tenancy_selected":
+          emit("tenancy_selected", {
+            org_count: body.properties.orgCount,
+            single_org_confirm: body.properties.singleOrgConfirm
+          });
+          break;
+        case "workspace_created":
+          emit("workspace_created");
           break;
         case "dashboard_reached":
           emit("dashboard_reached", {}, true);

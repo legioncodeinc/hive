@@ -8,9 +8,8 @@
  * Unlike `/login`'s `GuidedSetup` (which waits for an explicit "First time setup" click), the
  * onboarding flow has already walked the operator through installs and a health check, so this
  * step begins the device flow automatically on mount: one fewer click at the end of a long guided
- * sequence. Once `/setup/state.authenticated` flips true it fires `dashboard_reached`, best-effort
- * POSTs `/api/onboarding/complete`, then hard-navigates to `/` (ob-AC-15) so the server gate
- * revalidates and serves the authoritative dashboard, the same discipline `LoginScreen` follows.
+ * sequence. Once `/setup/state.authenticated` flips true the parent advances to the PRD-011 tenancy
+ * step; the terminal `dashboard_reached` handoff runs only after tenancy selection (ts-AC-1/9).
  */
 
 import React from "react";
@@ -25,7 +24,7 @@ export interface LoginStepProps {
 	readonly onboardingClient: OnboardingClient;
 	/** The proxied setup wire client (defaults to the live one; a test injects a mock). */
 	readonly wire?: WireClient;
-	/** Test seam: called instead of the real hard navigation once authenticated. */
+	/** Test seam: called when login authenticates (parent advances to the tenancy step). */
 	readonly onAuthenticated?: () => void;
 	/** Overrides {@link LOGIN_STEP_POLL_MS} (a test injects a short window). */
 	readonly pollMs?: number;
@@ -69,7 +68,7 @@ export function LoginStep({ onboardingClient, wire: wireOverride, onAuthenticate
 
 	const beginRef = React.useRef(false);
 	const grantShownEventRef = React.useRef(false);
-	const navigatedRef = React.useRef(false);
+	const authenticatedHandledRef = React.useRef(false);
 
 	// Auto-begin the device flow on mount (see module doc for why onboarding skips the button
 	// `GuidedSetup` shows on the standalone `/login` route).
@@ -109,20 +108,16 @@ export function LoginStep({ onboardingClient, wire: wireOverride, onAuthenticate
 		};
 	}, [wire, state.authenticated, pollMs]);
 
-	// ob-AC-15, authenticated: fire `dashboard_reached`, best-effort POST complete, then hard-nav.
+	// ts-AC-1: authenticated advances to the tenancy step; terminal handoff lives in TenancyStep.
 	React.useEffect(() => {
-		if (!state.authenticated || navigatedRef.current) return;
-		navigatedRef.current = true;
-		onboardingClient.sendEvent("dashboard_reached");
-		void (async (): Promise<void> => {
-			await onboardingClient.complete();
-			if (onAuthenticated !== undefined) {
-				onAuthenticated();
-				return;
-			}
-			if (typeof window !== "undefined") window.location.assign("/");
-		})();
-	}, [state.authenticated, onboardingClient, onAuthenticated]);
+		if (!state.authenticated || authenticatedHandledRef.current) return;
+		authenticatedHandledRef.current = true;
+		if (onAuthenticated !== undefined) {
+			onAuthenticated();
+			return;
+		}
+		// Real usage: parent OnboardingScreen owns the phase transition; this branch is unreachable.
+	}, [state.authenticated, onAuthenticated]);
 
 	if (state.authenticated) return <></>;
 

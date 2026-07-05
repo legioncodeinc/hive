@@ -28,7 +28,7 @@ describe("dashboard copy-map", () => {
   it("b-AC-5 migrated all honeycomb web/ files plus PRD-002b/004/005 readiness+health modules and PRD-003c's boot-route", () => {
     // 36 from the original migration + the PRD-009b `onboarding/` feature-folder files
     // (contracts, the wire client, copy, hooks, the six components, and the resume-selection store).
-    expect(countFiles(WEB_DIR)).toBe(49);
+    expect(countFiles(WEB_DIR)).toBe(53);
   });
 
   it("b-AC-5 includes the shell + infra files (21) and the pages (13)", () => {
@@ -59,7 +59,9 @@ describe("dashboard copy-map", () => {
       "health-rail.tsx",
       "setup-gate.tsx",
       "boot-route.ts",
-      "route-daemon-owner.ts"
+      "route-daemon-owner.ts",
+      // PRD-011b: persistent active-tenancy readout in the shell chrome.
+      "active-tenancy-display.tsx"
     ]) {
       expect(existsSync(join(WEB_DIR, file))).toBe(true);
     }
