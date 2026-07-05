@@ -14,7 +14,7 @@
  * ── The routes this host registers (hive serves at the root) ───────────────
  *   GET /app.js                       → the esbuild bundle (React + ReactDOM + the app)
  *   GET /styles.css                   → the concatenated design-system CSS
- *   GET /honeycomb-memory-cluster.svg → the brand mark
+ *   GET /hive-mark.svg                → the brand mark
  *   GET /fonts/:name                  → an allow-listed brand font
  *   GET *                             → the index shell ({@link renderShell}), a CATCH-ALL
  *
@@ -42,7 +42,7 @@ export const DASHBOARD_APP_PATH = "/app.js" as const;
 export const DASHBOARD_CSS_PATH = "/styles.css" as const;
 
 /** The same-origin path the host serves the brand mark at. */
-export const DASHBOARD_LOGO_PATH = "/honeycomb-memory-cluster.svg" as const;
+export const DASHBOARD_LOGO_PATH = "/hive-mark.svg" as const;
 
 /**
  * The same-origin path prefix the host serves the brand fonts under. The served DS CSS's
@@ -63,7 +63,7 @@ export const DASHBOARD_BRAND_PATH = "/assets/brand/:name" as const;
 
 /**
  * The asset base the app resolves host-served assets under. hive serves the mark at the ROOT
- * (`/honeycomb-memory-cluster.svg`), so the base is empty — the app's `${assetBase}/…svg`
+ * (`/hive-mark.svg`), so the base is empty — the app's `${assetBase}/…svg`
  * resolves to `/…svg`. main.tsx sanitizes this DOM-read value; an empty string is the safe default.
  */
 const ASSET_BASE = "" as const;
@@ -149,7 +149,7 @@ export function mountDashboardAssets(app: Hono, options: MountDashboardHostOptio
 		return c.body(asset.body, 200, { "content-type": asset.contentType, "cache-control": "no-cache" });
 	});
 
-	// GET /honeycomb-memory-cluster.svg — the brand mark. Served `no-cache` too: it shares the
+	// GET /hive-mark.svg — the brand mark. Served `no-cache` too: it shares the
 	// un-hashed URL contract with the shell, and revalidating a ~1 KB SVG over loopback is free.
 	app.get(DASHBOARD_LOGO_PATH, (c) => {
 		const asset = assets.logo();

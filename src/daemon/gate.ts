@@ -62,7 +62,7 @@ export const GATE_EXEMPT_ROUTES = [BUZZING_ROUTE, LOGIN_ROUTE, ONBOARDING_ROUTE]
  * literal path for the operator-facing `/health` page, so it needs content-negotiated handling
  * rather than a blanket exemption.
  */
-const GATE_EXEMPT_INFRA_PATHS = new Set<string>(["/app.js", "/styles.css", "/honeycomb-memory-cluster.svg"]);
+const GATE_EXEMPT_INFRA_PATHS = new Set<string>(["/app.js", "/styles.css", "/hive-mark.svg"]);
 
 /**
  * Path PREFIXES that are data-plane / static-asset traffic (the BFF proxy, fonts, and the brand

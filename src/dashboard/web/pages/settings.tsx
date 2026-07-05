@@ -542,16 +542,37 @@ function LifecycleConfigSection(): React.JSX.Element {
 // Embeddings on/off (dashboard action) — turn semantic recall on/off LIVE + persisted.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** The honest embeddings state (mirrors the daemon `reasons.embeddingsState`): off | warming | on | failed. */
+type EmbeddingsState = "off" | "warming" | "on" | "failed";
+
+/** How often {@link EmbeddingsSection} re-polls `/health` WHILE warming, so the badge auto-advances to on/failed. */
+const EMBED_WARMING_POLL_MS = 2500;
+
+/** Render one embeddings state → its badge tone, badge label, and whether embeddings are enabled. */
+function embeddingsView(state: EmbeddingsState): { tone: "verified" | "neutral" | "warning" | "critical"; label: string; enabled: boolean } {
+	switch (state) {
+		case "on":
+			return { tone: "verified", label: "on", enabled: true };
+		case "warming":
+			return { tone: "warning", label: "warming…", enabled: true };
+		case "failed":
+			return { tone: "critical", label: "failed", enabled: true };
+		default:
+			return { tone: "neutral", label: "off", enabled: false };
+	}
+}
+
 /**
- * The embeddings toggle. Reads the LIVE on/off state from `wire.health()` (`reasons.embeddings`) and
- * flips it through `wire.setEmbeddings(...)`, which actuates the daemon's embed supervisor (spawn+warm
- * / stop) AND persists the choice so it survives a restart. Off = lexical (BM25) recall only. The
- * state re-reads from `health()` after a toggle so the badge reflects the persisted truth, never an
- * optimistic flip.
+ * The embeddings toggle. Reads the HONEST live state from `wire.health()` — `reasons.embeddingsState`
+ * (`off | warming | on | failed`), falling back to the coarse `reasons.embeddings` for a pre-honesty
+ * daemon. Flips it through `wire.setEmbeddings(...)`, which actuates the daemon's embed supervisor
+ * (spawn+warm / stop) AND persists the choice so it survives a restart. Off = lexical (BM25) recall
+ * only. The state re-reads from `health()` after a toggle AND polls WHILE `warming` so the badge
+ * advances from "warming…" to "on" (or "failed") on its own — never an optimistic flip.
  */
 export function EmbeddingsSection({ wire }: { wire: PageProps["wire"] }): React.JSX.Element {
 	// `null` while the first health read is in flight (so we never render a wrong default).
-	const [on, setOn] = React.useState<boolean | null>(null);
+	const [state, setState] = React.useState<EmbeddingsState | null>(null);
 	const [busy, setBusy] = React.useState(false);
 
 	const load = React.useCallback(async (): Promise<void> => {
@@ -559,9 +580,12 @@ export function EmbeddingsSection({ wire }: { wire: PageProps["wire"] }): React.
 		// rather than throwing into React (the badge shows off; the toggle still works).
 		try {
 			const health = await wire.health();
-			setOn(health?.reasons?.embeddings === "on");
+			const reasons = health?.reasons;
+			// Prefer the honest fine-grained state; fall back to the coarse enabled/disabled field.
+			const next: EmbeddingsState = reasons?.embeddingsState ?? (reasons?.embeddings === "on" ? "on" : "off");
+			setState(next);
 		} catch {
-			setOn(false);
+			setState("off");
 		}
 	}, [wire]);
 
@@ -569,44 +593,58 @@ export function EmbeddingsSection({ wire }: { wire: PageProps["wire"] }): React.
 		void load();
 	}, [load]);
 
-	const toggle = React.useCallback(async (): Promise<void> => {
-		if (on === null) return;
-		setBusy(true);
-		const want = !on;
-		const ok = await wire.setEmbeddings(want);
-		if (ok) setOn(want);
-		setBusy(false);
-		// Re-read the live truth (a disabled toggle may already be reflected; an enable warms async).
-		void load();
-	}, [on, wire, load]);
+	// While warming, re-poll `/health` so the badge advances to "on"/"failed" without a manual refresh.
+	React.useEffect(() => {
+		if (state !== "warming") return;
+		if (isTabHidden()) return;
+		const id = setInterval(() => void load(), EMBED_WARMING_POLL_MS);
+		return () => clearInterval(id);
+	}, [state, load]);
 
-	const label = on === null ? "…" : on ? "on" : "off";
+	const view = state === null ? null : embeddingsView(state);
+
+	const toggle = React.useCallback(async (): Promise<void> => {
+		if (view === null) return;
+		setBusy(true);
+		const want = !view.enabled;
+		const ok = await wire.setEmbeddings(want);
+		// Optimistically reflect the INTENT (enabling → warming; disabling → off), then re-read the live
+		// truth. The warming poll takes it the rest of the way to on/failed.
+		if (ok) setState(want ? "warming" : "off");
+		setBusy(false);
+		void load();
+	}, [view, wire, load]);
+
+	const hint =
+		state === "warming"
+			? "Downloading + loading the local embedding model (~600 MB, one time). Recall is lexical until it is ready."
+			: state === "failed"
+				? "The embedding model could not load. Recall is lexical (BM25) only. Try toggling off then on, or check the daemon logs."
+				: "On runs the local embedding model for semantic search. Off falls back to lexical (BM25) recall only.";
 
 	return (
 		<Panel
 			title="Embeddings"
 			eyebrow="semantic recall · local model"
 			right={
-				<Badge tone={on ? "verified" : "neutral"} mono dot>
-					{label}
+				<Badge tone={view?.tone ?? "neutral"} mono dot>
+					{view?.label ?? "…"}
 				</Badge>
 			}
 		>
 			<div data-testid="embeddings-section" style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 6px", flexWrap: "wrap" }}>
 				<div style={{ display: "flex", flexDirection: "column", minWidth: 200, flex: 1 }}>
 					<span style={{ fontSize: 14, color: "var(--text-primary)" }}>Semantic vector recall</span>
-					<span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
-						On runs the local embedding model for semantic search. Off falls back to lexical (BM25) recall only.
-					</span>
+					<span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{hint}</span>
 				</div>
 				<Button
-					variant={on ? "secondary" : "primary"}
+					variant={view?.enabled ? "secondary" : "primary"}
 					size="sm"
-					disabled={busy || on === null}
+					disabled={busy || view === null}
 					onClick={() => void toggle()}
 					data-testid="embeddings-toggle"
 				>
-					{busy ? "saving…" : on ? "Turn off" : "Turn on"}
+					{busy ? "saving…" : view?.enabled ? "Turn off" : "Turn on"}
 				</Button>
 			</div>
 		</Panel>

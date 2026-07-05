@@ -25,13 +25,12 @@
 import React from "react";
 
 import { Badge, Button, Input, Kpi, MemoryCard } from "../primitives.js";
-import { LiveLog, RulesPanel, SessionsPanel, SettingsPanel, SkillSyncPanel } from "../panels.js";
+import { LiveLog, RulesPanel, SessionsPanel, SkillSyncPanel } from "../panels.js";
 import { HarnessStrip } from "../harness-strip.js";
 import { useScope } from "../scope-context.js";
 import { usePoll, type PageProps } from "../page-frame.js";
 import {
 	EMPTY_KPIS,
-	EMPTY_VAULT_SETTINGS,
 	formatLogLine,
 	type HarnessStatusWire,
 	type HealthReasonsWire,
@@ -39,9 +38,7 @@ import {
 	type RecalledMemory,
 	type RuleRowWire,
 	type SessionRowWire,
-	type SettingValueWire,
 	type SkillRowWire,
-	type VaultSettingsWire,
 } from "../wire.js";
 
 /** How often the live-log poll re-reads `/api/logs` (ms). Reasonable cadence, stopped on unmount. */
@@ -106,10 +103,26 @@ function LexicalFallbackBadge(): React.JSX.Element {
 	);
 }
 
-/** The display label + degraded predicate for one subsystem chip in {@link HealthStrip}. */
-const SUBSYSTEMS: readonly { readonly key: keyof HealthReasonsWire; readonly label: string; readonly degraded: (r: HealthReasonsWire) => boolean }[] = [
+/**
+ * The display label + degraded predicate + rendered state for one subsystem chip in {@link HealthStrip}.
+ * `value` is optional (defaults to the coarse `reasons[key]`) — the `semantic` chip overrides it to the
+ * HONEST fine-grained `embeddingsState` so it reads `warming`/`failed`, not a coarse `on`.
+ */
+const SUBSYSTEMS: readonly {
+	readonly key: keyof HealthReasonsWire;
+	readonly label: string;
+	readonly degraded: (r: HealthReasonsWire) => boolean;
+	readonly value?: (r: HealthReasonsWire) => string;
+}[] = [
 	{ key: "storage", label: "storage", degraded: (r) => r.storage === "unreachable" },
-	{ key: "embeddings", label: "semantic", degraded: (r) => r.embeddings === "off" },
+	{
+		key: "embeddings",
+		label: "semantic",
+		// PRD-025 honesty: semantic is "up" only when embeddings are actually WARM (`on`). `off`/`warming`/
+		// `failed` all mean semantic recall is not working yet → degraded (recall is lexical meanwhile).
+		degraded: (r) => (r.embeddingsState ?? r.embeddings) !== "on",
+		value: (r) => String(r.embeddingsState ?? r.embeddings),
+	},
 	{ key: "schema", label: "schema", degraded: (r) => r.schema === "missing_table" },
 	// PRD-063b (b-AC-7): the Portkey gateway chip. `unconfigured` (on but no key) + `unreachable`
 	// (a real call failed) are the DOWN states → critical; `off` (not in force) + `ok` are healthy.
@@ -133,7 +146,7 @@ function HealthStrip({ reasons }: { reasons: HealthReasonsWire | null }): React.
 			</span>
 			{SUBSYSTEMS.map((s) => {
 				const down = s.degraded(reasons);
-				const state = String(reasons[s.key]);
+				const state = s.value !== undefined ? s.value(reasons) : String(reasons[s.key]);
 				return (
 					<Badge key={s.key} tone={down ? "critical" : "verified"} mono dot>
 						{s.label}: {state}
@@ -162,8 +175,6 @@ export function DashboardPage({ wire, pollinating = false, healthReasons = null 
 	const [sessions, setSessions] = React.useState<readonly SessionRowWire[]>([]);
 	const [rules, setRules] = React.useState<readonly RuleRowWire[]>([]);
 	const [skills, setSkills] = React.useState<readonly SkillRowWire[]>([]);
-	const [vaultSettings, setVaultSettings] = React.useState<VaultSettingsWire>(EMPTY_VAULT_SETTINGS);
-	const [secretNames, setSecretNames] = React.useState<readonly string[]>([]);
 
 	// ── harness-area state (038c) — the PRD-039 registry/telemetry backbone (`wire.harnesses()`) ──
 	const [harnesses, setHarnesses] = React.useState<readonly HarnessStatusWire[]>([]);
@@ -192,20 +203,18 @@ export function DashboardPage({ wire, pollinating = false, healthReasons = null 
 	const hydrateSeqRef = React.useRef(0);
 
 	/**
-	 * Hydrate the diagnostics views + the vault settings from the live endpoints (AC-2), in ONE
-	 * batched `Promise.all` round-trip (parity with the old app). The org/workspace `settings` view
-	 * now renders in the SHELL header (D-5), so the page no longer keeps it — but the shell hydrates
-	 * its own settings; this page hydrates only what its body renders.
+	 * Hydrate the diagnostics views from the live endpoints (AC-2), in ONE batched `Promise.all`
+	 * round-trip (parity with the old app). Provider/model/pollinating settings live on the SETTINGS
+	 * page (not the home) — the dashboard no longer renders the settings panel, so it hydrates only the
+	 * KPI band, recall, and the below-the-fold diagnostics grid it actually shows.
 	 */
 	const hydrate = React.useCallback(async (): Promise<void> => {
 		const seq = ++hydrateSeqRef.current;
-		const [k, sess, r, sk, vs, sn] = await Promise.all([
+		const [k, sess, r, sk] = await Promise.all([
 			wire.kpis(scope.project),
 			wire.sessions(),
 			wire.rules(),
 			wire.skills(),
-			wire.vaultSettings(),
-			wire.secretNames(),
 		]);
 		// A newer hydrate (a faster project switch) superseded this one → drop this stale result wholesale
 		// so the band never flickers back to the previous project's numbers.
@@ -214,21 +223,7 @@ export function DashboardPage({ wire, pollinating = false, healthReasons = null 
 		setSessions(sess);
 		setRules(r);
 		setSkills(sk);
-		setVaultSettings(vs);
-		setSecretNames(sn);
 	}, [wire, scope.project]);
-
-	/** PRD-032c (AC-5): persist one vault `setting` through the daemon, then RE-READ the persisted truth. */
-	const saveSetting = React.useCallback(
-		async (key: string, value: SettingValueWire): Promise<boolean> => {
-			const ok = await wire.setSetting(key, value);
-			const [vs, sn] = await Promise.all([wire.vaultSettings(), wire.secretNames()]);
-			setVaultSettings(vs);
-			setSecretNames(sn);
-			return ok;
-		},
-		[wire],
-	);
 
 	// AC-2: hydrate once on mount.
 	React.useEffect(() => {
@@ -344,8 +339,9 @@ export function DashboardPage({ wire, pollinating = false, healthReasons = null 
 							<div className="col">
 								{/* The codebase-graph canvas is intentionally NOT on the home (the graph memory cap): a real snapshot is
 								    tens of thousands of nodes and rendering it here froze the browser. The graph lives on its
-								    own bounded, memory-aware `#/graph` page; the home stays light. */}
-								<SettingsPanel catalog={vaultSettings.catalog} settings={vaultSettings.settings} secretNames={secretNames} onSave={saveSetting} />
+								    own bounded, memory-aware `#/graph` page; the home stays light.
+								    Provider/model/pollinating settings are NOT on the home either — they live on the SETTINGS page
+								    (turning pollinating on is a settings action, not a dashboard one); the panel was a duplicate. */}
 								<SkillSyncPanel skills={skills} />
 							</div>
 						</div>

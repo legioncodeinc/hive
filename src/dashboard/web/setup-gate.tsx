@@ -153,7 +153,7 @@ export function GuidedSetup({
 				textAlign: "center",
 			}}
 		>
-			<img src={`${assetBase}/honeycomb-memory-cluster.svg`} width={56} height={56} alt="" />
+			<img src={`${assetBase}/hive-mark.svg`} width={56} height={56} alt="" />
 			<div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 460 }}>
 				<h1 style={{ fontSize: "var(--text-xl)", fontWeight: 700, color: "var(--text-primary)", margin: 0, letterSpacing: "-0.02em" }}>
 					Let&rsquo;s connect your account
@@ -266,7 +266,7 @@ export function CoexistenceWarning({
 				textAlign: "center",
 			}}
 		>
-			<img src={`${assetBase}/honeycomb-memory-cluster.svg`} width={56} height={56} alt="" />
+			<img src={`${assetBase}/hive-mark.svg`} width={56} height={56} alt="" />
 			<div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 500 }}>
 				<h1 style={{ fontSize: "var(--text-xl)", fontWeight: 700, color: "var(--text-primary)", margin: 0, letterSpacing: "-0.02em" }}>
 					We found an existing Hivemind setup
@@ -376,7 +376,7 @@ export function MigrationInterrupted({
 				textAlign: "center",
 			}}
 		>
-			<img src={`${assetBase}/honeycomb-memory-cluster.svg`} width={56} height={56} alt="" />
+			<img src={`${assetBase}/hive-mark.svg`} width={56} height={56} alt="" />
 			<div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 500 }}>
 				<h1 style={{ fontSize: "var(--text-xl)", fontWeight: 700, color: "var(--text-primary)", margin: 0, letterSpacing: "-0.02em" }}>
 					Your migration was interrupted

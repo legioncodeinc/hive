@@ -65,13 +65,13 @@ export const NPM_SAFETY_COPY =
 export const DOCTOR_DESELECT_WARNING = "Without Doctor, nothing restarts your daemons after a crash or reboot.";
 
 /**
- * Resolve a product's brand mark URL. Honeycomb keeps its existing top-level, `assetBase`-relative
- * route (`host.ts`'s `DASHBOARD_LOGO_PATH`, unchanged by this PRD); Doctor, Hive, and Nectar are
- * served by the daemon agent at the new fixed `/assets/brand/<name>-mark.svg` route (see the task
- * brief), independent of `assetBase`.
+ * Resolve a product's brand mark URL. Every product mark is served at the fixed
+ * `/assets/brand/<name>-mark.svg` route (Honeycomb, Doctor, Hive, Nectar alike), independent of
+ * `assetBase`. Honeycomb previously special-cased the top-level `DASHBOARD_LOGO_PATH`, but that route
+ * was repurposed to serve the HIVE brand mark in the honeycomb→hive dashboard rebrand, so Honeycomb
+ * now uses its own `honeycomb-mark.svg` under the same brand route as its siblings.
  */
-export function productLogoUrl(product: OnboardingProduct, assetBase: string): string {
-	if (product === "honeycomb") return `${assetBase}/honeycomb-memory-cluster.svg`;
+export function productLogoUrl(product: OnboardingProduct, _assetBase: string): string {
 	return `/assets/brand/${product}-mark.svg`;
 }
 

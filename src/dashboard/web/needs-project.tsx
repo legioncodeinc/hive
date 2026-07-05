@@ -73,7 +73,7 @@ export interface FirstRunBindCTAProps {
 /**
  * The first-run "Pick a folder to start" CTA (PRD-059b b-AC-1). Rendered as the PRIMARY dashboard
  * content when the workspace has ZERO bound projects — never an empty switcher or a blank page. It
- * states the one action plainly ("point Honeycomb at the repo or folder you want it to remember"),
+ * states the one action plainly ("point Hive at the repo or folder you want the fleet to remember"),
  * then reveals the daemon-served {@link FolderPicker} so the user can browse, name, and bind a folder.
  * On a successful bind it advances to the Projects page (b-AC-4); capture begins because the 059a gate
  * opens the moment the binding is written (daemon-side).
@@ -105,11 +105,11 @@ export function FirstRunBindCTA({ wire, navigate, assetBase }: FirstRunBindCTAPr
 				textAlign: "center",
 			}}
 		>
-			<img src={`${assetBase}/honeycomb-memory-cluster.svg`} width={48} height={48} alt="" />
+			<img src={`${assetBase}/hive-mark.svg`} width={48} height={48} alt="" />
 			<div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 480 }}>
 				<div style={{ fontSize: 17, fontWeight: 700, color: "var(--text-primary)", letterSpacing: "-0.02em" }}>No active projects?</div>
 				<div style={{ fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.5 }}>
-					Pick a folder to start — point Honeycomb at the repo or folder you want it to remember, and it begins capturing there.
+					Pick a folder to start — point Hive at the repo or folder you want the fleet to remember, and capture begins there.
 				</div>
 			</div>
 

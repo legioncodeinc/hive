@@ -57,7 +57,7 @@ describe("dashboard host shell", () => {
     });
     const html = await (await daemon.app.request("http://hive.local/")).text();
     expect(html).toContain('data-asset-base=""');
-    expect(html).toContain('href="/honeycomb-memory-cluster.svg"');
+    expect(html).toContain('href="/hive-mark.svg"');
   });
 
   it("404s the app bundle route when no bundle is available (fail-soft, no 500)", async () => {
