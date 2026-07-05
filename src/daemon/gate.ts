@@ -1,8 +1,8 @@
 /**
  * The server-side PORTAL LANDING GATE — PRD-003a, implementing ADR-0004's precedence.
  *
- * On landing on ANY non-exempt route hive evaluates ONE ordered precedence, health then auth,
- * before deciding what to serve:
+ * On landing on ANY non-exempt route hive evaluates ONE ordered precedence, health then auth then
+ * tenancy, before deciding what to serve:
  *
  *   1. Fleet not healthy (per the EXISTING `isFleetReady()` projection, `fleet-status.ts`) →
  *      redirect to `/buzzing` (g-AC-3). Checked FIRST: an unhealthy fleet makes every other screen
@@ -10,7 +10,9 @@
  *   2. Else not logged in (the EXISTING proxied honeycomb `/setup/state` `authenticated` bit,
  *      `setup-auth.ts`) → redirect to `/login` (g-AC-4). A fetch failure/timeout reads as "not
  *      logged in" (l-AC-6) — never a fail-soft into the dashboard.
- *   3. Else serve the requested route as-is (g-AC-5 / g-AC-6): `next()` falls through to the
+ *   3. Else tenancy unconfirmed (`GET /setup/tenancy` `selected` bit, `setup-tenancy.ts`) →
+ *      redirect to `/onboarding` (PRD-011c tg-AC-1). Fails closed to unconfirmed on any read fault.
+ *   4. Else serve the requested route as-is (g-AC-5 / g-AC-6): `next()` falls through to the
  *      more specific route/catch-all registered after this middleware in `server.ts`.
  *
  * `/buzzing` and `/login` are a FIXED exemption set checked BEFORE the precedence above, so they
@@ -26,9 +28,8 @@
  * same-origin", both depend on the proxy handling its own requests untouched).
  *
  * SECURITY (g-AC-11, open-redirect defense): every redirect this middleware issues targets a
- * FIXED, hard-coded literal (`/buzzing` or `/login`) — never a value derived from user input (no
- * `?next=`, no `Referer`, no request path echoed back). This makes an open redirect structurally
- * impossible here: there is no code path where an attacker-controlled string reaches `c.redirect`.
+ * FIXED, hard-coded literal (`/buzzing`, `/login`, or `/onboarding`), never a value derived from
+ * user input (no `?next=`, no `Referer`, no request path echoed back).
  */
 
 import type { Context, MiddlewareHandler } from "hono";
@@ -37,6 +38,7 @@ import { DOCTOR_STATUS_URL } from "../shared/constants.js";
 import { isFleetReady } from "../shared/fleet-readiness.js";
 import { fetchFleetStatus, type FetchImpl as FleetFetchImpl } from "./fleet-status.js";
 import { fetchSetupAuthenticated, type SetupAuthFetchImpl } from "./setup-auth.js";
+import { fetchTenancySelected, type SetupTenancyFetchImpl } from "./setup-tenancy.js";
 
 /** The fixed redirect target for an unhealthy fleet (g-AC-3). A hard-coded literal, never derived. */
 const BUZZING_ROUTE = "/buzzing" as const;
@@ -107,6 +109,8 @@ export interface CreatePortalGateOptions {
   readonly doctorStatusUrl?: string;
   /** The fetch used for the auth check (defaults to the global `fetch`; a test injects a fake). */
   readonly setupAuthFetch?: SetupAuthFetchImpl;
+  /** The fetch used for the tenancy check (defaults to the global `fetch`; a test injects a fake). */
+  readonly setupTenancyFetch?: SetupTenancyFetchImpl;
   /** Override the doctor registry file path the auth check resolves honeycomb's base from. */
   readonly registryPath?: string;
 }
@@ -122,6 +126,7 @@ export function createPortalGate(options: CreatePortalGateOptions = {}): Middlew
   const fleetStatusFetch = options.fleetStatusFetch ?? fetch;
   const doctorStatusUrl = options.doctorStatusUrl ?? DOCTOR_STATUS_URL;
   const setupAuthFetch = options.setupAuthFetch ?? fetch;
+  const setupTenancyFetch = options.setupTenancyFetch ?? fetch;
   const registryPath = options.registryPath;
 
   return async (c: Context, next: () => Promise<void>): Promise<Response | void> => {
@@ -159,8 +164,18 @@ export function createPortalGate(options: CreatePortalGateOptions = {}): Middlew
       return c.redirect(LOGIN_ROUTE, 302);
     }
 
-    // g-AC-5 / g-AC-6 / g-AC-10: healthy + authenticated — serve the requested route as-is (the
-    // SPA shell catch-all defaults `/` to the dashboard; nothing here re-derives a fallback path).
+    // PRD-011c tg-AC-1: tenancy third. Unconfirmed (or any read fault) → `/onboarding` to resume
+    // the tenancy step; never serve the dashboard while `selected` is false.
+    // tg-AC-6 (separate-fetch justification): this is deliberately a SECOND loopback fetch rather
+    // than a coalesced read, because honeycomb does not surface `selected` on `/setup/state`;
+    // the tenancy marker lives only on `GET /setup/tenancy` (the canonical 073c contract). One
+    // additional loopback round trip per gated page navigation is the accepted budget.
+    const tenancySelected = await fetchTenancySelected(setupTenancyFetch, { registryPath, signal: c.req.raw.signal });
+    if (!tenancySelected) {
+      return c.redirect(ONBOARDING_ROUTE, 302);
+    }
+
+    // g-AC-5 / g-AC-6 / g-AC-10: healthy + authenticated + tenancy confirmed, serve as-is.
     await next();
     return undefined;
   };

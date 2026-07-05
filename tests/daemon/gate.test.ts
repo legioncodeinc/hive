@@ -8,6 +8,7 @@
 import { createHive } from "../../src/daemon/server.js";
 import type { FetchImpl as FleetFetchImpl } from "../../src/daemon/fleet-status.js";
 import type { SetupAuthFetchImpl } from "../../src/daemon/setup-auth.js";
+import type { SetupTenancyFetchImpl } from "../../src/daemon/setup-tenancy.js";
 
 function fleetStatusFetch(health: "ok" | "degraded" | "unreachable"): FleetFetchImpl {
   if (health === "unreachable") {
@@ -33,16 +34,32 @@ const throwingSetupAuthFetch: SetupAuthFetchImpl = async () => {
   throw new Error("ECONNREFUSED");
 };
 
+function setupTenancyFetch(selected: boolean): SetupTenancyFetchImpl {
+  return async () =>
+    new Response(JSON.stringify({ selected }), { status: 200, headers: { "content-type": "application/json" } });
+}
+
+const throwingSetupTenancyFetch: SetupTenancyFetchImpl = async () => {
+  throw new Error("ECONNREFUSED");
+};
+
 const HEALTHY = fleetStatusFetch("ok");
 const UNHEALTHY = fleetStatusFetch("degraded");
 const UNREACHABLE = fleetStatusFetch("unreachable");
 const LOGGED_IN = setupAuthFetch(true);
 const LOGGED_OUT = setupAuthFetch(false);
+const TENANCY_SELECTED = setupTenancyFetch(true);
+const TENANCY_UNSELECTED = setupTenancyFetch(false);
 
-function gatedDaemon(options: { fleetStatusFetch: FleetFetchImpl; setupAuthFetch: SetupAuthFetchImpl }) {
+function gatedDaemon(options: {
+  fleetStatusFetch: FleetFetchImpl;
+  setupAuthFetch: SetupAuthFetchImpl;
+  setupTenancyFetch?: SetupTenancyFetchImpl;
+}) {
   return createHive({
     fleetStatusFetch: options.fleetStatusFetch,
-    setupAuthFetch: options.setupAuthFetch
+    setupAuthFetch: options.setupAuthFetch,
+    setupTenancyFetch: options.setupTenancyFetch ?? TENANCY_SELECTED
   });
 }
 
@@ -201,18 +218,62 @@ describe("PRD-003a portal landing gate — exempt screens never redirect", () =>
     }
   });
 
-  it("g-AC-11 every redirect target is exactly /buzzing or /login (the fixed internal allowlist), never open", async () => {
+  it("g-AC-11 every redirect target is exactly /buzzing, /login, or /onboarding (fixed allowlist)", async () => {
     const unhealthy = await requestPath(gatedDaemon({ fleetStatusFetch: UNHEALTHY, setupAuthFetch: LOGGED_OUT }), "/settings");
     expect(unhealthy.headers.get("location")).toBe("/buzzing");
 
     const loggedOut = await requestPath(gatedDaemon({ fleetStatusFetch: HEALTHY, setupAuthFetch: LOGGED_OUT }), "/settings");
     expect(loggedOut.headers.get("location")).toBe("/login");
 
-    // Even an attacker-shaped path (host header spoof / traversal-looking path) never leaks into
-    // the redirect target — the gate never reads the request path to build the Location header.
+    const tenancyPending = await requestPath(
+      gatedDaemon({ fleetStatusFetch: HEALTHY, setupAuthFetch: LOGGED_IN, setupTenancyFetch: TENANCY_UNSELECTED }),
+      "/settings"
+    );
+    expect(tenancyPending.headers.get("location")).toBe("/onboarding");
+
     const daemon = gatedDaemon({ fleetStatusFetch: UNHEALTHY, setupAuthFetch: LOGGED_OUT });
     const weird = await requestPath(daemon, "/..%2f..%2fevil.example.com");
     expect(weird.headers.get("location")).toBe("/buzzing");
+  });
+});
+
+describe("PRD-011c portal landing gate - tenancy precedence", () => {
+  it("tg-AC-1 redirects to /onboarding when healthy, authenticated, and tenancy unconfirmed", async () => {
+    const daemon = gatedDaemon({ fleetStatusFetch: HEALTHY, setupAuthFetch: LOGGED_IN, setupTenancyFetch: TENANCY_UNSELECTED });
+    const response = await requestPath(daemon, "/");
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/onboarding");
+  });
+
+  it("tg-AC-2 skips tenancy check when fleet is unhealthy (redirect /buzzing)", async () => {
+    const tenancyCheck: SetupTenancyFetchImpl = async () => {
+      throw new Error("tenancy should never run when fleet is unhealthy");
+    };
+    const daemon = gatedDaemon({ fleetStatusFetch: UNHEALTHY, setupAuthFetch: LOGGED_IN, setupTenancyFetch: tenancyCheck });
+    const response = await requestPath(daemon, "/memories");
+    expect(response.headers.get("location")).toBe("/buzzing");
+  });
+
+  it("tg-AC-2 skips tenancy check when unauthenticated (redirect /login)", async () => {
+    const tenancyCheck: SetupTenancyFetchImpl = async () => {
+      throw new Error("tenancy should never run when logged out");
+    };
+    const daemon = gatedDaemon({ fleetStatusFetch: HEALTHY, setupAuthFetch: LOGGED_OUT, setupTenancyFetch: tenancyCheck });
+    const response = await requestPath(daemon, "/");
+    expect(response.headers.get("location")).toBe("/login");
+  });
+
+  it("tg-AC-3 serves the dashboard when healthy, authenticated, and tenancy selected", async () => {
+    const daemon = gatedDaemon({ fleetStatusFetch: HEALTHY, setupAuthFetch: LOGGED_IN, setupTenancyFetch: TENANCY_SELECTED });
+    const response = await requestPath(daemon, "/");
+    expect(response.status).toBe(200);
+  });
+
+  it("tg-AC-4 treats a tenancy read failure as unconfirmed (redirect /onboarding)", async () => {
+    const daemon = gatedDaemon({ fleetStatusFetch: HEALTHY, setupAuthFetch: LOGGED_IN, setupTenancyFetch: throwingSetupTenancyFetch });
+    const response = await requestPath(daemon, "/graph");
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/onboarding");
   });
 });
 

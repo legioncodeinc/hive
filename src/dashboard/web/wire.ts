@@ -26,6 +26,13 @@ import { z } from "zod";
 
 import { EMPTY_ROI_TREND, EMPTY_ROI_VIEW, type RoiTrendView, type RoiView } from "../contracts.js";
 import { projectionToGraphWire, type PortableProjectionWire, type ProjectionDerivedEntry, type ProjectionFileEntry } from "./hive-graph-projection.js";
+// PRD-011: only the `GET /setup/tenancy` read lives on WireClient (the display surfaces, tv-AC-4).
+// The onboarding step's enumerate/select/create calls go through `onboarding/tenancy-client.ts`
+// exclusively (ts-AC-11), deliberately NOT duplicated here, so the two clients cannot drift.
+import { SetupTenancySchema, UNSELECTED_SETUP_TENANCY, type SetupTenancyWire } from "./onboarding/tenancy-contracts.js";
+
+export type { SetupTenancyWire };
+export { UNSELECTED_SETUP_TENANCY };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Endpoint paths (single source — the host serves these under the daemon origin).
@@ -104,6 +111,9 @@ export const ENDPOINTS = Object.freeze({
 	// crash-recovery "Roll back" affordance (d-AC-7).
 	setupMigrate: "/setup/migrate-from-hivemind",
 	setupMigrateRollback: "/setup/migrate-from-hivemind/rollback",
+	// PRD-011: the explicit-tenancy read (proxied to honeycomb `/setup/tenancy`). The onboarding
+	// step's enumerate/select/create endpoints live in `onboarding/tenancy-client.ts` only.
+	setupTenancy: "/setup/tenancy",
 	// PRD-049e — the dashboard scope-switcher enumeration reads (local-mode-only loopback). The
 	// switcher hydrates its Org→Workspace→Project dropdowns from these. `scopeOrgs`/`scopeWorkspaces`
 	// are privilege-scoped by the daemon's token (`GET /organizations` / `GET /workspaces`);
@@ -952,6 +962,10 @@ export type NectarProjectRowWire = z.infer<typeof NectarProjectRowSchema>;
 export const NectarProjectsBodySchema = z.object({
 	globalBrooding: z.enum(["on", "paused"]).catch("on"),
 	projects: z.array(NectarProjectRowSchema).catch([]),
+	tenancyOrgName: z.string().optional(),
+	tenancyWorkspaceName: z.string().optional(),
+	tenancyOrgId: z.string().optional(),
+	tenancyWorkspaceId: z.string().optional(),
 });
 export type NectarProjectsBodyWire = z.infer<typeof NectarProjectsBodySchema>;
 
@@ -979,6 +993,16 @@ export type SetNectarBroodingBody =
 
 /** The brooding toggle ack mirrors the persisted projects read-model (019b). */
 export type NectarBroodingAckWire = NectarProjectsWire;
+
+/** PRD-011: tenancy read with fail-soft unreachable flag (tv-AC-4). */
+export interface SetupTenancyResultWire extends SetupTenancyWire {
+	readonly unreachable: boolean;
+}
+
+export const UNREACHABLE_SETUP_TENANCY: SetupTenancyResultWire = Object.freeze({
+	...UNSELECTED_SETUP_TENANCY,
+	unreachable: true,
+});
 
 /**
  * The generous client-side timeout (ms) for `buildGraph()`. The build parses the WHOLE repo with
@@ -1916,6 +1940,13 @@ export interface WireClient {
 	 */
 	setupLogin(): Promise<SetupLoginWire | null>;
 	/**
+	 * PRD-011: read explicit tenancy selection state (`GET /setup/tenancy`). Degrades to
+	 * {@link UNREACHABLE_SETUP_TENANCY} on failure; never throws. No token in the body. This is the
+	 * ONLY tenancy method on WireClient (the tv-AC-4 display read); the onboarding step's
+	 * enumerate/select/create surface lives in `onboarding/tenancy-client.ts` (ts-AC-11).
+	 */
+	setupTenancy(): Promise<SetupTenancyResultWire>;
+	/**
 	 * PRD-050d — "Proceed with Honeycomb": run the Hivemind→Honeycomb migration (`POST
 	 * /setup/migrate-from-hivemind`). The daemon backs up + uninstalls Hivemind idempotently, then
 	 * verify-and-adopts the shared credential (d-AC-4) or returns `needsLogin:true` (the page then runs
@@ -2575,6 +2606,21 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 			// arrives (it keeps polling → persist in the background). A 502 (device-flow-unavailable) or
 			// a network failure → null (the button shows an honest error). The body carries NO token.
 			return postJson(fetchImpl, url(ENDPOINTS.setupLogin), {}, SetupLoginSchema);
+		},
+		async setupTenancy(): Promise<SetupTenancyResultWire> {
+			// GET the explicit-tenancy state (PRD-011b tv-AC-4). A non-2xx / network / malformed
+			// body degrades to the honest unreachable state (never a fabricated tenancy, never a
+			// throw). The onboarding step's enumerate/select/create calls do NOT live here; they
+			// go through `onboarding/tenancy-client.ts` exclusively (ts-AC-11, no drift).
+			try {
+				const res = await fetchImpl(url(ENDPOINTS.setupTenancy), { headers: { accept: "application/json" } });
+				if (!res.ok) return UNREACHABLE_SETUP_TENANCY;
+				const parsed = SetupTenancySchema.safeParse(await res.json());
+				if (!parsed.success) return UNREACHABLE_SETUP_TENANCY;
+				return { ...parsed.data, unreachable: false };
+			} catch {
+				return UNREACHABLE_SETUP_TENANCY;
+			}
 		},
 			async migrateFromHivemind(): Promise<SetupMigrateWire> {
 				// POST the migration trigger; the daemon runs the guarded backup->uninstall->adopt transaction

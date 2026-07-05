@@ -213,6 +213,83 @@ describe("PRD-009c tm-AC-1 funnel events at transitions", () => {
   });
 });
 
+describe("PRD-011a ts-AC-13 tenancy funnel events are ACCEPTED by the event route", () => {
+  it("ts-AC-13 accepts tenancy_shown, tenancy_selected, and workspace_created (202, not 400) and emits them", async () => {
+    const { app, recorder, cleanup } = telemetryHarness();
+    try {
+      for (const [path, body] of [
+        ["/api/onboarding/event", { event: "tenancy_shown" }],
+        ["/api/onboarding/event", { event: "tenancy_selected", properties: { orgCount: "few", singleOrgConfirm: "false" } }],
+        ["/api/onboarding/event", { event: "workspace_created" }]
+      ] as const) {
+        const res = await request(app, path, { method: "POST", body });
+        expect(res.status).toBe(202);
+      }
+      await flushTelemetry();
+      expect(eventNames(recorder.calls)).toEqual(["tenancy_shown", "tenancy_selected", "workspace_created"]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("ts-AC-13 forwards only the bucketed org count and confirm flag on tenancy_selected (closed allow-list)", async () => {
+    const { app, recorder, cleanup } = telemetryHarness();
+    try {
+      const res = await request(app, "/api/onboarding/event", {
+        method: "POST",
+        body: { event: "tenancy_selected", properties: { orgCount: "single", singleOrgConfirm: "true" } }
+      });
+      expect(res.status).toBe(202);
+      await flushTelemetry();
+      const call = recorder.calls.find((c) => c.body["event"] === "tenancy_selected");
+      expect(call).toBeDefined();
+      const props = call!.body["properties"] as Record<string, string>;
+      expect(props["org_count"]).toBe("single");
+      expect(props["single_org_confirm"]).toBe("true");
+      const allowed = new Set([...ALLOWED_PROPERTY_KEYS, ...FUNNEL_PROPERTY_KEYS]);
+      for (const key of Object.keys(props)) {
+        expect(allowed.has(key as (typeof ALLOWED_PROPERTY_KEYS)[number] | (typeof FUNNEL_PROPERTY_KEYS)[number])).toBe(true);
+      }
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("N-1 records tenancy_selected from a TOKENLESS resume selection (202, not 401) while the session token is still active", async () => {
+    // The tokenless gate-redirect resume (C-1) fires funnel events with no `?t=` token while the
+    // on-disk token file still exists (complete() has not run). The event route must count this
+    // cohort rather than silently 401 it.
+    const { app, recorder, cleanup } = telemetryHarness();
+    try {
+      const res = await request(app, "/api/onboarding/event", {
+        method: "POST",
+        body: { event: "tenancy_selected", properties: { orgCount: "few", singleOrgConfirm: "false" } },
+        token: null
+      });
+      expect(res.status).toBe(202);
+      await flushTelemetry();
+      expect(eventNames(recorder.calls)).toContain("tenancy_selected");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("ts-AC-13 rejects a tenancy_selected body with a raw org name or id (400, nothing emitted)", async () => {
+    const { app, recorder, cleanup } = telemetryHarness();
+    try {
+      const res = await request(app, "/api/onboarding/event", {
+        method: "POST",
+        body: { event: "tenancy_selected", properties: { orgCount: "org-1234", singleOrgConfirm: "Acme Corp" } }
+      });
+      expect(res.status).toBe(400);
+      await flushTelemetry();
+      expect(recorder.calls).toHaveLength(0);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
 describe("PRD-009c tm-AC-2 session dedupe and install retries", () => {
   it("once-per-session milestones dedupe within the onboarding session ledger", async () => {
     const { app, recorder, telemetryDir, cleanup } = telemetryHarness();

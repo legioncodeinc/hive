@@ -214,5 +214,13 @@ export type { FleetHealth, FleetStatusResponse };
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** The exact UI-fired event names (product install + health events are daemon-side, never sent here). */
-export const ONBOARDING_UI_EVENTS = ["onboarding_started", "mode_selected", "login_shown", "dashboard_reached"] as const;
+export const ONBOARDING_UI_EVENTS = [
+	"onboarding_started",
+	"mode_selected",
+	"login_shown",
+	"tenancy_shown",
+	"tenancy_selected",
+	"workspace_created",
+	"dashboard_reached",
+] as const;
 export type OnboardingUiEvent = (typeof ONBOARDING_UI_EVENTS)[number];

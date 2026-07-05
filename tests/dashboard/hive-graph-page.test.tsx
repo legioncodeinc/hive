@@ -83,6 +83,14 @@ function makeWire(overrides: Partial<WireClient> = {}): WireClient {
 		})),
 		hiveGraphBuild: vi.fn(async (): Promise<HiveGraphBuildAck> => ({ state: "accepted", message: "Build triggered" })),
 		nectarProjects: vi.fn(async () => defaultNectarProjects()),
+		setupTenancy: vi.fn(async () => ({
+			pending: false,
+			selected: true,
+			authenticated: true,
+			org: { id: "local", name: "local" },
+			workspace: { id: "default", name: "default" },
+			unreachable: false,
+		})),
 		setNectarBrooding: vi.fn(async () => defaultNectarProjects()),
 		bindProject: vi.fn(async () => ({ bound: true, path: "/home/user/new-repo", projectId: "proj-new", error: undefined })),
 		fsBrowse: vi.fn(async () => ({
@@ -269,6 +277,37 @@ describe("HiveGraphPage", () => {
 		renderPage(wire);
 		await waitFor(() => expect(screen.getByTestId("nectar-projects-unreachable")).toBeTruthy());
 		expect((screen.getByTestId("nectar-global-brooding-toggle") as HTMLButtonElement).disabled).toBe(true);
+	});
+
+	it("tv-AC-6 renders the panel tenancy line naming the fleet credential tenancy when the projects body carries no tenancy fields", async () => {
+		renderPage(makeWire());
+		await waitFor(() => expect(screen.getByTestId("nectar-projects-tenancy")).toBeTruthy());
+		// makeWire's setupTenancy reports local · default; the body carries no fields, so the line
+		// falls back to the fleet-shared credential's tenancy, labeled as such (tv-AC-8 at render).
+		expect(screen.getByTestId("nectar-projects-tenancy").textContent).toContain("local · default (fleet credential)");
+	});
+
+	it("tv-AC-6 prefers the projects body's tenancy fields when nectar reports them", async () => {
+		const wire = makeWire({
+			nectarProjects: vi.fn(async () => ({
+				...defaultNectarProjects(),
+				tenancyOrgName: "Nectar Org",
+				tenancyWorkspaceName: "Nectar WS",
+			})),
+		});
+		renderPage(wire);
+		await waitFor(() => expect(screen.getByTestId("nectar-projects-tenancy")).toBeTruthy());
+		expect(screen.getByTestId("nectar-projects-tenancy").textContent).toContain("Nectar Org · Nectar WS");
+		expect(screen.getByTestId("nectar-projects-tenancy").textContent).not.toContain("fleet credential");
+	});
+
+	it("tv-AC-7 renders NO tenancy line when nectar is unreachable (the unreachable message stands alone)", async () => {
+		const wire = makeWire({
+			nectarProjects: vi.fn(async () => ({ ...EMPTY_NECTAR_PROJECTS, unreachable: true })),
+		});
+		renderPage(wire);
+		await waitFor(() => expect(screen.getByTestId("nectar-projects-unreachable")).toBeTruthy());
+		expect(screen.queryByTestId("nectar-projects-tenancy")).toBeNull();
 	});
 
 	it("c-AC-7 renders names and paths as escaped text without executing markup", async () => {

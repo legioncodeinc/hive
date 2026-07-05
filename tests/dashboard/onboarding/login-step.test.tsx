@@ -61,7 +61,7 @@ describe("LoginStep", () => {
 		);
 	});
 
-	it("ob-AC-15: once authenticated flips true, fires dashboard_reached, completes, then navigates", async () => {
+	it("ts-AC-1: once authenticated flips true, reports up to the parent without terminal handoff", async () => {
 		let authenticated = false;
 		const wire = fakeWire({
 			setupState: vi.fn(async () => ({ ...FRESH_SETUP_STATE, authenticated })),
@@ -75,9 +75,7 @@ describe("LoginStep", () => {
 		authenticated = true;
 		await waitFor(() => expect(onAuthenticated).toHaveBeenCalledTimes(1));
 
-		expect(onboardingClient.sendEvent).toHaveBeenCalledWith("dashboard_reached");
-		expect(onboardingClient.complete).toHaveBeenCalledTimes(1);
-		// Never a client-side swap into a dashboard subtree, l-AC-7/l-AC-8's discipline, reused here.
-		expect(screen.queryByTestId("onboarding-login-step")).toBeNull();
+		expect(onboardingClient.sendEvent).not.toHaveBeenCalledWith("dashboard_reached");
+		expect(onboardingClient.complete).not.toHaveBeenCalled();
 	});
 });

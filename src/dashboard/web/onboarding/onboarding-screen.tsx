@@ -12,7 +12,8 @@
  *        └ Advanced → picker → installing(exactly the chosen subset)  (ob-AC-7)
  *   installing(queue, index) ── each card completes+dwells → advance → next index, else → health
  *   health ── polls until ready → login
- *   login ── device-code display, then a hard navigation to `/` on authenticated (ob-AC-14/15)
+ *   login ── device-code display → tenancy when authenticated (PRD-011a)
+ *   tenancy ── org + workspace selection → hard navigation to `/` on `selected: true` (ts-AC-9)
  *
  * Resume honesty (ob-AC-16): the Standard/Advanced choice is persisted client-side
  * (onboarding-selection-store), so a resumed install uses `buildResumeQueue`, which excludes a
@@ -40,9 +41,11 @@ import { InstallCard } from "./install-card.js";
 import { LoginStep } from "./login-step.js";
 import { createOnboardingClient, type OnboardingClient } from "./onboarding-client.js";
 import { OnboardingHero, type OnboardingMode } from "./onboarding-hero.js";
+import type { TenancyClient } from "./tenancy-client.js";
+import { consumeTenancyAutoComplete, TenancyStep } from "./tenancy-step.js";
 import { useOnboardingToken } from "./use-onboarding-token.js";
 import { Button } from "../primitives.js";
-import type { WireClient } from "../wire.js";
+import { createWireClient, type WireClient } from "../wire.js";
 
 type Phase =
 	| { readonly kind: "loading" }
@@ -51,7 +54,8 @@ type Phase =
 	| { readonly kind: "picker" }
 	| { readonly kind: "installing"; readonly queue: readonly InstallableProduct[]; readonly index: number }
 	| { readonly kind: "health" }
-	| { readonly kind: "login" };
+	| { readonly kind: "login" }
+	| { readonly kind: "tenancy" };
 
 /** An empty install queue means nothing more to do, skip straight to the health gate. */
 function installingOrHealth(queue: readonly InstallableProduct[]): Phase {
@@ -64,6 +68,8 @@ export interface OnboardingScreenProps {
 	readonly client?: OnboardingClient;
 	/** Test seam: inject a fake proxied setup wire client for the login step. */
 	readonly wire?: WireClient;
+	/** Test seam: inject a fake tenancy client for the tenancy step (never touches the network). */
+	readonly tenancyClient?: TenancyClient;
 	/** Test seam: override the brief install dwell (ob-AC-11, revised). */
 	readonly minDwellMs?: number;
 	/** Test seam: override the health-check poll interval. */
@@ -72,7 +78,7 @@ export interface OnboardingScreenProps {
 	readonly loginPollMs?: number;
 	/** Test seam: called instead of the real hard navigation from the short-circuit summary. */
 	readonly onShortCircuitNavigate?: () => void;
-	/** Test seam: called instead of the real hard navigation once login completes (ob-AC-15). */
+	/** Test seam: called instead of the real hard navigation once tenancy selection completes. */
 	readonly onAuthenticated?: () => void;
 }
 
@@ -111,10 +117,13 @@ function ShortCircuitSummary({ onGoToDashboard }: { readonly onGoToDashboard: ()
 }
 
 /**
- * The terminal "no token" screen. The one-time token rides the opened URL (`/onboarding?t=...`) and
- * is held in memory only, so landing here without one (a refresh after the URL scrub, the printed
- * fallback link, a bookmark) can never recover on its own — the operator re-runs the installer,
- * which mints a fresh token and reopens the portal.
+ * The terminal "no token" screen for a machine that is genuinely NOT installed/authenticated. The
+ * one-time token rides the opened URL (`/onboarding?t=...`) and is held in memory only, so landing
+ * here without one (a refresh after the URL scrub, the printed fallback link, a bookmark) cannot
+ * recover the INSTALLER flow on its own: the operator re-runs the installer, which mints a fresh
+ * token and reopens the portal. PRD-011c C-1: an installed + authenticated + tenancy-unselected
+ * machine never lands here; the tokenless probe below resumes it at the tenancy step instead,
+ * because the tenancy step's whole data plane is the token-free `/setup/*` surface (ts-AC-12).
  */
 function MissingTokenNotice(): React.JSX.Element {
 	return (
@@ -176,6 +185,7 @@ export function OnboardingScreen({
 	assetBase = "assets",
 	client: clientOverride,
 	wire,
+	tenancyClient,
 	minDwellMs,
 	healthPollMs,
 	loginPollMs,
@@ -190,6 +200,8 @@ export function OnboardingScreen({
 	const tokenReady = clientOverride !== undefined || (token !== null && token !== "");
 	const tokenMissing = clientOverride === undefined && token === "";
 	const client = React.useMemo<OnboardingClient>(() => clientOverride ?? createOnboardingClient(token ?? ""), [clientOverride, token]);
+
+	const wireClient = React.useMemo<WireClient>(() => wire ?? createWireClient(), [wire]);
 
 	const [phase, setPhase] = React.useState<Phase>({ kind: "loading" });
 	const [detection, setDetection] = React.useState<DetectResponse | null>(null);
@@ -209,6 +221,14 @@ export function OnboardingScreen({
 			if (!alive) return;
 			setDetection(detectResult);
 			if (isFleetFullyInstalled(detectResult) && healthResult.ready) {
+				const setupState = await wireClient.setupState();
+				if (setupState.authenticated) {
+					const tenancy = await wireClient.setupTenancy();
+					if (!tenancy.selected) {
+						setPhase({ kind: "tenancy" });
+						return;
+					}
+				}
 				setPhase({ kind: "short-circuit" });
 			} else if (hasResumableInstall(detectResult)) {
 				// Resume honors the operator's persisted subset so a deselected product is never
@@ -221,7 +241,7 @@ export function OnboardingScreen({
 		return () => {
 			alive = false;
 		};
-	}, [client, tokenReady]);
+	}, [client, tokenReady, wireClient]);
 
 	const chooseMode = React.useCallback(
 		(mode: OnboardingMode): void => {
@@ -261,14 +281,73 @@ export function OnboardingScreen({
 		if (typeof window !== "undefined") window.location.assign("/");
 	}, [onShortCircuitNavigate]);
 
-	// Onboarding reached its terminal state (login complete): drop the persisted subset so a later
-	// visit starts clean rather than resuming against a stale choice.
-	const handleAuthenticated = React.useCallback((): void => {
+	// ts-AC-9: terminal handoff after tenancy selection persists; drop the persisted install subset.
+	const handleTenancyComplete = React.useCallback((): void => {
 		clearSelection();
-		if (onAuthenticated !== undefined) onAuthenticated();
+		if (onAuthenticated !== undefined) {
+			onAuthenticated();
+			return;
+		}
+		if (typeof window !== "undefined") window.location.assign("/");
 	}, [onAuthenticated]);
 
-	if (tokenMissing) return <MissingTokenNotice />;
+	// ts-AC-1: login authenticates into the tenancy phase, not the dashboard.
+	const handleLoginAuthenticated = React.useCallback((): void => {
+		setPhase({ kind: "tenancy" });
+	}, []);
+
+	// PRD-011c C-1 (tg-AC-8 / ts-AC-10): the gate's tenancy redirect navigates to `/onboarding`
+	// WITHOUT a `?t=` token, so a tokenless mount must not dead-end on the expired-link notice
+	// when the machine is actually installed, authenticated, and merely tenancy-unselected. The
+	// tenancy step's entire data plane is the token-free `/setup/*` surface (ts-AC-12), so probe
+	// `/setup/state` + `/setup/tenancy` (both token-free by design) and resume there directly:
+	//   - authenticated + unselected  -> the tenancy phase (the gated redirect's intended landing)
+	//   - authenticated + selected    -> straight back to `/` (nothing to resume; the gate serves it)
+	//   - not authenticated           -> the genuine expired-link notice (installer must re-run)
+	// An unreachable/failed probe reads as not-authenticated (fail-soft into the honest notice).
+	const [tokenlessResume, setTokenlessResume] = React.useState<"probing" | "tenancy" | "expired">("probing");
+	React.useEffect(() => {
+		if (!tokenMissing) return;
+		let alive = true;
+		void (async (): Promise<void> => {
+			const [setupState, tenancy] = await Promise.all([wireClient.setupState(), wireClient.setupTenancy()]);
+			if (!alive) return;
+			if (!setupState.authenticated) {
+				setTokenlessResume("expired");
+				return;
+			}
+			if (tenancy.selected) {
+				// Tenancy is already confirmed (e.g. a stale bookmark): hand back to the
+				// gate-served dashboard without firing any funnel event. This auto-navigation is
+				// bounded by the same W-4 lap counter as the tenancy step's short-circuit: in the
+				// split-brain fault (browser reads selected, the gate's read persistently fails)
+				// the gate bounces every navigation back here, so past the allowance the flow
+				// falls through to the tenancy step, whose terminal split-brain state stops the
+				// loop with manual affordances.
+				if (consumeTenancyAutoComplete()) {
+					handleTenancyComplete();
+					return;
+				}
+			}
+			setTokenlessResume("tenancy");
+		})().catch(() => {
+			// N-2: fail closed on a THROWN probe (not just a resolved failure). The wire client
+			// already never throws by contract, but the terminal-notice fallback must not depend
+			// on that guarantee: any unexpected throw reads as not-authenticated.
+			if (alive) setTokenlessResume("expired");
+		});
+		return () => {
+			alive = false;
+		};
+	}, [tokenMissing, wireClient, handleTenancyComplete]);
+
+	if (tokenMissing) {
+		if (tokenlessResume === "probing") return <LoadingPlaceholder />;
+		if (tokenlessResume === "tenancy") {
+			return <TenancyStep onboardingClient={client} tenancyClient={tenancyClient} onComplete={handleTenancyComplete} />;
+		}
+		return <MissingTokenNotice />;
+	}
 
 	switch (phase.kind) {
 		case "loading":
@@ -297,7 +376,9 @@ export function OnboardingScreen({
 		case "health":
 			return <HealthView client={client} onReady={goToLogin} pollMs={healthPollMs} />;
 		case "login":
-			return <LoginStep onboardingClient={client} wire={wire} onAuthenticated={handleAuthenticated} pollMs={loginPollMs} />;
+			return <LoginStep onboardingClient={client} wire={wire} onAuthenticated={handleLoginAuthenticated} pollMs={loginPollMs} />;
+		case "tenancy":
+			return <TenancyStep onboardingClient={client} tenancyClient={tenancyClient} onComplete={handleTenancyComplete} />;
 		default: {
 			const exhaustive: never = phase;
 			return exhaustive;

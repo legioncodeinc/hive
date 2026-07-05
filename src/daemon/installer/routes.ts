@@ -225,9 +225,13 @@ export function createInstallerService(options: InstallerServiceOptions = {}): I
       return c.body(null, 204);
     });
 
-    // 6) Funnel events (PRD-009c): validate token + closed UI event set, emit through chokepoint.
+    // 6) Funnel events (PRD-009c): closed UI event set, emitted through the chokepoint. Token
+    //    mode is "optional" (PRD-011 N-1): the tokenless gate-redirect resume path (C-1) must
+    //    still be able to record tenancy_shown / tenancy_selected / dashboard_reached, or the
+    //    resume cohort is silently undercounted; a presented token still validates as before.
+    //    This route is telemetry-only (no state change), Host + Origin guarded like the rest.
     app.post("/api/onboarding/event", async (c) => {
-      const rejection = guardInstallerRequest(c, tokenStore, "always");
+      const rejection = guardInstallerRequest(c, tokenStore, "optional");
       if (rejection !== null) return rejection;
       const body = await readJsonBody(c);
       const parsed = OnboardingEventBodySchema.safeParse(body);

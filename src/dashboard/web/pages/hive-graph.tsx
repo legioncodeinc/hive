@@ -8,6 +8,7 @@
 
 import React from "react";
 
+import { deriveActiveTenancyLabel, formatNectarPanelTenancy } from "../active-tenancy-display.js";
 import { layout } from "../graph-layout.js";
 import { Panel } from "../panels.js";
 import { Badge, Button } from "../primitives.js";
@@ -45,6 +46,7 @@ import {
 	type SetNectarBroodingBody,
 	type WireClient,
 	EMPTY_NECTAR_PROJECTS,
+	UNREACHABLE_SETUP_TENANCY,
 } from "../wire.js";
 import type { ViewTransform } from "./graph.js";
 
@@ -91,13 +93,15 @@ function broodingBadgeTone(state: NectarProjectRowWire["brooding"]): "verified" 
 /** PRD-019c — nectar active projects + brooding controls (polls `GET /api/hive-graph/projects`). */
 function NectarProjectsPanel({ wire }: { wire: WireClient }): React.JSX.Element {
 	const [projectsWire, setProjectsWire] = React.useState<NectarProjectsWire>(EMPTY_NECTAR_PROJECTS);
+	const [fleetTenancy, setFleetTenancy] = React.useState(() => deriveActiveTenancyLabel(UNREACHABLE_SETUP_TENANCY));
 	const [hydrated, setHydrated] = React.useState(false);
 	const [busyKey, setBusyKey] = React.useState<string | null>(null);
 	const inFlightRef = React.useRef(false);
 
 	const reList = React.useCallback(async (): Promise<void> => {
-		const next = await wire.nectarProjects();
+		const [next, tenancy] = await Promise.all([wire.nectarProjects(), wire.setupTenancy()]);
 		setProjectsWire(next);
+		setFleetTenancy(deriveActiveTenancyLabel(tenancy));
 		setHydrated(true);
 	}, [wire]);
 
@@ -140,6 +144,17 @@ function NectarProjectsPanel({ wire }: { wire: WireClient }): React.JSX.Element 
 
 	const controlsDisabled = !hydrated || projectsWire.unreachable || busyKey !== null;
 
+	const panelTenancyLine =
+		!projectsWire.unreachable && hydrated
+			? formatNectarPanelTenancy(
+					{
+						org: projectsWire.tenancyOrgName ?? projectsWire.tenancyOrgId,
+						workspace: projectsWire.tenancyWorkspaceName ?? projectsWire.tenancyWorkspaceId,
+					},
+					fleetTenancy,
+				)
+			: null;
+
 	return (
 		<Panel
 			title="Nectar projects"
@@ -160,6 +175,14 @@ function NectarProjectsPanel({ wire }: { wire: WireClient }): React.JSX.Element 
 				</Button>
 			}
 		>
+			{panelTenancyLine !== null && (
+				<p
+					data-testid="nectar-projects-tenancy"
+					style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-tertiary)", margin: "0 0 10px" }}
+				>
+					Writing to: {panelTenancyLine}
+				</p>
+			)}
 			{projectsWire.unreachable ? (
 				<div
 					data-testid="nectar-projects-unreachable"

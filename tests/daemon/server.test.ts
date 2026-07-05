@@ -9,6 +9,7 @@ import {
 import type { ProxyFetch } from "../../src/daemon/proxy.js";
 import type { FetchImpl as FleetFetchImpl } from "../../src/daemon/fleet-status.js";
 import type { SetupAuthFetchImpl } from "../../src/daemon/setup-auth.js";
+import type { SetupTenancyFetchImpl } from "../../src/daemon/setup-tenancy.js";
 import type { TelemetryFetch } from "../../src/daemon/telemetry-proxy.js";
 import { DOCTOR_EVENTS_URL, HIVE_VERSION } from "../../src/shared/constants.js";
 
@@ -29,6 +30,9 @@ const authenticatedSetupAuthFetch: SetupAuthFetchImpl = async () =>
     status: 200,
     headers: { "content-type": "application/json" }
   });
+
+const selectedTenancyFetch: SetupTenancyFetchImpl = async () =>
+  new Response(JSON.stringify({ selected: true }), { status: 200, headers: { "content-type": "application/json" } });
 
 async function withTempLockPaths(run: (paths: { lockFilePath: string; pidFilePath: string }) => Promise<void> | void): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "hive-server-test-"));
@@ -63,7 +67,8 @@ describe("hive daemon server", () => {
   it("a-AC-3 serves the dashboard shell immediately when the portal gate passes (healthy + authenticated)", async () => {
     const daemon = createHive({
       fleetStatusFetch: healthyFleetStatusFetch,
-      setupAuthFetch: authenticatedSetupAuthFetch
+      setupAuthFetch: authenticatedSetupAuthFetch,
+      setupTenancyFetch: selectedTenancyFetch
     });
 
     const response = await daemon.app.request("http://hive.local/");
@@ -196,7 +201,8 @@ describe("hive daemon server", () => {
   it("PRD-005b: /health serves the SPA shell for an HTML-accepting request (the operator page), not the liveness JSON", async () => {
     const daemon = createHive({
       fleetStatusFetch: healthyFleetStatusFetch,
-      setupAuthFetch: authenticatedSetupAuthFetch
+      setupAuthFetch: authenticatedSetupAuthFetch,
+      setupTenancyFetch: selectedTenancyFetch
     });
     const response = await daemon.app.request("http://hive.local/health", { headers: { accept: "text/html" } });
     expect(response.status).toBe(200);

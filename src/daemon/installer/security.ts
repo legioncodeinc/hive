@@ -26,8 +26,15 @@ const ALLOWED_ORIGINS = new Set<string>([`http://${HIVE_HOST}:${HIVE_PORT}`, `ht
 /** The request header carrying the onboarding token (the SSE path uses the `t` query param instead). */
 export const TOKEN_HEADER = "x-onboarding-token" as const;
 
-/** Whether detection-style read endpoints require the token unconditionally or only while active. */
-export type TokenMode = "always" | "detect";
+/**
+ * Token requirement per endpoint class:
+ * - `always`: a valid token is required unconditionally (state-changing installer endpoints).
+ * - `detect`: required only while an onboarding session is active (the is-AC-10 re-entry carve-out).
+ * - `optional`: a PRESENTED token must be valid, but absence is accepted (PRD-011 N-1: the
+ *   telemetry-only event route, so the tokenless gate-redirect resume cohort is still counted;
+ *   the Host + Origin checks remain the cross-origin defense on this route).
+ */
+export type TokenMode = "always" | "detect" | "optional";
 
 /** True iff the `Host` header is the portal's own host (is-AC-8). */
 export function hostAllowed(host: string | undefined): boolean {
@@ -82,6 +89,14 @@ export function guardInstallerRequest(c: Context, tokenStore: TokenStore, tokenM
   const provided = extractToken(c);
   if (tokenMode === "always") {
     if (!tokenStore.requireValid(provided)) return unauthorized();
+    return null;
+  }
+
+  // "optional" (PRD-011 N-1): tokenless is accepted (the gate-redirect resume path has no token
+  // by design, ts-AC-12); a token that IS presented must still validate, so token-bearing
+  // behavior is unchanged and a wrong token never passes.
+  if (tokenMode === "optional") {
+    if (provided !== null && !tokenStore.requireValid(provided)) return unauthorized();
     return null;
   }
 

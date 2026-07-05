@@ -30,6 +30,7 @@
 
 import React from "react";
 
+import { ActiveTenancyDisplay } from "./active-tenancy-display.js";
 import { Button } from "./primitives.js";
 import { ConnectivityBanner } from "./panels.js";
 import { HEALTH_ROUTE, HealthRail } from "./health-rail.js";
@@ -111,6 +112,7 @@ export function Shell({ client, assetBase = "assets" }: ShellProps = {}): React.
 	const [healthReasons, setHealthReasons] = React.useState<HealthReasonsWire | null>(null);
 	const [settings, setSettings] = React.useState<SettingsWire>(EMPTY_SETTINGS);
 	const [pollinating, setPollinating] = React.useState(false);
+	const [tenancyRefreshKey, setTenancyRefreshKey] = React.useState(0);
 	// Collapsed: a manual toggle OR an auto-collapse under the narrow breakpoint (037a AC-6). We track
 	// both an explicit user choice and the viewport, preferring the user's choice once they toggle.
 	const [collapsed, setCollapsed] = React.useState(false);
@@ -148,7 +150,10 @@ export function Shell({ client, assetBase = "assets" }: ShellProps = {}): React.
 		const nextNectarUp = !nectarStatus.unreachable;
 		setDaemonUpByOwner({ honeycomb: nextHoneycombUp, nectar: nextNectarUp });
 		setHealthReasons(honeycombProbe.reasons);
-		if (nextHoneycombUp && prevDaemonUpRef.current === false) void hydrateIdentity();
+		if (nextHoneycombUp && prevDaemonUpRef.current === false) {
+			void hydrateIdentity();
+			setTenancyRefreshKey((k) => k + 1);
+		}
 		prevDaemonUpRef.current = nextHoneycombUp;
 	}, HEALTH_POLL_MS);
 
@@ -237,6 +242,7 @@ export function Shell({ client, assetBase = "assets" }: ShellProps = {}): React.
 						borderBottom: "1px solid var(--border-subtle)",
 					}}
 				>
+					<ActiveTenancyDisplay wire={wire} refreshKey={tenancyRefreshKey} />
 					<span style={{ flex: 1 }} />
 					<Button variant="pollinate" onClick={() => void pollinate()} disabled={pollinating}>
 						{pollinating ? "pollinating…" : "Pollinate now"}

@@ -21,6 +21,7 @@ import { resolveRegisteredServiceNames } from "./registry.js";
 import { createTelemetryStreamHandler, type TelemetryFetch } from "./telemetry-proxy.js";
 import { createInstallerService, type InstallerServiceOptions } from "./installer/index.js";
 import type { SetupAuthFetchImpl } from "./setup-auth.js";
+import type { SetupTenancyFetchImpl } from "./setup-tenancy.js";
 
 export interface CreateHiveOptions {
   readonly host?: string;
@@ -33,6 +34,8 @@ export interface CreateHiveOptions {
   readonly proxyFetch?: ProxyFetch;
   /** The fetch used by the portal gate's auth check (`/setup/state`, defaults to the global `fetch`). */
   readonly setupAuthFetch?: SetupAuthFetchImpl;
+  /** The fetch used by the portal gate's tenancy check (`/setup/tenancy`, defaults to the global `fetch`). */
+  readonly setupTenancyFetch?: SetupTenancyFetchImpl;
   /** Override doctor's SSE events URL the telemetry relay connects to (defaults to the fixed loopback constant). */
   readonly doctorEventsUrl?: string;
   /** The fetch used by the telemetry relay to reach doctor's SSE stream (defaults to the global `fetch`). */
@@ -108,6 +111,7 @@ export function createHive(options: CreateHiveOptions = {}): HiveInstance {
       fleetStatusFetch,
       doctorStatusUrl,
       setupAuthFetch: options.setupAuthFetch,
+      setupTenancyFetch: options.setupTenancyFetch,
       registryPath: options.registryPath
     })
   );
