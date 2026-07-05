@@ -6,6 +6,12 @@ import { resolveFleetRoot, resolveLaunchdLogPaths } from "../shared/apiary-root.
 export const HIVE_START_COMMAND = "start" as const;
 export const RESTART_SEC = 5 as const;
 export const WINDOWS_RESTART_INTERVAL = "PT1M" as const;
+/**
+ * The task action runs under `conhost.exe --headless` instead of `node.exe` directly, so the
+ * scheduled task never pops a visible console window at logon/run (proven empirically: the
+ * identical task ran with Last Result 0 and no window under this wrapper).
+ */
+export const WINDOWS_CONHOST_COMMAND = "C:\\Windows\\System32\\conhost.exe" as const;
 
 /**
  * rr-AC-10 / 010a implementation note: when the root resolved at render time differs from the
@@ -108,10 +114,19 @@ WantedBy=default.target
  * root at render time, but the task-started daemon resolves the default root unless the operator
  * sets APIARY_HOME machine-wide (setx / system properties). Recorded in PRD-010a implementation
  * notes; hive's Windows service is per-user InteractiveToken only, so no LocalSystem edge exists.
+ *
+ * `userId` (a SID or a `domain\user` fallback, resolved by the caller and passed in already
+ * escaped-ready) scopes the `LogonTrigger` and `Principal` to a concrete identity. An unscoped
+ * logon trigger/principal means "any user's logon", which a hardened Windows 11 25H2 machine
+ * (Administrator Protection enabled) refuses to register from a non-elevated shell. `null` renders
+ * with no `UserId`, matching prior behavior for machines where no identity could be resolved.
+ * `UserId` is placed first inside `<Principal>` and after `<Enabled>` inside `<LogonTrigger>` per
+ * the Task Scheduler schema's element ordering.
  */
-export function renderScheduledTaskXml(plan: ServicePlan): string {
+export function renderScheduledTaskXml(plan: ServicePlan, userId: string | null = null): string {
   const node = escapeXml(process.execPath);
   const exec = escapeXml(plan.execPath);
+  const userIdBlock = userId === null ? "" : `\n      <UserId>${escapeXml(userId)}</UserId>`;
   return `<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
@@ -120,11 +135,11 @@ export function renderScheduledTaskXml(plan: ServicePlan): string {
   </RegistrationInfo>
   <Triggers>
     <LogonTrigger>
-      <Enabled>true</Enabled>
+      <Enabled>true</Enabled>${userIdBlock}
     </LogonTrigger>
   </Triggers>
   <Principals>
-    <Principal id="Author">
+    <Principal id="Author">${userIdBlock}
       <LogonType>InteractiveToken</LogonType>
       <RunLevel>LeastPrivilege</RunLevel>
     </Principal>
@@ -146,21 +161,25 @@ export function renderScheduledTaskXml(plan: ServicePlan): string {
   </Settings>
   <Actions Context="Author">
     <Exec>
-      <Command>${node}</Command>
-      <Arguments>"${exec}" ${HIVE_START_COMMAND}</Arguments>
+      <Command>${WINDOWS_CONHOST_COMMAND}</Command>
+      <Arguments>--headless "${node}" "${exec}" ${HIVE_START_COMMAND}</Arguments>
     </Exec>
   </Actions>
 </Task>
 `;
 }
 
-export function renderUnit(plan: ServicePlan, env: NodeJS.ProcessEnv = process.env): string {
+export function renderUnit(
+  plan: ServicePlan,
+  env: NodeJS.ProcessEnv = process.env,
+  windowsUserId: string | null = null
+): string {
   switch (plan.manager) {
     case "launchd":
       return renderLaunchdPlist(plan, env);
     case "systemd":
       return renderSystemdUnit(plan, env);
     case "schtasks":
-      return renderScheduledTaskXml(plan);
+      return renderScheduledTaskXml(plan, windowsUserId);
   }
 }

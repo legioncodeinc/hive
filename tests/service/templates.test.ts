@@ -7,7 +7,9 @@ import {
   renderLaunchdPlist,
   renderScheduledTaskXml,
   renderSystemdUnit,
+  renderUnit,
   HIVE_START_COMMAND,
+  WINDOWS_CONHOST_COMMAND,
   WINDOWS_RESTART_INTERVAL
 } from "../../src/service/templates.js";
 import { fixedEnv } from "./helpers.js";
@@ -87,6 +89,55 @@ describe("hive service templates", () => {
     expect(xml).toContain("<LogonTrigger>");
     expect(xml).toContain("<RestartOnFailure>");
     expect(xml).toContain(`<Interval>${WINDOWS_RESTART_INTERVAL}</Interval>`);
-    expect(xml).toContain(`<Arguments>"C:\\hive\\dist\\cli.js" ${HIVE_START_COMMAND}</Arguments>`);
+  });
+
+  it("wraps the schtasks action in conhost --headless so no console window pops at logon/run", () => {
+    const plan = resolveServicePlan(fixedEnv({ platform: "win32", execPath: "C:\\hive\\dist\\cli.js" }));
+    const xml = renderScheduledTaskXml(plan);
+
+    expect(xml).toContain(`<Command>${WINDOWS_CONHOST_COMMAND}</Command>`);
+    expect(xml).toContain(
+      `<Arguments>--headless "${process.execPath}" "C:\\hive\\dist\\cli.js" ${HIVE_START_COMMAND}</Arguments>`
+    );
+    expect(xml).not.toContain(`<Command>${process.execPath}</Command>`);
+  });
+
+  it("renders no UserId in LogonTrigger/Principal when no identity was resolved (prior unscoped behavior)", () => {
+    const plan = resolveServicePlan(fixedEnv({ platform: "win32", execPath: "C:\\hive\\dist\\cli.js" }));
+    const xml = renderScheduledTaskXml(plan, null);
+
+    expect(xml).not.toContain("<UserId>");
+  });
+
+  it("scopes the LogonTrigger and Principal to the resolved SID so schtasks registers without elevation", () => {
+    const plan = resolveServicePlan(fixedEnv({ platform: "win32", execPath: "C:\\hive\\dist\\cli.js" }));
+    const sid = "S-1-5-21-1111111111-2222222222-3333333333-1001";
+    const xml = renderScheduledTaskXml(plan, sid);
+
+    // Exactly two UserId elements: one scoping the LogonTrigger, one scoping the Principal.
+    expect(xml.split(`<UserId>${sid}</UserId>`)).toHaveLength(3);
+    const logonTriggerBlock = xml.slice(xml.indexOf("<LogonTrigger>"), xml.indexOf("</LogonTrigger>"));
+    expect(logonTriggerBlock).toContain(`<UserId>${sid}</UserId>`);
+    const principalBlock = xml.slice(xml.indexOf('<Principal id="Author">'), xml.indexOf("</Principal>"));
+    expect(principalBlock).toContain(`<UserId>${sid}</UserId>`);
+    // Per the Task Scheduler schema, UserId comes first inside Principal.
+    expect(principalBlock.indexOf("<UserId>")).toBeLessThan(principalBlock.indexOf("<LogonType>"));
+  });
+
+  it("XML-escapes a fallback domain\\user account rendered as UserId", () => {
+    const plan = resolveServicePlan(fixedEnv({ platform: "win32", execPath: "C:\\hive\\dist\\cli.js" }));
+    const xml = renderScheduledTaskXml(plan, "DOMAIN&<>\\user'\"");
+
+    expect(xml).toContain("<UserId>DOMAIN&amp;&lt;&gt;\\user&apos;&quot;</UserId>");
+    expect(xml).not.toContain("<UserId>DOMAIN&<>\\user'\"</UserId>");
+  });
+
+  it("renderUnit threads the resolved Windows UserId through to the schtasks XML only", () => {
+    const winPlan = resolveServicePlan(fixedEnv({ platform: "win32", execPath: "C:\\hive\\dist\\cli.js" }));
+    const linuxPlan = resolveServicePlan(fixedEnv({ platform: "linux", execPath: "/opt/hive/dist/cli.js" }));
+    const sid = "S-1-5-21-1-2-3-1001";
+
+    expect(renderUnit(winPlan, process.env, sid)).toContain(`<UserId>${sid}</UserId>`);
+    expect(renderUnit(linuxPlan, {}, sid)).not.toContain(sid);
   });
 });

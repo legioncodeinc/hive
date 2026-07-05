@@ -21,6 +21,7 @@ import {
   type ServicePlan
 } from "./platform.js";
 import { renderUnit } from "./templates.js";
+import { resolveWindowsUserId as resolveWindowsUserIdDefault } from "./windows-identity.js";
 
 const SERVICE_COMMAND_TIMEOUT_MS = 15_000;
 
@@ -88,6 +89,13 @@ export interface ServiceModuleDeps {
    * against the plan's home; tests MUST inject a no-op so a fake `home` never touches real disk.
    */
   readonly migrateState?: (environment: ServiceEnvironment) => void;
+  /**
+   * Windows-only seam resolving the SID (or `domain\user` fallback) embedded as the schtasks
+   * `LogonTrigger`/`Principal` `UserId` (see `templates.ts` `renderScheduledTaskXml`). Defaults to
+   * the real {@link resolveWindowsUserId} (execFile of `whoami.exe`, never a shell); tests MUST
+   * inject a fixed value so a run never shells out. Never invoked for launchd/systemd plans.
+   */
+  readonly resolveWindowsUserId?: () => Promise<string | null>;
 }
 
 export function createExecFileRunner(): CommandRunner {
@@ -251,6 +259,7 @@ export function createServiceModule(deps: ServiceModuleDeps): ServiceModule {
     ((env: ServiceEnvironment): void => {
       migrateHiveState({ home: env.home, env: process.env });
     });
+  const resolveWindowsUserId = deps.resolveWindowsUserId ?? (() => resolveWindowsUserIdDefault());
 
   function plan(): ServicePlan {
     return resolveServicePlan(environment);
@@ -311,7 +320,8 @@ export function createServiceModule(deps: ServiceModuleDeps): ServiceModule {
       if (needsUnitFile) {
         try {
           fs.mkdirp(dirname(resolvedPlan.unitPath));
-          fs.writeFile(resolvedPlan.unitPath, renderUnit(resolvedPlan));
+          const windowsUserId = resolvedPlan.manager === "schtasks" ? await resolveWindowsUserId() : null;
+          fs.writeFile(resolvedPlan.unitPath, renderUnit(resolvedPlan, process.env, windowsUserId));
         } catch (error) {
           return {
             ok: false,

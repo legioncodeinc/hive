@@ -62,19 +62,28 @@ describe("hive service module", () => {
   it("rr-AC-10 stages Windows XML under the fleet hive state dir and creates schtask", async () => {
     const runner = createRecordingRunner();
     const fs = createMemoryFs();
+    const sid = "S-1-5-21-1111111111-2222222222-3333333333-1001";
     const service = createServiceModule({
       execPath: "C:\\hive\\dist\\cli.js",
       runner,
       fs,
       environment: fixedEnv({ platform: "win32", home: "C:\\Users\\t", execPath: "C:\\hive\\dist\\cli.js" }),
-      migrateState: () => {}
+      migrateState: () => {},
+      resolveWindowsUserId: () => Promise.resolve(sid)
     });
 
     const result = await service.install();
     const stagedPath = resolveStagedWindowsTaskPath({ home: "C:\\Users\\t", env: process.env });
 
     expect(result.ok).toBe(true);
-    expect(fs.files.get(stagedPath)).toContain("<Task ");
+    const xml = fs.files.get(stagedPath);
+    expect(xml).toContain("<Task ");
+    // BUG 1 fix: the LogonTrigger and Principal are scoped to the resolved SID, so schtasks
+    // registers without elevation on a hardened Windows 11 25H2 machine.
+    expect(xml).toContain(`<UserId>${sid}</UserId>`);
+    // BUG 2 fix: the action runs under conhost --headless, so no console window pops.
+    expect(xml).toContain("<Command>C:\\Windows\\System32\\conhost.exe</Command>");
+    expect(xml).toContain("--headless");
     expect(runner.calls[0]).toEqual({
       command: "schtasks",
       args: ["/Delete", "/TN", "thehive", "/F"]
@@ -83,6 +92,46 @@ describe("hive service module", () => {
       command: "schtasks",
       args: ["/Create", "/XML", stagedPath, "/TN", "hive", "/F"]
     });
+  });
+
+  it("rr-AC-10 falls back to an unscoped UserId-less task XML when the SID cannot be resolved", async () => {
+    const runner = createRecordingRunner();
+    const fs = createMemoryFs();
+    const service = createServiceModule({
+      execPath: "C:\\hive\\dist\\cli.js",
+      runner,
+      fs,
+      environment: fixedEnv({ platform: "win32", home: "C:\\Users\\t", execPath: "C:\\hive\\dist\\cli.js" }),
+      migrateState: () => {},
+      resolveWindowsUserId: () => Promise.resolve(null)
+    });
+
+    const result = await service.install();
+    const stagedPath = resolveStagedWindowsTaskPath({ home: "C:\\Users\\t", env: process.env });
+
+    expect(result.ok).toBe(true);
+    expect(fs.files.get(stagedPath)).not.toContain("<UserId>");
+  });
+
+  it("rr-AC-10 never invokes the Windows SID resolver for a non-Windows plan", async () => {
+    const runner = createRecordingRunner();
+    const fs = createMemoryFs();
+    let resolverCalls = 0;
+    const service = createServiceModule({
+      execPath: "/opt/hive/dist/cli.js",
+      runner,
+      fs,
+      environment: fixedEnv({ platform: "linux", home: "/home/t", execPath: "/opt/hive/dist/cli.js" }),
+      migrateState: () => {},
+      resolveWindowsUserId: () => {
+        resolverCalls += 1;
+        return Promise.resolve("S-1-5-21-1-2-3-1001");
+      }
+    });
+
+    await service.install();
+
+    expect(resolverCalls).toBe(0);
   });
 
   it("b-AC-2 uninstall deregisters legacy and current units", async () => {
