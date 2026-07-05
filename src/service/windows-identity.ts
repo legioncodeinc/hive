@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { join } from "node:path";
+import { win32 } from "node:path";
 
 /** Matches a Windows SID string such as `S-1-5-21-...-1001`. */
 export const WINDOWS_SID_PATTERN = /^S-1-\d+(-\d+)+$/;
@@ -24,7 +24,7 @@ export interface WindowsUserIdResolverDeps {
  * be picked up instead.
  */
 export function whoamiExecutablePath(env: NodeJS.ProcessEnv): string {
-  return join(env.SystemRoot ?? "C:\\Windows", "System32", "whoami.exe");
+  return win32.join(env.SystemRoot ?? "C:\\Windows", "System32", "whoami.exe");
 }
 
 /** Real `whoami.exe` runner: execFile, never a shell. */
