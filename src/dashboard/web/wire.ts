@@ -1058,6 +1058,11 @@ export type UninstallResultWire = z.infer<typeof UninstallResultSchema>;
 export const HealthReasonsSchema = z.object({
 	storage: z.enum(["reachable", "unreachable"]).catch("reachable"),
 	embeddings: z.enum(["on", "off"]).catch("on"),
+	// PRD-025 honesty: the ADDITIVE fine-grained embeddings state the daemon now emits alongside the
+	// coarse `embeddings` field. `off`/`warming`/`on`/`failed` — so the UI shows real feedback (the
+	// model is downloading vs actually working vs could-not-load) instead of a coarse `on` that only
+	// means "enabled". Optional: a pre-honesty daemon omits it → the UI falls back to `embeddings`.
+	embeddingsState: z.enum(["off", "warming", "on", "failed"]).optional().catch(undefined),
 	schema: z.enum(["ok", "missing_table"]).catch("ok"),
 	// PRD-063b (b-AC-7): the Portkey gateway reason. `.catch("off")` so a pre-063b daemon (no
 	// `portkey` field) or an unknown future state degrades to "off" (Portkey not in force) rather
