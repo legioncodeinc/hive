@@ -166,6 +166,11 @@ hive register             # append Hive to Doctor's daemon registry
 
 That's the whole list, on purpose. Day to day you never touch it; the installer wires the service unit and registration, Doctor keeps the process alive, and you live in the browser.
 
+Two behaviors worth knowing:
+
+- **Hive owns sign-in for the fleet.** When Honeycomb or Nectar detect Hive on the machine, they never open a sign-in of their own; this dashboard's onboarding is the one login surface, and the workload daemons sit degraded until it writes the shared credentials, then recover on their own.
+- **`uninstall` is surgical and honest.** It stops the daemon, removes the service unit (current `com.legioncode.hive` and legacy `thehive` labels), deletes Hive's entry from Doctor's registry without touching anyone else's, and removes `~/.apiary/hive`, nothing more. Already gone? It exits 0 and says so. For a full-machine wipe, see `doctor purge` or the one-command uninstall at [get.theapiary.sh](https://get.theapiary.sh).
+
 <img src="assets/brand/divider-minor.svg" width="100%" height="3">
 
 ## ✨ Open one URL, see the whole hive
