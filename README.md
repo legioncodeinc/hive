@@ -157,8 +157,10 @@ The `hive` binary keeps a deliberately small surface. It's a portal daemon, not 
 
 ```bash
 hive start                # run the portal daemon on :3853 (the default verb)
+hive stop                 # stop the portal daemon (service manager or direct SIGTERM)
 hive install-service      # install the OS service unit (launchd / systemd / schtasks)
 hive uninstall-service    # remove the service unit
+hive uninstall            # stop, remove service, registry entry, and hive state dir
 hive register             # append Hive to Doctor's daemon registry
 ```
 

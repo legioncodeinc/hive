@@ -4,12 +4,14 @@ import {
   runInstallServiceCommand,
   runRegisterCommand,
   runStartCommand,
+  runStopCommand,
+  runUninstallCommand,
   runUninstallServiceCommand
 } from "./cli-commands.js";
 import { DaemonAlreadyRunningError } from "./errors.js";
 
 function printUsage(): void {
-  process.stderr.write("Usage: hive <start|install-service|uninstall-service|register>\n");
+  process.stderr.write("Usage: hive <start|stop|install-service|uninstall-service|uninstall|register>\n");
 }
 
 async function run(): Promise<void> {
@@ -21,11 +23,17 @@ async function run(): Promise<void> {
       case "start":
         process.exitCode = await runStartCommand();
         return;
+      case "stop":
+        process.exitCode = await runStopCommand(cliEntryPath);
+        return;
       case "install-service":
         process.exitCode = await runInstallServiceCommand(cliEntryPath);
         return;
       case "uninstall-service":
         process.exitCode = await runUninstallServiceCommand(cliEntryPath);
+        return;
+      case "uninstall":
+        process.exitCode = await runUninstallCommand(cliEntryPath);
         return;
       case "register":
         process.exitCode = await runRegisterCommand();

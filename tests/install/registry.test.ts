@@ -5,10 +5,48 @@ import { join } from "node:path";
 import {
   buildHiveRegistryEntry,
   createNodeRegistryFs,
+  deleteHiveFromDoctor,
   registerHiveWithDoctor,
+  registryContainsHiveEntry,
+  resolveRegistryWritePath,
   type RegistryFs
 } from "../../src/install/registry.js";
-import { resolveHiveRegistryPidPath } from "../../src/shared/apiary-root.js";
+import { resolveFleetRegistryPath, resolveHiveRegistryPidPath } from "../../src/shared/apiary-root.js";
+import { resolveLegacyDoctorRegistryPath } from "../../src/shared/legacy-paths.js";
+
+/**
+ * A fully in-memory RegistryFs so the default (no registryPath override) candidate
+ * fan-out can be exercised hermetically: the resolvers still compute the machine's
+ * real candidate paths, but every read/write lands in this map, never on disk.
+ */
+function createMemoryRegistryFs(seed: Record<string, string>): RegistryFs & { readonly files: Map<string, string> } {
+  const files = new Map<string, string>(Object.entries(seed));
+  return {
+    files,
+    readFile(path: string): string {
+      const content = files.get(path);
+      if (content === undefined) {
+        const error = new Error(`ENOENT: no such file, open '${path}'`) as NodeJS.ErrnoException;
+        error.code = "ENOENT";
+        throw error;
+      }
+      return content;
+    },
+    mkdirp(): void {},
+    writeFile(path: string, content: string): void {
+      files.set(path, content);
+    },
+    rename(from: string, to: string): void {
+      const content = files.get(from);
+      if (content === undefined) throw new Error(`rename source missing: ${from}`);
+      files.delete(from);
+      files.set(to, content);
+    },
+    removeFile(path: string): void {
+      files.delete(path);
+    }
+  };
+}
 
 async function withTempDir(run: (dir: string) => Promise<void> | void): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), "hive-registry-test-"));
@@ -125,5 +163,76 @@ describe("hive registry writer", () => {
       expect(readFileSync(registryPath, "utf8")).toBe(`${original}\n`);
       expect(readdirSync(dir).some((name) => name.includes(".tmp-"))).toBe(false);
     });
+  });
+
+  it("b-AC-3 deleteHiveFromDoctor removes hive and preserves other entries", () => {
+    return withTempDir((dir) => {
+      const registryPath = join(dir, "registry.json");
+      const honeycombEntry = {
+        name: "honeycomb",
+        healthUrl: "http://127.0.0.1:3850/health",
+        pidPath: "/opt/state/honeycomb.pid"
+      };
+      registerHiveWithDoctor({ registryPath });
+      writeFileSync(
+        registryPath,
+        JSON.stringify({ daemons: [honeycombEntry, buildHiveRegistryEntry()], schemaVersion: 2 }, null, 2),
+        "utf8"
+      );
+
+      const result = deleteHiveFromDoctor({ registryPath });
+      expect(result.removed).toBe(true);
+      const parsed = JSON.parse(readFileSync(registryPath, "utf8")) as {
+        daemons: Array<Record<string, unknown>>;
+        schemaVersion: number;
+      };
+      expect(parsed.daemons).toEqual([honeycombEntry]);
+      expect(parsed.schemaVersion).toBe(2);
+      expect(registryContainsHiveEntry({ registryPath })).toBe(false);
+    });
+  });
+
+  it("b-AC-3 missing registry file or hive entry is a no-op", () => {
+    return withTempDir((dir) => {
+      const registryPath = join(dir, "missing.json");
+      expect(deleteHiveFromDoctor({ registryPath })).toEqual({ removed: false, registryPaths: [] });
+    });
+  });
+
+  it("b-AC-3 default delete fans out over the write, fleet, and legacy registry paths", () => {
+    // No registryPath override: exercises the real candidate chain
+    // [resolveRegistryWritePath(), resolveFleetRegistryPath(), resolveLegacyDoctorRegistryPath()]
+    // (deduped) with a memory fs, so nothing on the real disk is touched.
+    const candidates = [...new Set([resolveRegistryWritePath(), resolveFleetRegistryPath(), resolveLegacyDoctorRegistryPath()])];
+    const honeycombEntry = { name: "honeycomb", healthUrl: "http://127.0.0.1:3850/health" };
+    const seed: Record<string, string> = {};
+    for (const path of candidates) {
+      seed[path] = JSON.stringify({ daemons: [honeycombEntry, buildHiveRegistryEntry()] }, null, 2);
+    }
+    const fs = createMemoryRegistryFs(seed);
+
+    const result = deleteHiveFromDoctor({ fs });
+
+    expect(result.removed).toBe(true);
+    expect([...result.registryPaths].sort()).toEqual([...candidates].sort());
+    for (const path of candidates) {
+      const parsed = JSON.parse(fs.files.get(path) ?? "{}") as { daemons: Array<Record<string, unknown>> };
+      expect(parsed.daemons).toEqual([honeycombEntry]);
+    }
+    expect(registryContainsHiveEntry({ fs })).toBe(false);
+  });
+
+  it("b-AC-3 default delete skips absent candidates and removes from the one that has hive", () => {
+    const legacyPath = resolveLegacyDoctorRegistryPath();
+    const fs = createMemoryRegistryFs({
+      [legacyPath]: JSON.stringify({ daemons: [buildHiveRegistryEntry()] }, null, 2)
+    });
+
+    const result = deleteHiveFromDoctor({ fs });
+
+    expect(result.removed).toBe(true);
+    expect(result.registryPaths).toEqual([legacyPath]);
+    const parsed = JSON.parse(fs.files.get(legacyPath) ?? "{}") as { daemons: unknown[] };
+    expect(parsed.daemons).toEqual([]);
   });
 });

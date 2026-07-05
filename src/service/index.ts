@@ -1,14 +1,22 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 import { resolveStagedWindowsTaskPath } from "../shared/apiary-root.js";
 import { migrateHiveState } from "../shared/state-migration.js";
-import { installCommands, legacyUninstallCommands, uninstallCommands, type ServiceCommand } from "./commands.js";
+import {
+  installCommands,
+  legacyUninstallCommands,
+  stopCommands,
+  uninstallCommands,
+  type ServiceCommand
+} from "./commands.js";
 import {
   legacyUnitPath,
+  LEGACY_WINDOWS_TASK_NAME,
   resolveServiceContext,
   resolveServicePlan,
+  WINDOWS_TASK_NAME,
   type ServiceEnvironment,
   type ServicePlan
 } from "./platform.js";
@@ -32,6 +40,7 @@ export interface ServiceFs {
   mkdirp(path: string): void;
   writeFile(path: string, content: string): void;
   removeFile(path: string): void;
+  fileExists(path: string): boolean;
 }
 
 export interface ServiceResult {
@@ -39,9 +48,33 @@ export interface ServiceResult {
   readonly message: string;
 }
 
+/**
+ * The outcome of {@link ServiceModule.uninstall}, additionally classified so a
+ * caller can tell a genuine removal failure from the current unit simply
+ * having been absent already (M-2 / PRD-003b AC-9, b-AC-6): on macOS the
+ * `uninstall` verb runs `stop` (launchd `bootout`) before `service.uninstall()`
+ * issues its own `bootout` of the same unit, so the second call always finds
+ * "No such process" after a fully successful stop. A boot-resurrecting unit
+ * left behind by a swallowed "it was probably already gone" error is exactly
+ * the failure mode this classification exists to catch, so `alreadyAbsent`
+ * stays `false` for anything that does not match a known not-found signal.
+ */
+export interface ServiceUninstallResult extends ServiceResult {
+  /**
+   * True when the manager reported the current unit was not registered/found
+   * rather than a real error (permission denied, manager unreachable, etc.).
+   * A true `alreadyAbsent` is a friendly no-op; `ok` stays false either way
+   * since nothing was actually removed by THIS call - callers should treat
+   * `alreadyAbsent === true` the same as `ok === true` for exit-code purposes.
+   */
+  readonly alreadyAbsent: boolean;
+}
+
 export interface ServiceModule {
   install(): Promise<ServiceResult>;
-  uninstall(): Promise<ServiceResult>;
+  stop(): Promise<ServiceResult>;
+  uninstall(): Promise<ServiceUninstallResult>;
+  isRegistered(): Promise<boolean>;
 }
 
 export interface ServiceModuleDeps {
@@ -92,6 +125,9 @@ export function createNodeServiceFs(): ServiceFs {
     },
     removeFile(path: string): void {
       rmSync(path, { force: true });
+    },
+    fileExists(path: string): boolean {
+      return existsSync(path);
     }
   };
 }
@@ -123,15 +159,78 @@ function scopePhrase(plan: ServicePlan): string {
 async function runAll(
   runner: CommandRunner,
   commands: readonly ServiceCommand[]
-): Promise<{ readonly allOk: boolean; readonly firstFailure: ServiceCommand | null }> {
+): Promise<{
+  readonly allOk: boolean;
+  readonly firstFailure: ServiceCommand | null;
+  readonly firstFailureResult: CommandResult | null;
+}> {
   let firstFailure: ServiceCommand | null = null;
+  let firstFailureResult: CommandResult | null = null;
   for (const command of commands) {
     const result = await runner.run(command.command, command.args, { timeoutMs: SERVICE_COMMAND_TIMEOUT_MS });
     if (!result.ok && firstFailure === null) {
       firstFailure = command;
+      firstFailureResult = result;
     }
   }
-  return { allOk: firstFailure === null, firstFailure };
+  return { allOk: firstFailure === null, firstFailure, firstFailureResult };
+}
+
+/** Cap how much of a command's own output is ever echoed back in a result message. */
+const MAX_FAILURE_DETAIL_CHARS = 200;
+
+function lastNonEmptyLine(text: string): string | null {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+  return lines.length > 0 ? (lines[lines.length - 1] ?? null) : null;
+}
+
+/**
+ * Reduce a failed {@link CommandResult} to one short, secret-free line worth
+ * surfacing to the operator (e.g. "No such process", "Access is denied.").
+ * Prefers the runner's own `detail` (a spawn-error message); otherwise falls
+ * back to the last non-empty line of stderr, then stdout, since launchctl/
+ * systemctl/schtasks all print their real error there. A genuine failure must
+ * surface the underlying error rather than a generic "something failed" -
+ * that is what lets an operator tell a real problem from a no-op.
+ */
+function describeFailure(result: CommandResult | null): string {
+  if (result === null) return "unknown error";
+  const candidate =
+    result.detail ?? lastNonEmptyLine(result.stderr) ?? lastNonEmptyLine(result.stdout) ?? "unknown error";
+  return candidate.length > MAX_FAILURE_DETAIL_CHARS
+    ? `${candidate.slice(0, MAX_FAILURE_DETAIL_CHARS)}...`
+    : candidate;
+}
+
+/**
+ * True when a failed stop/uninstall command's result indicates the unit was
+ * already absent (not currently registered/running) rather than a genuine
+ * failure. Each service manager reports "not found" differently; launchd's
+ * `ESRCH`-derived exit code (3) is locale-independent so it is checked
+ * directly. Every manager additionally falls back to a broad, case-insensitive
+ * text match over stdout/stderr/detail. Anything that does not match is
+ * conservatively treated as a GENUINE failure (never silently swallowed) -
+ * this is the classification M-2 / AC-9 / b-AC-6 depend on.
+ */
+function isAlreadyAbsentFailure(manager: ServicePlan["manager"], result: CommandResult | null): boolean {
+  if (result === null) return false;
+  const text = `${result.detail ?? ""} ${result.stderr} ${result.stdout}`.toLowerCase();
+  const genericAbsent = /does not exist|cannot find|no such process|not[- ]loaded|could not find|not found/;
+  switch (manager) {
+    case "launchd":
+      return result.code === 3 || genericAbsent.test(text);
+    case "systemd":
+      return genericAbsent.test(text);
+    case "schtasks":
+      return genericAbsent.test(text);
+    default: {
+      const unreachable: never = manager;
+      return unreachable;
+    }
+  }
 }
 
 function withResolvedUnitPath(plan: ServicePlan): ServicePlan {
@@ -157,7 +256,32 @@ export function createServiceModule(deps: ServiceModuleDeps): ServiceModule {
     return resolveServicePlan(environment);
   }
 
+  async function isRegisteredForPlan(resolvedPlan: ServicePlan): Promise<boolean> {
+    if (resolvedPlan.manager === "schtasks") {
+      const current = await runner.run("schtasks", ["/Query", "/TN", WINDOWS_TASK_NAME], {
+        timeoutMs: SERVICE_COMMAND_TIMEOUT_MS
+      });
+      if (current.ok) return true;
+      const legacy = await runner.run("schtasks", ["/Query", "/TN", LEGACY_WINDOWS_TASK_NAME], {
+        timeoutMs: SERVICE_COMMAND_TIMEOUT_MS
+      });
+      return legacy.ok;
+    }
+
+    if (resolvedPlan.unitPath !== "" && fs.fileExists(resolvedPlan.unitPath)) return true;
+    const legacyPath = legacyUnitPath(resolvedPlan);
+    return legacyPath !== "" && fs.fileExists(legacyPath);
+  }
+
   return {
+    async isRegistered(): Promise<boolean> {
+      try {
+        return await isRegisteredForPlan(withResolvedUnitPath(plan()));
+      } catch {
+        return false;
+      }
+    },
+
     async install(): Promise<ServiceResult> {
       let resolvedPlan: ServicePlan;
       try {
@@ -210,33 +334,90 @@ export function createServiceModule(deps: ServiceModuleDeps): ServiceModule {
       };
     },
 
-    async uninstall(): Promise<ServiceResult> {
+    async stop(): Promise<ServiceResult> {
       let resolvedPlan: ServicePlan;
       try {
         resolvedPlan = withResolvedUnitPath(plan());
       } catch (error) {
         return {
           ok: false,
-          message: `Could not unregister hive service: ${error instanceof Error ? error.message : "unknown error"}.`
+          message: `Could not stop hive service: ${error instanceof Error ? error.message : "unknown error"}.`
         };
       }
 
-      const { allOk, firstFailure } = await runAll(runner, uninstallCommands(resolvedPlan, uid));
-      try {
-        if (resolvedPlan.unitPath !== "") fs.removeFile(resolvedPlan.unitPath);
-      } catch {
-        // A stale unit file should not block uninstall feedback.
-      }
-
+      const { allOk, firstFailure, firstFailureResult } = await runAll(runner, stopCommands(resolvedPlan, uid));
       if (!allOk) {
+        // M-2 posture applied to stop too: a manager reporting "already not running/
+        // loaded" (e.g. a repeat `hive stop`, or launchd having nothing left to boot
+        // out) is a friendly no-op, not a failure - there is nothing left to stop
+        // either way. A genuine failure still fails honestly with the real detail.
+        if (isAlreadyAbsentFailure(resolvedPlan.manager, firstFailureResult)) {
+          return {
+            ok: true,
+            message: `hive service was already stopped (${scopePhrase(resolvedPlan)}).`
+          };
+        }
         return {
           ok: false,
-          message: `Removed hive unit file; a deregister command (${firstFailure?.command ?? "unknown"}) reported an error.`
+          message: `A service-manager stop command (${firstFailure?.command ?? "unknown"}) reported an error: ${describeFailure(firstFailureResult)}.`
         };
       }
 
       return {
         ok: true,
+        message: `hive service stopped (${scopePhrase(resolvedPlan)}).`
+      };
+    },
+
+    async uninstall(): Promise<ServiceUninstallResult> {
+      let resolvedPlan: ServicePlan;
+      try {
+        resolvedPlan = withResolvedUnitPath(plan());
+      } catch (error) {
+        return {
+          ok: false,
+          alreadyAbsent: false,
+          message: `Could not unregister hive service: ${error instanceof Error ? error.message : "unknown error"}.`
+        };
+      }
+
+      // Legacy deregister is best-effort (same posture as install()): it is EXPECTED to fail
+      // when no pre-decision-#32 unit exists, so it must never fail the uninstall verdict.
+      // Only a current-unit deregister failure may flip `ok` to false.
+      await runAll(runner, legacyUninstallCommands(resolvedPlan, uid));
+      const { allOk, firstFailure, firstFailureResult } = await runAll(runner, uninstallCommands(resolvedPlan, uid));
+      try {
+        if (resolvedPlan.unitPath !== "") fs.removeFile(resolvedPlan.unitPath);
+        const legacyPath = legacyUnitPath(resolvedPlan);
+        if (legacyPath !== "") fs.removeFile(legacyPath);
+      } catch {
+        // A stale unit file should not block uninstall feedback.
+      }
+
+      if (!allOk) {
+        // M-2: on macOS, `uninstall` runs stop (launchd `bootout`) before this current-unit
+        // `bootout`, so the unit is routinely already gone by the time this call runs - that
+        // is a friendly no-op (b-AC-6), not a failure, and must be classified as such rather
+        // than flipping the whole verb to exit 1 despite complete success (AC-9). A GENUINE
+        // failure (permission denied, manager unreachable, etc.) still fails honestly with
+        // the underlying error surfaced.
+        if (isAlreadyAbsentFailure(resolvedPlan.manager, firstFailureResult)) {
+          return {
+            ok: false,
+            alreadyAbsent: true,
+            message: `hive ${resolvedPlan.manager} unit was already absent (nothing to remove).`
+          };
+        }
+        return {
+          ok: false,
+          alreadyAbsent: false,
+          message: `Removed hive unit file; a deregister command (${firstFailure?.command ?? "unknown"}) reported an error: ${describeFailure(firstFailureResult)}.`
+        };
+      }
+
+      return {
+        ok: true,
+        alreadyAbsent: false,
         message: `hive service unregistered (${scopePhrase(resolvedPlan)}). It will not start on next boot/login.`
       };
     }
