@@ -7,7 +7,7 @@ import React from "react";
 
 import { Button } from "../primitives.js";
 import type { OnboardingClient } from "./onboarding-client.js";
-import { createTenancyClient, type TenancyClient } from "./tenancy-client.js";
+import { createTenancyClient, isTenancyRequestFailure, type TenancyClient } from "./tenancy-client.js";
 import type { TenancyEntityWire } from "./tenancy-contracts.js";
 
 type StepView =
@@ -20,7 +20,10 @@ type StepView =
 			readonly workspaces: readonly TenancyEntityWire[];
 			readonly canCreate: boolean;
 	  }
-	| { readonly kind: "error"; readonly message: string }
+	// Bounded-failure states (client robustness): `onRetry` REISSUES the exact request that
+	// failed/timed out (never just dismisses), and `onBack` optionally offers a way back to the
+	// organization list so a workspace-load failure is never a dead end.
+	| { readonly kind: "error"; readonly message: string; readonly onRetry: () => void; readonly onBack?: () => void }
 	| { readonly kind: "split-brain" };
 
 /**
@@ -93,6 +96,9 @@ export function TenancyStep({ onboardingClient, tenancyClient: tenancyOverride, 
 	const [view, setView] = React.useState<StepView>({ kind: "loading" });
 	const [busy, setBusy] = React.useState(false);
 	const [selectError, setSelectError] = React.useState<string | null>(null);
+	// The bounded action (select or create) that produced `selectError`, so the Retry affordance
+	// below ACTUALLY re-issues the failed request rather than merely dismissing the message.
+	const [selectErrorRetry, setSelectErrorRetry] = React.useState<(() => void) | null>(null);
 	const [createName, setCreateName] = React.useState("");
 	const [showCreate, setShowCreate] = React.useState(false);
 
@@ -115,8 +121,13 @@ export function TenancyStep({ onboardingClient, tenancyClient: tenancyOverride, 
 	const loadOrgs = React.useCallback(async (): Promise<void> => {
 		setView({ kind: "loading" });
 		setSelectError(null);
+		setSelectErrorRetry(null);
+		// Bounded by TENANCY_REQUEST_TIMEOUT_MS inside the client (AbortController): this await
+		// always settles, so "Loading your organizations…" can never spin forever, even on a
+		// stalled gateway. A failed/timed-out read degrades to the fail-soft default (selected:
+		// false), which correctly falls through to the org list attempt below.
 		const status = await tenancy.setupTenancy();
-		if (status.selected) {
+		if (!isTenancyRequestFailure(status) && status.selected) {
 			// W-4: bound the automatic short-circuit. Each auto-navigation consumes one lap of the
 			// per-tab allowance; past the limit the step stops reloading and renders the terminal
 			// manual state instead, breaking the split-brain reload loop deterministically.
@@ -131,11 +142,22 @@ export function TenancyStep({ onboardingClient, tenancyClient: tenancyOverride, 
 		// bound, so a later legitimate pass through this step starts from a clean counter.
 		resetTenancyAutoComplete();
 		const orgsBody = await tenancy.listOrgs();
+		if (isTenancyRequestFailure(orgsBody)) {
+			// A timeout or network failure, never a genuine "zero orgs" read: an honest, clearly
+			// retryable state instead of the misleading "no organizations" message below.
+			setView({
+				kind: "error",
+				message: "Could not load your organizations. Check your connection and retry.",
+				onRetry: () => void loadOrgs(),
+			});
+			return;
+		}
 		orgCountRef.current = orgsBody.orgs.length;
 		if (orgsBody.orgs.length === 0) {
 			setView({
 				kind: "error",
 				message: "No organizations are available for this account. Check your Deeplake credential and retry.",
+				onRetry: () => void loadOrgs(),
 			});
 			return;
 		}
@@ -161,10 +183,22 @@ export function TenancyStep({ onboardingClient, tenancyClient: tenancyOverride, 
 		async (org: TenancyEntityWire): Promise<void> => {
 			setBusy(true);
 			setSelectError(null);
+			setSelectErrorRetry(null);
 			setShowCreate(false);
 			setCreateName("");
+			// Bounded by TENANCY_REQUEST_TIMEOUT_MS: this await always settles, so the workspace
+			// load can never leave the picker busy forever.
 			const ws = await tenancy.listWorkspaces(org.id);
 			setBusy(false);
+			if (isTenancyRequestFailure(ws)) {
+				setView({
+					kind: "error",
+					message: "Could not load workspaces for this organization. Check your connection and retry.",
+					onRetry: () => void openWorkspaces(org),
+					onBack: () => void loadOrgs(),
+				});
+				return;
+			}
 			setView({
 				kind: "workspace-list",
 				org,
@@ -172,18 +206,23 @@ export function TenancyStep({ onboardingClient, tenancyClient: tenancyOverride, 
 				canCreate: ws.canCreate,
 			});
 		},
-		[tenancy],
+		[tenancy, loadOrgs],
 	);
 
 	const persistSelection = React.useCallback(
 		async (org: TenancyEntityWire, workspace: TenancyEntityWire): Promise<void> => {
 			setBusy(true);
 			setSelectError(null);
+			setSelectErrorRetry(null);
+			// Bounded by TENANCY_REQUEST_TIMEOUT_MS: this await always settles (a stalled select
+			// call can never leave the picker busy forever).
 			const ack = await tenancy.selectTenancy(org.id, workspace.id);
 			setBusy(false);
 			if (ack === null || ack.selected === false) {
 				const message = ack !== null && ack.selected === false ? ack.error : "Selection could not be saved. Retry.";
 				setSelectError(message);
+				// The Retry affordance below re-issues THIS exact select call, not just dismisses.
+				setSelectErrorRetry(() => () => void persistSelection(org, workspace));
 				return;
 			}
 			// An explicit acknowledged selection resets the W-4 loop counter: if the gate still
@@ -205,10 +244,14 @@ export function TenancyStep({ onboardingClient, tenancyClient: tenancyOverride, 
 		if (trimmed === "") return;
 		setBusy(true);
 		setSelectError(null);
+		setSelectErrorRetry(null);
+		// Bounded by TENANCY_REQUEST_TIMEOUT_MS: this await always settles.
 		const ack = await tenancy.createWorkspace(view.org.id, trimmed);
 		if (ack === null || ack.created === false) {
 			setBusy(false);
 			setSelectError(ack !== null && ack.created === false ? ack.error : "Workspace could not be created. Retry.");
+			// The Retry affordance below re-issues THIS exact create call.
+			setSelectErrorRetry(() => () => void onCreateWorkspace());
 			return;
 		}
 		onboardingClient.sendEvent("workspace_created");
@@ -244,9 +287,14 @@ export function TenancyStep({ onboardingClient, tenancyClient: tenancyOverride, 
 				<p data-testid="onboarding-tenancy-error" style={{ fontSize: "var(--text-sm)", color: "var(--severity-critical)", margin: 0 }}>
 					{view.message}
 				</p>
-				<Button variant="secondary" data-testid="onboarding-tenancy-retry" onClick={() => void loadOrgs()}>
+				<Button variant="secondary" data-testid="onboarding-tenancy-retry" onClick={() => view.onRetry()}>
 					Retry
 				</Button>
+				{view.onBack !== undefined && (
+					<Button variant="ghost" data-testid="onboarding-tenancy-error-back" onClick={() => view.onBack?.()}>
+						Back to organizations
+					</Button>
+				)}
 			</div>
 		);
 	}
@@ -411,8 +459,20 @@ export function TenancyStep({ onboardingClient, tenancyClient: tenancyOverride, 
 					<p data-testid="onboarding-tenancy-select-error" style={{ fontSize: "var(--text-sm)", color: "var(--severity-critical)", margin: 0 }}>
 						{selectError}
 					</p>
-					<Button variant="secondary" size="sm" data-testid="onboarding-tenancy-select-retry" onClick={() => setSelectError(null)}>
-						Dismiss
+					<Button
+						variant="secondary"
+						size="sm"
+						data-testid="onboarding-tenancy-select-retry"
+						disabled={busy}
+						onClick={() => {
+							// Re-issue the exact request that failed when one is known (bounded by the
+							// client's own timeout, so this can never hang); otherwise just clear the
+							// message so the picker is usable again.
+							if (selectErrorRetry !== null) selectErrorRetry();
+							else setSelectError(null);
+						}}
+					>
+						Retry
 					</Button>
 				</div>
 			)}

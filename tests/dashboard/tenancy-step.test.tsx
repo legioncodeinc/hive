@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TENANCY_AUTO_COMPLETE_LIMIT, TenancyStep } from "../../src/dashboard/web/onboarding/tenancy-step.js";
 import type { OnboardingClient } from "../../src/dashboard/web/onboarding/onboarding-client.js";
-import type { TenancyClient } from "../../src/dashboard/web/onboarding/tenancy-client.js";
+import { createTenancyClient, type TenancyClient } from "../../src/dashboard/web/onboarding/tenancy-client.js";
 
 afterEach(() => {
 	cleanup();
@@ -237,5 +237,133 @@ describe("TenancyStep", () => {
 		await waitFor(() => expect(onComplete).toHaveBeenCalled());
 		expect(onboarding.sendEvent).toHaveBeenCalledWith("workspace_created");
 		expect(tenancy.createWorkspace).toHaveBeenCalledWith("o", "Fresh");
+	});
+});
+
+/**
+ * Client-robustness coverage (operator-reported incident): a stalled/failed `/setup/tenancy*`
+ * request must never leave the step spinning forever, and every Retry affordance must ACTUALLY
+ * re-issue the request it is retrying. These exercise the REAL `createTenancyClient` (not a hand
+ * rolled mock) so the fail-soft failure marker from `tenancy-client.ts` is genuinely produced.
+ */
+describe("TenancyStep: bounded loading + retry (client resilience)", () => {
+	function jsonResponse(body: unknown, status = 200): Response {
+		return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+	}
+
+	it("a failed org-list read renders a clearly retryable error (never an infinite spinner), and Retry re-issues the request", async () => {
+		let orgsCalls = 0;
+		const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+			const path = String(input);
+			if (path.endsWith("/setup/tenancy")) return jsonResponse({ pending: true, selected: false, authenticated: true, org: null, workspace: null });
+			if (path.endsWith("/setup/tenancy/orgs")) {
+				orgsCalls += 1;
+				if (orgsCalls === 1) return jsonResponse({ error: "gateway timeout" }, 503);
+				return jsonResponse({ orgs: [{ id: "o", name: "Org" }] });
+			}
+			return jsonResponse({}, 404);
+		});
+		render(<TenancyStep onboardingClient={mockOnboardingClient()} tenancyClient={createTenancyClient({ fetchImpl })} />);
+
+		// The failure renders an honest, retryable state, never a dead spinner stuck on "Loading…".
+		await waitFor(() => expect(screen.getByTestId("onboarding-tenancy-error")).toBeTruthy());
+		expect(screen.getByTestId("onboarding-tenancy-error").textContent).toMatch(/connection/i);
+
+		fireEvent.click(screen.getByTestId("onboarding-tenancy-retry"));
+		await waitFor(() => expect(screen.getByTestId("onboarding-tenancy-org-confirm")).toBeTruthy());
+		expect(orgsCalls).toBe(2);
+	});
+
+	it("a failed workspace-list read offers Retry (re-issuing the SAME org's load) and Back to organizations, never a dead end", async () => {
+		let workspacesCalls = 0;
+		const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+			const path = String(input);
+			if (path.endsWith("/setup/tenancy")) return jsonResponse({ pending: true, selected: false, authenticated: true, org: null, workspace: null });
+			if (path.endsWith("/setup/tenancy/orgs")) {
+				return jsonResponse({
+					orgs: [
+						{ id: "a", name: "Alpha" },
+						{ id: "b", name: "Beta" },
+					],
+				});
+			}
+			if (path.includes("/setup/tenancy/workspaces?")) {
+				workspacesCalls += 1;
+				if (workspacesCalls === 1) return jsonResponse({}, 503);
+				return jsonResponse({ org: "a", workspaces: [{ id: "w", name: "WS" }], canCreate: false });
+			}
+			return jsonResponse({}, 404);
+		});
+		render(<TenancyStep onboardingClient={mockOnboardingClient()} tenancyClient={createTenancyClient({ fetchImpl })} />);
+
+		await waitFor(() => expect(screen.getByTestId("onboarding-tenancy-org-list")).toBeTruthy());
+		fireEvent.click(screen.getAllByTestId("onboarding-tenancy-org-option")[0]!);
+
+		await waitFor(() => expect(screen.getByTestId("onboarding-tenancy-error")).toBeTruthy());
+		expect(screen.getByTestId("onboarding-tenancy-error").textContent).toMatch(/workspaces/i);
+		expect(screen.getByTestId("onboarding-tenancy-error-back")).toBeTruthy();
+
+		fireEvent.click(screen.getByTestId("onboarding-tenancy-retry"));
+		await waitFor(() => expect(screen.getByTestId("onboarding-tenancy-workspace-list")).toBeTruthy());
+		expect(workspacesCalls).toBe(2);
+	});
+
+	it("Back to organizations from a failed workspace read recovers instead of stalling", async () => {
+		const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+			const path = String(input);
+			if (path.endsWith("/setup/tenancy")) return jsonResponse({ pending: true, selected: false, authenticated: true, org: null, workspace: null });
+			if (path.endsWith("/setup/tenancy/orgs")) {
+				return jsonResponse({
+					orgs: [
+						{ id: "a", name: "Alpha" },
+						{ id: "b", name: "Beta" },
+					],
+				});
+			}
+			if (path.includes("/setup/tenancy/workspaces?")) return jsonResponse({}, 503);
+			return jsonResponse({}, 404);
+		});
+		render(<TenancyStep onboardingClient={mockOnboardingClient()} tenancyClient={createTenancyClient({ fetchImpl })} />);
+
+		await waitFor(() => expect(screen.getByTestId("onboarding-tenancy-org-list")).toBeTruthy());
+		fireEvent.click(screen.getAllByTestId("onboarding-tenancy-org-option")[0]!);
+
+		await waitFor(() => expect(screen.getByTestId("onboarding-tenancy-error-back")).toBeTruthy());
+		fireEvent.click(screen.getByTestId("onboarding-tenancy-error-back"));
+		await waitFor(() => expect(screen.getByTestId("onboarding-tenancy-org-list")).toBeTruthy());
+	});
+
+	it('the "Selection could not be saved. Retry." path ACTUALLY re-issues the same select call, not just dismisses', async () => {
+		let selectCalls = 0;
+		let lastSelectBody = "";
+		const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			const path = String(input);
+			if (path.endsWith("/setup/tenancy")) return jsonResponse({ pending: true, selected: false, authenticated: true, org: null, workspace: null });
+			if (path.endsWith("/setup/tenancy/orgs")) return jsonResponse({ orgs: [{ id: "o", name: "Org" }] });
+			if (path.includes("/setup/tenancy/workspaces?")) return jsonResponse({ org: "o", workspaces: [{ id: "w", name: "WS" }], canCreate: false });
+			if (path.endsWith("/setup/tenancy/select") && init?.method === "POST") {
+				selectCalls += 1;
+				lastSelectBody = String(init.body);
+				if (selectCalls === 1) return jsonResponse({ selected: false, error: "Selection could not be saved. Retry." });
+				return jsonResponse({ selected: true, org: { id: "o", name: "Org" }, workspace: { id: "w", name: "WS" }, reminted: false });
+			}
+			return jsonResponse({}, 404);
+		});
+		const onComplete = vi.fn();
+		render(<TenancyStep onboardingClient={mockOnboardingClient()} tenancyClient={createTenancyClient({ fetchImpl })} onComplete={onComplete} />);
+
+		await waitFor(() => expect(screen.getByTestId("onboarding-tenancy-org-confirm")).toBeTruthy());
+		fireEvent.click(screen.getByTestId("onboarding-tenancy-org-confirm-btn"));
+		await waitFor(() => expect(screen.getByTestId("onboarding-tenancy-workspace-option")).toBeTruthy());
+		fireEvent.click(screen.getByTestId("onboarding-tenancy-workspace-option"));
+
+		await waitFor(() => expect(screen.getByTestId("onboarding-tenancy-select-error")).toBeTruthy());
+		expect(screen.getByTestId("onboarding-tenancy-select-error").textContent).toBe("Selection could not be saved. Retry.");
+		expect(selectCalls).toBe(1);
+
+		fireEvent.click(screen.getByTestId("onboarding-tenancy-select-retry"));
+		await waitFor(() => expect(onComplete).toHaveBeenCalled());
+		expect(selectCalls).toBe(2);
+		expect(JSON.parse(lastSelectBody)).toEqual({ orgId: "o", workspaceId: "w" });
 	});
 });

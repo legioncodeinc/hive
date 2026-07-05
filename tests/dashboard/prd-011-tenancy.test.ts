@@ -2,7 +2,7 @@
  * PRD-011: tenancy contracts, display helpers, and onboarding wire client (AC-named).
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { deriveActiveTenancyLabel, formatActiveTenancyLabel, formatNectarPanelTenancy } from "../../src/dashboard/web/active-tenancy-display.js";
 import {
@@ -11,7 +11,7 @@ import {
 	TenancySelectResponseSchema,
 	TenancyWorkspacesSchema,
 } from "../../src/dashboard/web/onboarding/tenancy-contracts.js";
-import { createTenancyClient } from "../../src/dashboard/web/onboarding/tenancy-client.js";
+import { createTenancyClient, isTenancyRequestFailure, TENANCY_REQUEST_TIMEOUT_MS } from "../../src/dashboard/web/onboarding/tenancy-client.js";
 import type { SetupTenancyResultWire } from "../../src/dashboard/web/wire.js";
 
 function selectedTenancy(): SetupTenancyResultWire {
@@ -176,5 +176,68 @@ describe("PRD-011a tenancy client", () => {
 		const ack = await client.selectTenancy("o1", "w1");
 		expect(JSON.parse(body)).toEqual({ orgId: "o1", workspaceId: "w1" });
 		expect(ack?.selected).toBe(true);
+	});
+});
+
+describe("PRD-011a tenancy client robustness (client resilience: bounded timeout + fail-soft, ts-AC-14)", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("every call carries an AbortSignal bounded by TENANCY_REQUEST_TIMEOUT_MS, and a stalled request degrades to a MARKED failure instead of hanging forever", async () => {
+		vi.useFakeTimers();
+		const fetchImpl = vi.fn(
+			(_input: RequestInfo | URL, init?: RequestInit) =>
+				new Promise<Response>((_resolve, reject) => {
+					init?.signal?.addEventListener("abort", () => reject(new DOMException("The operation was aborted.", "AbortError")));
+				}),
+		);
+		const client = createTenancyClient({ fetchImpl });
+
+		const pending = client.listOrgs();
+		await vi.advanceTimersByTimeAsync(TENANCY_REQUEST_TIMEOUT_MS);
+		const result = await pending;
+
+		expect(result.orgs).toEqual([]);
+		// A timed-out read is DISTINGUISHABLE from a genuine "zero orgs" read (never throws into React).
+		expect(isTenancyRequestFailure(result)).toBe(true);
+		// The signal passed to fetch was actually aborted (not merely a timer that fired unused).
+		const [, init] = fetchImpl.mock.calls[0]!;
+		expect((init as RequestInit).signal?.aborted).toBe(true);
+	});
+
+	it("a non-2xx response marks the fail-soft default as a failure, distinct from a genuinely empty success body", async () => {
+		const failingFetch = vi.fn(async () => new Response("{}", { status: 503 }));
+		const failed = await createTenancyClient({ fetchImpl: failingFetch }).listOrgs();
+		expect(isTenancyRequestFailure(failed)).toBe(true);
+
+		const okFetch = vi.fn(async () => new Response(JSON.stringify({ orgs: [] }), { status: 200, headers: { "content-type": "application/json" } }));
+		const genuinelyEmpty = await createTenancyClient({ fetchImpl: okFetch }).listOrgs();
+		expect(isTenancyRequestFailure(genuinelyEmpty)).toBe(false);
+		expect(genuinelyEmpty.orgs).toEqual([]);
+	});
+
+	it("a thrown network error fails soft (never throws into the caller) and marks the default as a failure", async () => {
+		const throwingFetch = vi.fn(async () => {
+			throw new TypeError("network unreachable");
+		});
+		const status = await createTenancyClient({ fetchImpl: throwingFetch }).setupTenancy();
+		expect(status.selected).toBe(false);
+		expect(isTenancyRequestFailure(status)).toBe(true);
+	});
+
+	it("selectTenancy/createWorkspace still resolve to null (never throw) on a timeout", async () => {
+		vi.useFakeTimers();
+		const hangingFetch = vi.fn(
+			(_input: RequestInfo | URL, init?: RequestInit) =>
+				new Promise<Response>((_resolve, reject) => {
+					init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+				}),
+		);
+		const client = createTenancyClient({ fetchImpl: hangingFetch });
+
+		const pendingSelect = client.selectTenancy("o1", "w1");
+		await vi.advanceTimersByTimeAsync(TENANCY_REQUEST_TIMEOUT_MS);
+		expect(await pendingSelect).toBeNull();
 	});
 });

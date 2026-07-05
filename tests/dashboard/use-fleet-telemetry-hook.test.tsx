@@ -91,6 +91,72 @@ describe("useFleetTelemetry — REST fallback in an EventSource-less environment
 		fleetStatusResponse = { supervisor: "reachable", health: "ok", asOf: "t2", daemons: [{ name: "honeycomb", health: "ok", escalation: null }] };
 		await waitFor(() => expect(result.current.services.find((s) => s.name === "honeycomb")?.state).not.toBe("degraded"));
 	});
+
+	it("client resilience: a single transient empty/unreachable poll never flashes an already-healthy grid to all-down", async () => {
+		fleetStatusResponse = {
+			supervisor: "reachable",
+			health: "ok",
+			asOf: "t1",
+			daemons: [{ name: "honeycomb", health: "ok", escalation: null }],
+		};
+		const { result } = renderHook(() => useFleetTelemetry({ restPollMs: 10 }));
+		// "warming"/"active" both mean healthy-and-up; only "starting"/"error" would mean the grid
+		// collapsed to "not started"/down, which this resilience fix must prevent.
+		const isUp = (): boolean => {
+			const state = result.current.services.find((s) => s.name === "honeycomb")?.state;
+			return state === "active" || state === "warming";
+		};
+		await waitFor(() => expect(isUp()).toBe(true));
+
+		// A single suspicious poll: supervisor reachable, but zero daemons reported (a momentary
+		// gateway hiccup / route-transition race) must retain every prior service view intact.
+		fleetStatusResponse = { supervisor: "reachable", health: "unknown", asOf: "t2", daemons: [] };
+		await waitFor(() => expect(result.current.reconnecting).toBe(true));
+		// The tile must NEVER read as "not started"/down during the blip.
+		expect(isUp()).toBe(true);
+
+		// Recovery clears the reconnecting flag without ever having blanked the grid.
+		fleetStatusResponse = {
+			supervisor: "reachable",
+			health: "ok",
+			asOf: "t3",
+			daemons: [{ name: "honeycomb", health: "ok", escalation: null }],
+		};
+		await waitFor(() => expect(result.current.reconnecting).toBe(false));
+		expect(isUp()).toBe(true);
+	});
+
+	it("client resilience: a non-2xx /api/fleet-status poll is skipped (last-known view retained) rather than applied as data", async () => {
+		fleetStatusResponse = {
+			supervisor: "reachable",
+			health: "ok",
+			asOf: "t1",
+			daemons: [{ name: "honeycomb", health: "ok", escalation: null }],
+		};
+		let failNext = false;
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = requestUrl(input);
+				calls.push({ url });
+				if (url.includes("/api/registered-services")) return jsonResponse({ names: ["honeycomb"] });
+				if (url.includes("/api/fleet-status")) return jsonResponse(fleetStatusResponse, !failNext);
+				return jsonResponse({}, false);
+			}),
+		);
+
+		const { result } = renderHook(() => useFleetTelemetry({ restPollMs: 10 }));
+		const isUp = (): boolean => {
+			const state = result.current.services.find((s) => s.name === "honeycomb")?.state;
+			return state === "active" || state === "warming";
+		};
+		await waitFor(() => expect(isUp()).toBe(true));
+
+		failNext = true;
+		// A 503 for a few polls must never be parsed as an authoritative empty snapshot.
+		await new Promise((resolve) => setTimeout(resolve, 40));
+		expect(isUp()).toBe(true);
+	});
 });
 
 /**

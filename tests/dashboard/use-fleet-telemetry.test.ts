@@ -84,6 +84,22 @@ describe("applySseEvent (bz-AC-4, hr-AC-3, sd-AC-8/sd-AC-9 isolation)", () => {
 });
 
 describe("applyRestFallback (bz-AC-5, hr-AC-4, hm-AC-10)", () => {
+	it("adds a doctor supervisor row when present in fleet status", () => {
+		const restStatus: FleetStatusResponse = {
+			supervisor: "reachable",
+			health: "degraded",
+			asOf: "2026-07-01T12:00:05.000Z",
+			daemons: [
+				{ name: "honeycomb", health: "ok", escalation: null },
+				{ name: "doctor", kind: "supervisor", health: "degraded", escalation: null },
+			],
+		};
+		const state = applyRestFallback(createInitialTelemetryState(), restStatus, NOW);
+		const view = toFleetTelemetryView(state, NOW);
+		expect(view.services.map((service) => service.name)).toEqual(["honeycomb", "doctor"]);
+		expect(view.services.find((service) => service.name === "doctor")?.state).toBe("degraded");
+	});
+
 	it("retains previously-known metrics/deeplake (the REST projection carries neither)", () => {
 		const sseState = applySseEvent(
 			createInitialTelemetryState(),
@@ -157,6 +173,57 @@ describe("applyRestFallback (bz-AC-5, hr-AC-4, hm-AC-10)", () => {
 		// ...and a later snapshot must carry `firstActiveAt` forward (not restart the window).
 		const afterSecond = applyRestFallback(afterFirst, status, NOW);
 		expect(toFleetTelemetryView(afterSecond, NOW + 6_000).services[0]?.state).toBe("active");
+	});
+
+	it("client resilience: a transient EMPTY-but-reachable snapshot never collapses an already-populated grid to all-down", () => {
+		const healthyStatus: FleetStatusResponse = {
+			supervisor: "reachable",
+			health: "ok",
+			asOf: "2026-07-01T12:00:00.000Z",
+			daemons: [
+				{ name: "honeycomb", health: "ok", escalation: null },
+				{ name: "nectar", health: "ok", escalation: null },
+			],
+		};
+		const settled = applyRestFallback(createInitialTelemetryState(), healthyStatus, NOW - 60_000);
+		expect(toFleetTelemetryView(settled, NOW).services.every((s) => s.state === "active")).toBe(true);
+		expect(toFleetTelemetryView(settled, NOW).reconnecting).toBe(false);
+
+		// A single suspicious poll: supervisor reachable, but zero daemons reported (a momentary
+		// gateway hiccup / route-transition race) must retain every prior service view intact.
+		const blip: FleetStatusResponse = { supervisor: "reachable", health: "unknown", asOf: "2026-07-01T12:01:00.000Z", daemons: [] };
+		const afterBlip = applyRestFallback(settled, blip, NOW);
+		const view = toFleetTelemetryView(afterBlip, NOW);
+		expect(view.services.every((s) => s.state === "active")).toBe(true);
+		expect(view.services.map((s) => s.name)).toEqual(["honeycomb", "nectar"]);
+		// The fact that a poll is being quietly retried is exposed, but never as a blank/all-down grid.
+		expect(view.reconnecting).toBe(true);
+
+		// Recovery on the very next good poll clears the reconnecting flag without a remount.
+		const afterRecovery = applyRestFallback(afterBlip, healthyStatus, NOW + 2_000);
+		expect(toFleetTelemetryView(afterRecovery, NOW + 2_000).reconnecting).toBe(false);
+	});
+
+	it("client resilience: an unreachable-supervisor poll ALSO retains the last-known views (unchanged prior behavior) and now flags reconnecting", () => {
+		const healthyStatus: FleetStatusResponse = {
+			supervisor: "reachable",
+			health: "ok",
+			asOf: "2026-07-01T12:00:00.000Z",
+			daemons: [{ name: "honeycomb", health: "ok", escalation: null }],
+		};
+		const settled = applyRestFallback(createInitialTelemetryState(), healthyStatus, NOW - 60_000);
+		const afterUnreachable = applyRestFallback(settled, { supervisor: "unreachable", daemons: [] }, NOW);
+		const view = toFleetTelemetryView(afterUnreachable, NOW);
+		expect(view.services.find((s) => s.name === "honeycomb")?.state).toBe("active");
+		expect(view.reconnecting).toBe(true);
+	});
+
+	it("client resilience: an EMPTY snapshot with genuinely NO prior data still renders the honest empty state (never fakes activity)", () => {
+		const blip: FleetStatusResponse = { supervisor: "reachable", health: "unknown", asOf: "2026-07-01T12:00:00.000Z", daemons: [] };
+		const state = applyRestFallback(createInitialTelemetryState(["honeycomb"]), blip, NOW);
+		const view = toFleetTelemetryView(state, NOW);
+		expect(view.services.find((s) => s.name === "honeycomb")?.state).toBe("starting");
+		expect(view.reconnecting).toBe(false);
 	});
 });
 

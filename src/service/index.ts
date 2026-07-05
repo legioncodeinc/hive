@@ -166,7 +166,10 @@ function scopePhrase(plan: ServicePlan): string {
 
 async function runAll(
   runner: CommandRunner,
-  commands: readonly ServiceCommand[]
+  commands: readonly ServiceCommand[],
+  options: {
+    readonly isNonFatalFailure?: (command: ServiceCommand, result: CommandResult) => boolean;
+  } = {}
 ): Promise<{
   readonly allOk: boolean;
   readonly firstFailure: ServiceCommand | null;
@@ -176,6 +179,9 @@ async function runAll(
   let firstFailureResult: CommandResult | null = null;
   for (const command of commands) {
     const result = await runner.run(command.command, command.args, { timeoutMs: SERVICE_COMMAND_TIMEOUT_MS });
+    if (!result.ok && options.isNonFatalFailure?.(command, result)) {
+      continue;
+    }
     if (!result.ok && firstFailure === null) {
       firstFailure = command;
       firstFailureResult = result;
@@ -239,6 +245,25 @@ function isAlreadyAbsentFailure(manager: ServicePlan["manager"], result: Command
       return unreachable;
     }
   }
+}
+
+function isAlreadyRunningTaskFailure(result: CommandResult | null): boolean {
+  if (result === null) return false;
+  const text = `${result.detail ?? ""} ${result.stderr} ${result.stdout}`.toLowerCase();
+  return /already running|instance of the task.*running|task is currently running|cannot run because.*running/.test(
+    text
+  );
+}
+
+function isBenignInstallFailure(
+  resolvedPlan: ServicePlan,
+  command: ServiceCommand,
+  result: CommandResult | null
+): boolean {
+  if (resolvedPlan.manager !== "schtasks") return false;
+  if (command.command !== "schtasks") return false;
+  if (command.args[0] !== "/Run") return false;
+  return isAlreadyRunningTaskFailure(result);
 }
 
 function withResolvedUnitPath(plan: ServicePlan): ServicePlan {
@@ -330,7 +355,11 @@ export function createServiceModule(deps: ServiceModuleDeps): ServiceModule {
         }
       }
 
-      const { allOk, firstFailure } = await runAll(runner, installCommands(resolvedPlan, uid));
+      const { allOk, firstFailure } = await runAll(runner, installCommands(resolvedPlan, uid), {
+        // Windows schtasks install is idempotent: `/Create` can succeed while `/Run` reports the
+        // task is already running. Keep that benign follow-up from flipping install to exit 1.
+        isNonFatalFailure: (command, result) => isBenignInstallFailure(resolvedPlan, command, result)
+      });
       if (!allOk) {
         return {
           ok: false,

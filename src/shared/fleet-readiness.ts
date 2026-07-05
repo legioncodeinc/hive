@@ -1,7 +1,11 @@
 export type FleetHealth = "ok" | "degraded" | "unreachable" | "unknown";
 
+export type FleetServiceKind = "daemon" | "supervisor";
+
 export type FleetDaemonStatus = {
   readonly name: string;
+  /** Distinguishes supervised workloads from the doctor supervisor row. */
+  readonly kind?: FleetServiceKind;
   readonly health: FleetHealth;
   /** Opaque pass-through of doctor's per-daemon escalation record; hive does not interpret it. */
   readonly escalation: unknown;

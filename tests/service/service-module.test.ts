@@ -113,6 +113,66 @@ describe("hive service module", () => {
     expect(fs.files.get(stagedPath)).not.toContain("<UserId>");
   });
 
+  it("rr-AC-10 install treats schtasks /Run already-running as a benign no-op", async () => {
+    const runner = createRecordingRunner((command, args) => {
+      if (command !== "schtasks") return { ok: true, code: 0, stdout: "", stderr: "" };
+      if (args[0] === "/Run") {
+        return { ok: false, code: 1, stdout: "", stderr: "ERROR: The instance of the task is already running." };
+      }
+      if (args[0] === "/Delete") {
+        return { ok: false, code: 1, stdout: "", stderr: "ERROR: The system cannot find the file specified." };
+      }
+      return { ok: true, code: 0, stdout: "", stderr: "" };
+    });
+    const fs = createMemoryFs();
+    const service = createServiceModule({
+      execPath: "C:\\hive\\dist\\cli.js",
+      runner,
+      fs,
+      environment: fixedEnv({ platform: "win32", home: "C:\\Users\\t", execPath: "C:\\hive\\dist\\cli.js" }),
+      migrateState: () => {},
+      resolveWindowsUserId: () => Promise.resolve("S-1-5-21-1-2-3-1001")
+    });
+
+    const result = await service.install();
+
+    expect(result.ok).toBe(true);
+    expect(runner.calls[1]).toEqual({
+      command: "schtasks",
+      args: ["/Create", "/XML", resolveStagedWindowsTaskPath({ home: "C:\\Users\\t", env: process.env }), "/TN", "hive", "/F"]
+    });
+    expect(runner.calls[2]).toEqual({
+      command: "schtasks",
+      args: ["/Run", "/TN", "hive"]
+    });
+  });
+
+  it("rr-AC-10 install still fails on a genuine schtasks /Create error", async () => {
+    const runner = createRecordingRunner((command, args) => {
+      if (command === "schtasks" && args[0] === "/Create") {
+        return { ok: false, code: 1, stdout: "", stderr: "ERROR: Access is denied." };
+      }
+      if (command === "schtasks" && args[0] === "/Delete") {
+        return { ok: false, code: 1, stdout: "", stderr: "ERROR: The system cannot find the file specified." };
+      }
+      return { ok: true, code: 0, stdout: "", stderr: "" };
+    });
+    const fs = createMemoryFs();
+    const service = createServiceModule({
+      execPath: "C:\\hive\\dist\\cli.js",
+      runner,
+      fs,
+      environment: fixedEnv({ platform: "win32", home: "C:\\Users\\t", execPath: "C:\\hive\\dist\\cli.js" }),
+      migrateState: () => {},
+      resolveWindowsUserId: () => Promise.resolve("S-1-5-21-1-2-3-1001")
+    });
+
+    const result = await service.install();
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("service-manager command failed");
+  });
+
   it("rr-AC-10 never invokes the Windows SID resolver for a non-Windows plan", async () => {
     const runner = createRecordingRunner();
     const fs = createMemoryFs();

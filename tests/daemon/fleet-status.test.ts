@@ -70,7 +70,8 @@ describe("fetchFleetStatus", () => {
       asOf: "2026-07-01T12:00:00.000Z",
       daemons: [
         { name: "honeycomb", health: "ok", escalation: null },
-        { name: "nectar", health: "degraded", escalation: { reason: "stale" } }
+        { name: "nectar", health: "degraded", escalation: { reason: "stale" } },
+        { name: "doctor", kind: "supervisor", health: "ok", escalation: null }
       ]
     });
   });
@@ -88,7 +89,29 @@ describe("fetchFleetStatus", () => {
       supervisor: "reachable",
       health: "ok",
       asOf: "2026-07-01T12:00:00.000Z",
-      daemons: []
+      daemons: [{ name: "doctor", kind: "supervisor", health: "ok", escalation: null }]
+    });
+  });
+
+  it("surfaces doctor from upstream as supervisor without duplicating rows", async () => {
+    const upstream = {
+      health: "degraded",
+      asOf: "2026-07-01T12:00:00.000Z",
+      daemons: [
+        { name: "doctor", health: "degraded", escalation: null },
+        { name: "honeycomb", health: "ok", escalation: null }
+      ]
+    };
+
+    const result = await fetchFleetStatus(mockFetch(upstream));
+    expect(result).toEqual({
+      supervisor: "reachable",
+      health: "degraded",
+      asOf: "2026-07-01T12:00:00.000Z",
+      daemons: [
+        { name: "doctor", kind: "supervisor", health: "degraded", escalation: null },
+        { name: "honeycomb", health: "ok", escalation: null }
+      ]
     });
   });
 
@@ -205,7 +228,10 @@ describe("GET /api/fleet-status route", () => {
       supervisor: "reachable",
       health: "ok",
       asOf: "2026-07-01T12:00:00.000Z",
-      daemons: [{ name: "honeycomb", health: "ok", escalation: null }]
+      daemons: [
+        { name: "honeycomb", health: "ok", escalation: null },
+        { name: "doctor", kind: "supervisor", health: "ok", escalation: null }
+      ]
     });
     expect(fleetStatusFetch).toHaveBeenCalledWith(DOCTOR_STATUS_URL, { redirect: "error" });
   });

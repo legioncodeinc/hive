@@ -22,6 +22,13 @@
  * Memory-bounded (parent index constraint, lg-AC-6): `logs` is a capped ring buffer
  * ({@link LOG_RING_BUFFER_CAP}), oldest-dropped; `services` holds only CURRENT per-service state,
  * never a history series (hr-AC-7).
+ *
+ * Client robustness (operator-reported incident): a single transient/empty `/api/fleet-status`
+ * poll (a momentary gateway hiccup, or a race during a route transition) must never collapse an
+ * already-populated tile grid to "every service not started". {@link applyRestFallback} keeps the
+ * LAST-KNOWN per-service views whenever a "reachable" snapshot reports zero daemons while prior
+ * runtime state exists, surfacing a `reconnecting` flag on the returned view instead of wiping the
+ * grid; only a poll with genuinely no prior data renders the honest empty state.
  */
 
 import React from "react";
@@ -85,9 +92,16 @@ export interface FleetTelemetryView {
 	readonly logs: readonly FleetLogEntry[];
 	readonly source: TelemetrySource;
 	readonly asOf: string | null;
+	/**
+	 * True while the REST fallback is quietly retrying after an unreachable-supervisor or
+	 * suspicious-empty snapshot (see {@link applyRestFallback}) WITHOUT losing the last-known
+	 * service views. A consumer may use this to render a subtle "reconnecting" affordance; the
+	 * hook itself never blanks the grid on this alone.
+	 */
+	readonly reconnecting: boolean;
 }
 
-export const EMPTY_FLEET_TELEMETRY_VIEW: FleetTelemetryView = { services: [], logs: [], source: "none", asOf: null };
+export const EMPTY_FLEET_TELEMETRY_VIEW: FleetTelemetryView = { services: [], logs: [], source: "none", asOf: null, reconnecting: false };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal state + the pure reducer steps (unit-testable without a live EventSource).
@@ -107,11 +121,13 @@ export interface TelemetryState {
 	readonly logs: readonly FleetLogEntry[];
 	readonly source: TelemetrySource;
 	readonly asOf: string | null;
+	/** See {@link FleetTelemetryView.reconnecting}. */
+	readonly reconnecting: boolean;
 }
 
 /** The initial, empty state before any registration/telemetry has arrived. */
 export function createInitialTelemetryState(registeredNames: readonly string[] = []): TelemetryState {
-	return { registeredNames, services: new Map(), logs: [], source: "none", asOf: null };
+	return { registeredNames, services: new Map(), logs: [], source: "none", asOf: null, reconnecting: false };
 }
 
 /** Union a freshly-observed name into the tracked registered set, preserving first-seen order. */
@@ -160,6 +176,7 @@ export function applySseEvent(state: TelemetryState, event: FleetTelemetryEvent,
 		logs: appendLogs(state.logs, event.logs),
 		source: "sse",
 		asOf: event.asOf,
+		reconnecting: false,
 	};
 }
 
@@ -173,12 +190,29 @@ export function applySseEvent(state: TelemetryState, event: FleetTelemetryEvent,
  * a daemon missing from a later response loses its stale `signal`/`firstActiveAt` and falls back
  * to the registered-but-silent derivation (`starting`) instead of staying `active`/`degraded`
  * forever. Its NAME is still retained via `registeredNames`, so the row never disappears.
+ *
+ * Two ambiguous snapshot shapes are treated as a TRANSIENT fault rather than authoritative,
+ * because the REST fallback carries no `lastSeen`/staleness of its own to tell a momentary blip
+ * apart from a genuine mass outage (operator-reported incident: a single bad poll during a route
+ * transition briefly rendered every service as "not started"):
+ *   - `supervisor: "unreachable"`: always kept as-is (unchanged from before).
+ *   - `supervisor: "reachable"` but `daemons: []` while prior runtime state exists: a snapshot
+ *     this suspicious never wipes an already-populated grid. Only a poll with genuinely no prior
+ *     data (a fresh mount, `state.services.size === 0`) falls through to the honest empty render.
+ * Both set `reconnecting: true` so a consumer MAY render a subtle affordance without the hook ever
+ * blanking the grid on its own.
  */
 export function applyRestFallback(state: TelemetryState, status: FleetStatusResponse, now: number): TelemetryState {
 	if (status.supervisor !== "reachable") {
 		// Supervisor itself unreachable: no per-service signal to apply, but the source flips so
 		// consumers can show a "telemetry unavailable" fail-soft state rather than a stale "sse" label.
-		return { ...state, source: "rest" };
+		return { ...state, source: "rest", reconnecting: true };
+	}
+
+	if (status.daemons.length === 0 && state.services.size > 0) {
+		// A "reachable" snapshot with zero daemons while we already track live services reads as a
+		// transient blip, not "every service just vanished"; keep the last-known views intact.
+		return { ...state, source: "rest", asOf: status.asOf, reconnecting: true };
 	}
 
 	let names = state.registeredNames;
@@ -196,7 +230,7 @@ export function applyRestFallback(state: TelemetryState, status: FleetStatusResp
 		});
 	}
 
-	return { registeredNames: names, services, logs: state.logs, source: "rest", asOf: status.asOf };
+	return { registeredNames: names, services, logs: state.logs, source: "rest", asOf: status.asOf, reconnecting: false };
 }
 
 /** Build the rendered per-service views for every KNOWN name, in first-seen order (never omitted, sd-AC-2/bz-AC-2). */
@@ -222,7 +256,13 @@ export function deriveServiceViews(state: TelemetryState, now: number): readonly
 
 /** Project internal {@link TelemetryState} into the public {@link FleetTelemetryView}. */
 export function toFleetTelemetryView(state: TelemetryState, now: number): FleetTelemetryView {
-	return { services: deriveServiceViews(state, now), logs: state.logs, source: state.source, asOf: state.asOf };
+	return {
+		services: deriveServiceViews(state, now),
+		logs: state.logs,
+		source: state.source,
+		asOf: state.asOf,
+		reconnecting: state.reconnecting,
+	};
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -292,6 +332,7 @@ export function useFleetTelemetry(options: UseFleetTelemetryOptions = {}): Fleet
 			const tick = async (): Promise<void> => {
 				try {
 					const response = await fetch(FLEET_STATUS_ENDPOINT);
+					if (!response.ok) return; // Keep the last-known view; the next tick retries.
 					const body = (await response.json()) as FleetStatusResponse;
 					if (!alive) return;
 					setState((current) => applyRestFallback(current, body, Date.now()));
