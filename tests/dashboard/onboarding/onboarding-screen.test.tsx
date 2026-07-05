@@ -14,7 +14,12 @@ import type { OnboardingClient } from "../../../src/dashboard/web/onboarding/onb
 import { OnboardingScreen } from "../../../src/dashboard/web/onboarding/onboarding-screen.js";
 
 function detection(states: Partial<Record<"honeycomb" | "doctor" | "hive" | "nectar", ProductInstallState>>): DetectResponse {
-	const products: DetectResponse["products"] = {};
+	const products: DetectResponse["products"] = {
+		honeycomb: { state: "not_installed" },
+		doctor: { state: "not_installed" },
+		hive: { state: "not_installed" },
+		nectar: { state: "not_installed" },
+	};
 	for (const [name, state] of Object.entries(states)) {
 		(products as Record<string, { state: ProductInstallState }>)[name] = { state };
 	}

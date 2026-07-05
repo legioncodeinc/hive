@@ -13,17 +13,21 @@
 import { z } from "zod";
 
 import type { FleetHealth, FleetStatusResponse } from "../../../shared/fleet-readiness.js";
+import {
+	INSTALLABLE_PRODUCTS as SHARED_INSTALLABLE_PRODUCTS,
+	PRODUCT_SLUGS as SHARED_PRODUCT_SLUGS,
+} from "../../../shared/onboarding-types.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Product identity
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Every product the daemon reports detection for (hive is always present; it is the caller). */
-export const ONBOARDING_PRODUCTS = ["honeycomb", "doctor", "hive", "nectar"] as const;
+export const ONBOARDING_PRODUCTS = SHARED_PRODUCT_SLUGS;
 export type OnboardingProduct = (typeof ONBOARDING_PRODUCTS)[number];
 
 /** The three INSTALLABLE products, in the fixed order the guided flow walks them (ob-AC-6). */
-export const FIXED_PRODUCT_ORDER = ["doctor", "honeycomb", "nectar"] as const;
+export const FIXED_PRODUCT_ORDER = SHARED_INSTALLABLE_PRODUCTS;
 export type InstallableProduct = (typeof FIXED_PRODUCT_ORDER)[number];
 
 export function isInstallableProduct(value: string): value is InstallableProduct {
@@ -53,28 +57,40 @@ export type ProductDetection = z.infer<typeof ProductDetectionSchema>;
 /** The safe default for a product the response omitted (never assume installed). */
 export const DEFAULT_PRODUCT_DETECTION: ProductDetection = Object.freeze({ state: "not_installed" });
 
-// Every product key is OPTIONAL (a partial object, not a `z.record` over the enum): the daemon
-// contract never guarantees all four keys ride every response, and "omitted" must degrade to
-// {@link DEFAULT_PRODUCT_DETECTION} per-product rather than failing the WHOLE `products` object
-// (which a zod `z.record` over a finite enum key would do, since that shape requires every key).
+const DetectProductsInputSchema = z
+	.object({
+		honeycomb: ProductDetectionSchema.optional(),
+		doctor: ProductDetectionSchema.optional(),
+		hive: ProductDetectionSchema.optional(),
+		nectar: ProductDetectionSchema.optional(),
+	})
+	.catch({});
+
+type DetectProducts = Record<OnboardingProduct, ProductDetection>;
+
+function normalizeDetectProducts(products: z.infer<typeof DetectProductsInputSchema>): DetectProducts {
+	return {
+		honeycomb: products.honeycomb ?? DEFAULT_PRODUCT_DETECTION,
+		doctor: products.doctor ?? DEFAULT_PRODUCT_DETECTION,
+		hive: products.hive ?? DEFAULT_PRODUCT_DETECTION,
+		nectar: products.nectar ?? DEFAULT_PRODUCT_DETECTION,
+	};
+}
+
+const DEFAULT_DETECT_PRODUCTS: DetectProducts = Object.freeze(normalizeDetectProducts({}));
+
+// The wire response is normalized to all four products, even if a malformed/legacy payload omits keys.
 export const DetectResponseSchema = z.object({
-	products: z
-		.object({
-			honeycomb: ProductDetectionSchema.optional(),
-			doctor: ProductDetectionSchema.optional(),
-			hive: ProductDetectionSchema.optional(),
-			nectar: ProductDetectionSchema.optional(),
-		})
-		.catch({}),
+	products: DetectProductsInputSchema.transform((products) => normalizeDetectProducts(products)).catch(DEFAULT_DETECT_PRODUCTS),
 });
 export type DetectResponse = z.infer<typeof DetectResponseSchema>;
 
 /** The honest "nothing detected yet" default (a fetch failure never fabricates an installed product). */
-export const EMPTY_DETECTION: DetectResponse = Object.freeze({ products: {} });
+export const EMPTY_DETECTION: DetectResponse = Object.freeze({ products: DEFAULT_DETECT_PRODUCTS });
 
-/** Read one product's detection, defaulting to {@link DEFAULT_PRODUCT_DETECTION} when omitted. */
+/** Read one product's detection from the normalized four-product map. */
 export function detectionFor(detection: DetectResponse, product: OnboardingProduct): ProductDetection {
-	return detection.products[product] ?? DEFAULT_PRODUCT_DETECTION;
+	return detection.products[product];
 }
 
 /** ob-AC-3, every one of the four products reports `installed`. */

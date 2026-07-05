@@ -374,7 +374,7 @@ export function OnboardingScreen({
 			);
 		}
 		case "health":
-			return <HealthView client={client} onReady={goToLogin} pollMs={healthPollMs} />;
+			return <HealthView client={client} onReady={goToLogin} pollMs={healthPollMs} assetBase={assetBase} />;
 		case "login":
 			return <LoginStep onboardingClient={client} wire={wire} onAuthenticated={handleLoginAuthenticated} pollMs={loginPollMs} />;
 		case "tenancy":

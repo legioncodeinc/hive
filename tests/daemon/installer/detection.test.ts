@@ -3,7 +3,7 @@
  * node_modules + in-memory install state), never from doctor's status page or the request.
  */
 
-import type { DetectResponse } from "../../../src/shared/onboarding-types.js";
+import { PRODUCT_SLUGS, type DetectResponse } from "../../../src/shared/onboarding-types.js";
 import {
   Deferred,
   makeHarness,
@@ -20,29 +20,60 @@ async function detect(app: Parameters<typeof request>[0], token?: string | null)
   return (await res.json()) as DetectResponse;
 }
 
+function expectEnumeratesAllProducts(body: DetectResponse): void {
+  expect(Object.keys(body.products).sort()).toEqual([...PRODUCT_SLUGS].sort());
+}
+
 describe("PRD-009a detection", () => {
   it("is-AC-1 reports hive installed and the rest not_installed on a fresh machine, without doctor", async () => {
     const { app } = makeHarness();
     const body = await detect(app);
 
+    expectEnumeratesAllProducts(body);
     expect(body.products.hive).toEqual({ state: "installed", version: "0.2.1" });
     expect(body.products.doctor).toEqual({ state: "not_installed" });
     expect(body.products.honeycomb).toEqual({ state: "not_installed" });
     expect(body.products.nectar).toEqual({ state: "not_installed" });
   });
 
-  it("is-AC-2 reports installed products with their version from local evidence", async () => {
+  it("is-AC-2 always enumerates all four products for mixed installed/not_installed states", async () => {
     const { app } = makeHarness({
       files: {
+        [pkgJsonKey("@legioncodeinc/doctor")]: JSON.stringify({ version: "0.2.4" }),
         [pkgJsonKey("@legioncodeinc/honeycomb")]: JSON.stringify({ version: "0.2.1" }),
         [pkgJsonKey("@legioncodeinc/nectar")]: JSON.stringify({ version: "0.1.1" })
       }
     });
     const body = await detect(app);
 
+    expectEnumeratesAllProducts(body);
+    expect(body.products.hive).toEqual({ state: "installed", version: "0.2.1" });
+    expect(body.products.doctor).toEqual({ state: "installed", version: "0.2.4" });
     expect(body.products.honeycomb).toEqual({ state: "installed", version: "0.2.1" });
     expect(body.products.nectar).toEqual({ state: "installed", version: "0.1.1" });
+  });
+
+  it("is-AC-2 treats one product read failure as not_installed without dropping siblings", async () => {
+    const doctorPkg = pkgJsonKey("@legioncodeinc/doctor");
+    const files = new Map<string, string>([
+      [pkgJsonKey("@legioncodeinc/honeycomb"), JSON.stringify({ version: "0.2.1" })],
+      [pkgJsonKey("@legioncodeinc/nectar"), JSON.stringify({ version: "0.1.1" })]
+    ]);
+    const { app } = makeHarness({
+      overrides: {
+        readTextFile: (path) => {
+          if (path === doctorPkg) throw new Error("permission denied");
+          return files.get(path) ?? null;
+        }
+      }
+    });
+
+    const body = await detect(app);
+    expectEnumeratesAllProducts(body);
     expect(body.products.doctor).toEqual({ state: "not_installed" });
+    expect(body.products.hive).toEqual({ state: "installed", version: "0.2.1" });
+    expect(body.products.honeycomb).toEqual({ state: "installed", version: "0.2.1" });
+    expect(body.products.nectar).toEqual({ state: "installed", version: "0.1.1" });
   });
 
   it("is-AC-2 reports install_in_progress for a product mid-install", async () => {

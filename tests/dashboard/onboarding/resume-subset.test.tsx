@@ -11,6 +11,7 @@ describe("buildResumeQueue (ob-AC-16 resume honors the chosen subset)", () => {
 			products: {
 				doctor: { state: "install_failed", error: { stage: "downloading", summary: "network" } },
 				honeycomb: { state: "installed", version: "0.2.1" },
+				hive: { state: "installed", version: "0.2.1" },
 				nectar: { state: "not_installed" },
 			},
 		};
@@ -22,6 +23,7 @@ describe("buildResumeQueue (ob-AC-16 resume honors the chosen subset)", () => {
 			products: {
 				doctor: { state: "installed", version: "0.2.1" },
 				honeycomb: { state: "install_in_progress" },
+				hive: { state: "installed", version: "0.2.1" },
 				nectar: { state: "not_installed" },
 			},
 		};
@@ -35,6 +37,7 @@ describe("buildResumeQueue (ob-AC-16 resume honors the chosen subset)", () => {
 			products: {
 				doctor: { state: "not_installed" },
 				honeycomb: { state: "not_installed" },
+				hive: { state: "installed", version: "0.2.1" },
 				nectar: { state: "install_failed", error: { stage: "linking", summary: "eacces" } },
 			},
 		};
@@ -46,6 +49,7 @@ describe("buildResumeQueue (ob-AC-16 resume honors the chosen subset)", () => {
 			products: {
 				doctor: { state: "install_failed", error: { stage: "resolving", summary: "x" } },
 				honeycomb: { state: "not_installed" },
+				hive: { state: "installed", version: "0.2.1" },
 				nectar: { state: "install_in_progress" },
 			},
 		};

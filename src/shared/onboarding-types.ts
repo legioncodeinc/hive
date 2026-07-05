@@ -14,11 +14,17 @@ import type { FleetStatusResponse } from "./fleet-readiness.js";
 /** The four fleet product slugs (is-AC-3). The install allowlist is derived from this closed set. */
 export type ProductSlug = "honeycomb" | "doctor" | "hive" | "nectar";
 
+/** The canonical runtime product list used by detect/onboarding contract code paths. */
+export const PRODUCT_SLUGS = ["honeycomb", "doctor", "hive", "nectar"] as const;
+
 /**
  * The three installable-via-portal products. `hive` is intentionally excluded: it is the daemon
  * serving this very endpoint, so it is never a portal install target (a request for it is a 400).
  */
 export type InstallableProduct = "doctor" | "honeycomb" | "nectar";
+
+/** The canonical installable product order for onboarding flows. */
+export const INSTALLABLE_PRODUCTS = ["doctor", "honeycomb", "nectar"] as const;
 
 /** The closed set of install stages streamed over SSE (is-AC-11). Never a percentage (is-AC-12). */
 export type InstallStage =

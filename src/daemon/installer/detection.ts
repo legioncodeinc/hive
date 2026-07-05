@@ -27,7 +27,12 @@ const InstalledPackageSchema = z.object({ version: z.string().optional() });
 
 /** Read the installed version of `packageName` from its global node_modules package.json, if present. */
 function readInstalledVersion(config: InstallerConfig, nodeModulesDir: string, packageName: string): string | undefined {
-  const raw = config.readTextFile(join(nodeModulesDir, packageName, "package.json"));
+  let raw: string | null = null;
+  try {
+    raw = config.readTextFile(join(nodeModulesDir, packageName, "package.json"));
+  } catch {
+    return undefined;
+  }
   if (raw === null) return undefined;
   try {
     const parsed = InstalledPackageSchema.safeParse(JSON.parse(raw));
@@ -87,7 +92,12 @@ export async function detectFleet(config: InstallerConfig, store: InstallStateSt
 
   const products = {} as Record<ProductSlug, ProductDetection>;
   for (const slug of PRODUCT_SLUGS) {
-    products[slug] = detectProduct(config, store, nodeModulesDir, slug);
+    try {
+      products[slug] = detectProduct(config, store, nodeModulesDir, slug);
+    } catch {
+      // A read/decode error for one product never drops that product or its siblings from the map.
+      products[slug] = { state: "not_installed" };
+    }
   }
   return { products };
 }

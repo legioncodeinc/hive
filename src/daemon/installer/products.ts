@@ -8,10 +8,14 @@
  * running daemon, never a portal install target).
  */
 
-import type { InstallableProduct, ProductSlug } from "../../shared/onboarding-types.js";
+import {
+  INSTALLABLE_PRODUCTS,
+  PRODUCT_SLUGS,
+  type InstallableProduct,
+  type ProductSlug
+} from "../../shared/onboarding-types.js";
 
-/** The four known product slugs (is-AC-3). The install allowlist is the installable subset below. */
-export const PRODUCT_SLUGS = ["honeycomb", "doctor", "hive", "nectar"] as const;
+export { INSTALLABLE_PRODUCTS, PRODUCT_SLUGS };
 
 /**
  * The npm package name for each slug, used as LOCAL DETECTION evidence (the folder name under the
@@ -24,9 +28,6 @@ export const PRODUCT_PACKAGES: Record<ProductSlug, string> = {
   hive: "@legioncodeinc/hive",
   nectar: "@legioncodeinc/nectar"
 };
-
-/** The three portal-installable products; `hive` is excluded (not installable, 400). */
-export const INSTALLABLE_PRODUCTS = ["doctor", "honeycomb", "nectar"] as const;
 
 /** Per-product static facts: the npm bin name and the argv of its own post-install registration verb. */
 export interface ProductProfile {
