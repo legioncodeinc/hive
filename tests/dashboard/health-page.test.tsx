@@ -8,7 +8,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-import { HealthPage } from "../../src/dashboard/web/pages/health.js";
+import { formatTelemetryFreshness, HealthPage } from "../../src/dashboard/web/pages/health.js";
 import type { PageProps } from "../../src/dashboard/web/page-frame.js";
 import type { WireClient } from "../../src/dashboard/web/wire.js";
 
@@ -104,5 +104,89 @@ describe("HealthPage with reachable fleet-status fallback", () => {
 		await waitFor(() => expect(screen.getByTestId("log-verbosity-select")).toBeTruthy());
 		fireEvent.change(screen.getByTestId("log-verbosity-select"), { target: { value: "error" } });
 		expect((screen.getByTestId("log-verbosity-select") as HTMLSelectElement).value).toBe("error");
+	});
+
+	// Health-page honesty (client-reported gap): the badges are doctor-RELAYED, not a live daemon
+	// probe, so every tile now carries a freshness annotation ("as of Xs ago via doctor") and an
+	// explicit reconnecting flag when the relay is behind, so a stale snapshot can never read as an
+	// unqualified current fact.
+	it("annotates each tile with when its (doctor-relayed) data is from", async () => {
+		render(<HealthPage {...pageProps()} />);
+		await waitFor(() => expect(screen.getByTestId("health-freshness-honeycomb")).toBeTruthy());
+		expect(screen.getByTestId("health-freshness-honeycomb").textContent).toContain("via doctor");
+		expect(screen.getByTestId("health-freshness-honeycomb").getAttribute("data-reconnecting")).toBe("false");
+	});
+});
+
+describe("HealthPage freshness labeling: reconnecting relay never reads as a current fact", () => {
+	beforeEach(() => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = requestUrl(input);
+				if (url.includes("/api/registered-services")) return jsonResponse({ names: ["honeycomb"] });
+				// A "reachable" supervisor with zero daemons while there is no prior state IS the honest
+				// empty state (not "reconnecting"); this suite instead seeds a genuine BLIP after first
+				// establishing live data, so `reconnecting` flips true without ever blanking the grid.
+				if (url.includes("/api/fleet-status")) {
+					return jsonResponse({
+						supervisor: "reachable",
+						health: "ok",
+						asOf: "2026-07-01T12:00:00.000Z",
+						daemons: [{ name: "honeycomb", health: "ok", escalation: null }],
+					});
+				}
+				return jsonResponse({}, false);
+			}),
+		);
+	});
+
+	afterEach(() => {
+		cleanup();
+		vi.unstubAllGlobals();
+	});
+
+	it("flags a currently-reconnecting relay instead of letting a stale badge read as current", async () => {
+		render(<HealthPage {...pageProps()} />);
+		await waitFor(() => expect(screen.getByTestId("health-freshness-honeycomb").getAttribute("data-reconnecting")).toBe("false"));
+
+		// A subsequent blip (reachable, but zero daemons while prior state exists) flips `reconnecting`
+		// without wiping the tile (see `useFleetTelemetry`'s `applyRestFallback` doc).
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = requestUrl(input);
+				if (url.includes("/api/registered-services")) return jsonResponse({ names: ["honeycomb"] });
+				if (url.includes("/api/fleet-status")) return jsonResponse({ supervisor: "reachable", health: "unknown", asOf: "2026-07-01T12:01:00.000Z", daemons: [] });
+				return jsonResponse({}, false);
+			}),
+		);
+
+		// The REST fallback polls every 2s by default; give it enough headroom past that interval.
+		await waitFor(() => expect(screen.getByTestId("health-freshness-honeycomb").getAttribute("data-reconnecting")).toBe("true"), { timeout: 5000 });
+		expect(screen.getByTestId("health-freshness-honeycomb").textContent).toContain("reconnecting");
+		// The tile itself is still rendered (never blanked) even while the relay is behind.
+		expect(screen.getByTestId("health-service-honeycomb")).toBeTruthy();
+	});
+});
+
+describe("formatTelemetryFreshness (pure)", () => {
+	it("renders an honest 'no data yet' when there is no asOf at all", () => {
+		expect(formatTelemetryFreshness(null, Date.now())).toBe("no data yet");
+	});
+
+	it("renders 'as of just now' for a sub-2s age", () => {
+		const now = Date.parse("2026-07-01T12:00:01.000Z");
+		expect(formatTelemetryFreshness("2026-07-01T12:00:00.000Z", now)).toBe("as of just now");
+	});
+
+	it("renders seconds-ago for a sub-minute age", () => {
+		const now = Date.parse("2026-07-01T12:00:42.000Z");
+		expect(formatTelemetryFreshness("2026-07-01T12:00:00.000Z", now)).toBe("as of 42s ago");
+	});
+
+	it("renders minutes-ago for a longer age", () => {
+		const now = Date.parse("2026-07-01T12:05:00.000Z");
+		expect(formatTelemetryFreshness("2026-07-01T12:00:00.000Z", now)).toBe("as of 5m ago");
 	});
 });

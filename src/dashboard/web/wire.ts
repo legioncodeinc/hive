@@ -1567,6 +1567,102 @@ async function postJson<T>(
 	}
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// IRD-122 follow-up: the scope/tenancy switcher's BOUNDED calls. `getJson`/`postJson` above have
+// no timeout: a single stalled gateway hop left the switcher's `loadingWorkspaces`/
+// `switchFeedback.pending` open forever (the workspace select stayed disabled and "switching
+// org…" never cleared). Every scope/tenancy call the switcher makes (`scopeOrgs`, `scopeWorkspaces`,
+// `scopeProjects`, `switchOrg`, `switchWorkspace`, `setupTenancy`) now goes through one of the two
+// helpers below, bounded by {@link SCOPE_REQUEST_TIMEOUT_MS} via `AbortController`. This mirrors
+// `onboarding/tenancy-client.ts`'s bounded-fetch discipline (the SAME operator-reported "stalled
+// request wedges the UI forever" failure mode) WITHOUT importing from it: the two clients stay
+// independent by design (ts-AC-11) even though they solve the identical problem for two different
+// pre-auth/post-auth surfaces.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The generous client-side timeout (ms) for every scope/tenancy switcher call. The gateway hop
+ * these calls proxy through is legitimately slow (2-5s/call is normal), and a single switch chains
+ * 2-4 of them (switch → re-mint → re-enumerate → re-sync projects), so this must stay generous;
+ * it exists only to bound a genuinely HUNG request, never to abort a slow-but-live one.
+ */
+export const SCOPE_REQUEST_TIMEOUT_MS = 20_000 as const;
+
+/**
+ * A typed, non-enumerable marker so a bounded scope/tenancy call can report "timed out or failed"
+ * distinctly from a genuine empty/negative read (mirrors `onboarding/tenancy-client.ts`'s
+ * `isTenancyRequestFailure`). The scope-switcher callbacks already carry a `switched:false` /
+ * empty-list fallback for every failure mode; this marker lets a caller that needs to tell a
+ * timeout apart from an honest empty enumeration do so, without changing the fallback shape.
+ */
+const SCOPE_REQUEST_FAILURE_MARKER: unique symbol = Symbol("scopeRequestFailure");
+
+/** Stamp a FRESH copy of `fallback` with {@link SCOPE_REQUEST_FAILURE_MARKER} (never mutates a shared singleton default). */
+function markScopeRequestFailed<T extends object>(fallback: T): T {
+	return Object.defineProperty({ ...fallback }, SCOPE_REQUEST_FAILURE_MARKER, { value: true, enumerable: false }) as T;
+}
+
+/** True iff `value` was returned via {@link markScopeRequestFailed}: a timeout, network error, non-2xx, or malformed body. */
+export function isScopeRequestFailure(value: unknown): boolean {
+	return typeof value === "object" && value !== null && (value as Record<PropertyKey, unknown>)[SCOPE_REQUEST_FAILURE_MARKER] === true;
+}
+
+/**
+ * GET + zod-parse a scope/tenancy endpoint, bounded by {@link SCOPE_REQUEST_TIMEOUT_MS}. Degrades
+ * to a freshly-marked copy of `fallback` on a timeout/abort, network error, non-2xx, or malformed
+ * body; never throws, never hangs past the bound.
+ */
+async function getScopeJson<T extends object>(
+	fetchImpl: FetchLike,
+	url: string,
+	schema: z.ZodType<T>,
+	fallback: T,
+	extraHeaders: Record<string, string> = {},
+): Promise<T> {
+	const ac = new AbortController();
+	const timer = setTimeout(() => ac.abort(), SCOPE_REQUEST_TIMEOUT_MS);
+	try {
+		const res = await fetchImpl(url, {
+			headers: { accept: "application/json", ...DASHBOARD_SESSION_HEADERS, ...extraHeaders },
+			signal: ac.signal,
+		});
+		if (!res.ok) return markScopeRequestFailed(fallback);
+		const parsed = schema.safeParse(await res.json());
+		return parsed.success ? parsed.data : markScopeRequestFailed(fallback);
+	} catch {
+		return markScopeRequestFailed(fallback);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+/** POST + zod-parse a scope/tenancy endpoint, bounded the same way (see {@link getScopeJson}). */
+async function postScopeJson<T extends object>(
+	fetchImpl: FetchLike,
+	url: string,
+	body: unknown,
+	schema: z.ZodType<T>,
+	fallback: T,
+): Promise<T> {
+	const ac = new AbortController();
+	const timer = setTimeout(() => ac.abort(), SCOPE_REQUEST_TIMEOUT_MS);
+	try {
+		const res = await fetchImpl(url, {
+			method: "POST",
+			headers: { "content-type": "application/json", accept: "application/json", ...DASHBOARD_SESSION_HEADERS },
+			body: JSON.stringify(body),
+			signal: ac.signal,
+		});
+		if (!res.ok) return markScopeRequestFailed(fallback);
+		const parsed = schema.safeParse(await res.json());
+		return parsed.success ? parsed.data : markScopeRequestFailed(fallback);
+	} catch {
+		return markScopeRequestFailed(fallback);
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 /** The arm name → a human scope hint for a recalled memory (honest, derived from the wire). */
 function scopeForSource(source: string): string {
 	if (source === "memories") return "team";
@@ -2608,18 +2704,24 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 			return postJson(fetchImpl, url(ENDPOINTS.setupLogin), {}, SetupLoginSchema);
 		},
 		async setupTenancy(): Promise<SetupTenancyResultWire> {
-			// GET the explicit-tenancy state (PRD-011b tv-AC-4). A non-2xx / network / malformed
-			// body degrades to the honest unreachable state (never a fabricated tenancy, never a
-			// throw). The onboarding step's enumerate/select/create calls do NOT live here; they
-			// go through `onboarding/tenancy-client.ts` exclusively (ts-AC-11, no drift).
+			// GET the explicit-tenancy state (PRD-011b tv-AC-4), bounded by SCOPE_REQUEST_TIMEOUT_MS
+			// (IRD-122 follow-up: this read now also feeds the scope-context reconciliation on mount
+			// and after every switch, so it must never hang past the bound). A non-2xx / network /
+			// malformed body / timeout degrades to the honest unreachable state (never a fabricated
+			// tenancy, never a throw). The onboarding step's enumerate/select/create calls do NOT live
+			// here; they go through `onboarding/tenancy-client.ts` exclusively (ts-AC-11, no drift).
+			const ac = new AbortController();
+			const timer = setTimeout(() => ac.abort(), SCOPE_REQUEST_TIMEOUT_MS);
 			try {
-				const res = await fetchImpl(url(ENDPOINTS.setupTenancy), { headers: { accept: "application/json" } });
+				const res = await fetchImpl(url(ENDPOINTS.setupTenancy), { headers: { accept: "application/json" }, signal: ac.signal });
 				if (!res.ok) return UNREACHABLE_SETUP_TENANCY;
 				const parsed = SetupTenancySchema.safeParse(await res.json());
 				if (!parsed.success) return UNREACHABLE_SETUP_TENANCY;
 				return { ...parsed.data, unreachable: false };
 			} catch {
 				return UNREACHABLE_SETUP_TENANCY;
+			} finally {
+				clearTimeout(timer);
 			}
 		},
 			async migrateFromHivemind(): Promise<SetupMigrateWire> {
@@ -2637,26 +2739,39 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 				);
 			},
 			async scopeOrgs(): Promise<ScopeOrgWire[]> {
-				// GET the privilege-scoped org list; a failed/absent/non-local read degrades to [] so the
-				// switcher shows an empty/needs-login state (never a throw). No token rides the body.
-				const v = await getJson(fetchImpl, url(ENDPOINTS.scopeOrgs), ScopeOrgsSchema);
-				return v?.orgs ?? [];
+				// GET the privilege-scoped org list, bounded by SCOPE_REQUEST_TIMEOUT_MS (IRD-122
+				// follow-up: an unbounded read used to wedge the switcher forever on one stalled gateway
+				// hop). A failed/absent/non-local/timed-out read degrades to [] so the switcher shows an
+				// empty/needs-login state (never a throw, never a hang). No token rides the body.
+				const v = await getScopeJson(fetchImpl, url(ENDPOINTS.scopeOrgs), ScopeOrgsSchema, { orgs: [] });
+				return v.orgs;
 			},
 			async scopeWorkspaces(org?: string): Promise<ScopeWorkspacesWire> {
-				// GET the org's workspaces; the daemon re-mints the org-bound token (PRD-011) before
-				// enumerating when `org` differs from its credential org (49e-AC-3). A failed read degrades
-				// to an empty workspace list. The `org` query is encodeURIComponent-escaped (one safe value).
+				// GET the org's workspaces, bounded by SCOPE_REQUEST_TIMEOUT_MS; the daemon re-mints the
+				// org-bound token (PRD-011) before enumerating when `org` differs from its credential org
+				// (49e-AC-3). A failed/timed-out read degrades to an empty workspace list, never a hang.
+				// The `org` query is encodeURIComponent-escaped (one safe value).
 				const qs = org !== undefined && org !== "" ? `?org=${encodeURIComponent(org)}` : "";
-				const v = await getJson(fetchImpl, url(`${ENDPOINTS.scopeWorkspaces}${qs}`), ScopeWorkspacesSchema);
-				return v ?? { workspaces: [], org: org ?? "", reminted: false };
+				return getScopeJson(fetchImpl, url(`${ENDPOINTS.scopeWorkspaces}${qs}`), ScopeWorkspacesSchema, {
+					workspaces: [],
+					org: org ?? "",
+					reminted: false,
+				});
 			},
 			async scopeProjects(opts: { unbound?: boolean } = {}): Promise<ScopeProjectWire[]> {
-				// GET the workspace's synced registry projects (049a cache). `unbound` stamps `?unbound=1`
-				// for the 059d import list (registry-only projects). A failed/absent read degrades to [] so
-				// the switcher shows no projects (and the pages render the needs-selection state).
+				// GET the workspace's synced registry projects (049a cache), bounded by
+				// SCOPE_REQUEST_TIMEOUT_MS (a workspace switch chains this call, so an unbounded read here
+				// used to leave "switching workspace…" pending forever too). `unbound` stamps `?unbound=1`
+				// for the 059d import list (registry-only projects). A failed/absent/timed-out read
+				// degrades to [] so the switcher shows no projects (and the pages render the
+				// needs-selection state), never a hang.
 				const qs = opts.unbound === true ? "?unbound=1" : "";
-				const v = await getJson(fetchImpl, url(`${ENDPOINTS.scopeProjects}${qs}`), ScopeProjectsSchema);
-				return v?.projects ?? [];
+				const v = await getScopeJson(fetchImpl, url(`${ENDPOINTS.scopeProjects}${qs}`), ScopeProjectsSchema, {
+					projects: [],
+					org: "",
+					workspace: "",
+				});
+				return v.projects;
 			},
 			async fsBrowse(path?: string): Promise<BrowseBodyWire> {
 				// GET the daemon-served dirs-only tree (059b). The `path` query is encodeURIComponent-escaped
@@ -2684,15 +2799,17 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 				return (await postJson(fetchImpl, url(ENDPOINTS.projectsUnbind), { path: input.path }, UnbindAckSchema)) ?? FAILED_UNBIND_ACK;
 			},
 			async switchOrg(org: string): Promise<OrgSwitchAckWire> {
-				// POST the target org → the daemon re-mints + persists (IRD-122 / 122-AC-2). A non-2xx /
-				// network failure degrades to the failed ack so the switcher shows an honest "could not
-				// switch" rather than a silent no-op (122-AC-4). NO token rides the ack.
-				return (await postJson(fetchImpl, url(ENDPOINTS.scopeOrgSwitch), { org }, OrgSwitchAckSchema)) ?? FAILED_ORG_SWITCH_ACK;
+				// POST the target org → the daemon re-mints + persists (IRD-122 / 122-AC-2), bounded by
+				// SCOPE_REQUEST_TIMEOUT_MS. A non-2xx / network failure / timeout degrades to the failed
+				// ack so the switcher shows an honest "could not switch" rather than a silent no-op OR an
+				// infinite "switching org…" (122-AC-4). NO token rides the ack.
+				return postScopeJson(fetchImpl, url(ENDPOINTS.scopeOrgSwitch), { org }, OrgSwitchAckSchema, FAILED_ORG_SWITCH_ACK);
 			},
 			async switchWorkspace(workspace: string): Promise<WorkspaceSwitchAckWire> {
-				// POST the target workspace → the daemon persists the workspace id (no re-mint). A failure
-				// degrades to the failed ack so the switcher surfaces an honest error, never a no-op.
-				return (await postJson(fetchImpl, url(ENDPOINTS.scopeWorkspaceSwitch), { workspace }, WorkspaceSwitchAckSchema)) ?? FAILED_WORKSPACE_SWITCH_ACK;
+				// POST the target workspace → the daemon persists the workspace id (no re-mint), bounded
+				// by SCOPE_REQUEST_TIMEOUT_MS. A failure/timeout degrades to the failed ack so the switcher
+				// surfaces an honest error, never a no-op and never a hang.
+				return postScopeJson(fetchImpl, url(ENDPOINTS.scopeWorkspaceSwitch), { workspace }, WorkspaceSwitchAckSchema, FAILED_WORKSPACE_SWITCH_ACK);
 			},
 	};
 }

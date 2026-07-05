@@ -25,7 +25,7 @@
 
 import React from "react";
 
-import type { ScopeOrgWire, ScopeProjectWire, ScopeWorkspaceWire, WireClient } from "./wire.js";
+import type { ScopeOrgWire, ScopeProjectWire, ScopeWorkspaceWire, SetupTenancyResultWire, WireClient } from "./wire.js";
 
 /**
  * The active scope the dashboard reads (the 049e contract). `org` is always present; `workspace`
@@ -101,11 +101,26 @@ export interface ScopeSwitcherValue {
 	/** True while an org change is re-minting + re-enumerating (the workspace dropdown shows a loading hint). */
 	readonly loadingWorkspaces: boolean;
 	/**
+	 * True while ANY switch (org or workspace) is in flight: gates the org/workspace/project
+	 * `<select>`s so they re-disable during a switch and RE-ENABLE the moment the bounded wire call
+	 * resolves, whether that resolution is a success or a bounded timeout/failure (the "switch
+	 * freeze" fix: previously only `loadingWorkspaces` gated the workspace select, and an unbounded
+	 * wire call could leave it disabled forever on one stalled gateway hop).
+	 */
+	readonly switching: boolean;
+	/**
 	 * IRD-122 — the last switch's outcome feedback (122-AC-4: no switch is a silent no-op). `null` until a
 	 * switch runs; then a `{ kind: "persisted" | "view" | "error", message }` the switcher surfaces so the
 	 * user always sees whether a selection PERSISTED a real scope change, is a VIEW filter, or FAILED.
 	 */
 	readonly switchFeedback: SwitchFeedback | null;
+	/**
+	 * The exact failed switch action re-issued (the "switch freeze" fix's Retry affordance), `null`
+	 * when there is nothing to retry (no switch has failed, or a later switch superseded it).
+	 * {@link ScopeSwitcherSlot} renders a Retry control bound to this when `switchFeedback.kind` is
+	 * `"error"`.
+	 */
+	readonly retrySwitch: (() => void) | null;
 	/**
 	 * Select an org → PERSIST a real org switch via the daemon (re-mint + save to credentials.json —
 	 * 122-AC-2), then re-enumerate workspaces; clears the workspace/project. Surfaces persisted/error
@@ -139,7 +154,9 @@ const DEFAULT_SWITCHER: ScopeSwitcherValue = Object.freeze({
 	projects: [],
 	projectsHydrated: false,
 	loadingWorkspaces: false,
+	switching: false,
 	switchFeedback: null,
+	retrySwitch: null,
 	selectOrg: () => {},
 	selectWorkspace: () => {},
 	selectProject: () => {},
@@ -187,6 +204,54 @@ export function persistScope(scope: DashboardScope): void {
 	}
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// The "reverts to OSPRY" display-desync fix: the persisted/current scope is reconciled against
+// the daemon's REAL active tenancy (the credential `wire.setupTenancy()` reads), never left to
+// drift silently. Pure + exported so the reconciliation rule itself is unit-testable without
+// mounting the provider.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The daemon's REAL active org/workspace pair (derived from a {@link SetupTenancyResultWire} read). */
+export interface ActiveTenancy {
+	readonly org: string;
+	readonly workspace: string;
+}
+
+/**
+ * Derive the REAL active org/workspace ids from a tenancy read, or `null` when there is nothing
+ * authoritative to reconcile against (unreachable, not authenticated, not yet selected, or a body
+ * missing either id). Never fabricates a pair from a partial read.
+ */
+export function activeTenancyFromRead(read: SetupTenancyResultWire): ActiveTenancy | null {
+	if (read.unreachable || !read.authenticated || !read.selected) return null;
+	const org = read.org?.id ?? "";
+	const workspace = read.workspace?.id ?? "";
+	if (org === "" || workspace === "") return null;
+	return { org, workspace };
+}
+
+/**
+ * Reconcile `current` against the enumerated orgs + the REAL active tenancy (the fix for the
+ * "reverts to OSPRY" desync): the org/workspace switcher previously bound `value={scope.org}` to
+ * localStorage state and never reconciled it with the credential's real org, so a persisted value
+ * that matched no enumerated `<option>` made the native `<select>` VISUALLY fall back to the first
+ * option (whichever org happened to sort first), looking like a revert while the real bound org
+ * was actually unchanged underneath.
+ *
+ * `current` is trusted (returned unchanged) UNLESS it is genuinely stale: missing (`""`) or absent
+ * from the enumerated org list once that list has loaded (`orgs.length > 0`). Only then is it
+ * corrected: to `active`, the credential's real bound org/workspace, never to an enumerated org
+ * that merely happens to sort first. When `active` is `null` (tenancy unreachable/unselected) a
+ * stale value is left as-is: there is nothing authoritative to correct it TO yet, and the
+ * placeholder-option rendering in {@link ScopeSwitcherSlot} keeps the `<select>` honest in the
+ * meantime (never silently shows the wrong org as selected).
+ */
+export function reconcileScope(current: DashboardScope, orgs: readonly ScopeOrgWire[], active: ActiveTenancy | null): DashboardScope {
+	const isStaleOrMissing = current.org === "" || (orgs.length > 0 && !orgs.some((o) => o.id === current.org));
+	if (!isStaleOrMissing || active === null) return current;
+	return { org: active.org, workspace: active.workspace };
+}
+
 /**
  * The SCOPE PROVIDER (PRD-049e) — owns the switchable selection + the enumeration state, and feeds both
  * the lean {@link ScopeContext} (pages) and the rich {@link ScopeSwitcherContext} (the slot). Mounted by
@@ -210,11 +275,22 @@ export function ScopeProvider({ wire, children }: { wire: WireClient; children: 
 	const [loadingWorkspaces, setLoadingWorkspaces] = React.useState(false);
 	// IRD-122 (122-AC-4): the last switch's outcome, so no switcher change is ever a silent no-op.
 	const [switchFeedback, setSwitchFeedback] = React.useState<SwitchFeedback | null>(null);
+	// The "switch freeze" fix's Retry affordance: the exact action to re-issue on a failed switch.
+	const [retrySwitch, setRetrySwitch] = React.useState<(() => void) | null>(null);
 
 	/** Commit a new scope: persist it (viewer-side) + update state so pages re-render against it. */
 	const commitScope = React.useCallback((next: DashboardScope): void => {
 		setScopeState(next);
 		persistScope(next);
+	}, []);
+
+	/** Reconcile `current` against `orgs` + the REAL active tenancy; persist + commit only on an actual correction. */
+	const reconcileAgainstTenancy = React.useCallback((freshOrgs: readonly ScopeOrgWire[], active: ActiveTenancy | null): void => {
+		setScopeState((current) => {
+			const reconciled = reconcileScope(current, freshOrgs, active);
+			if (reconciled !== current) persistScope(reconciled);
+			return reconciled;
+		});
 	}, []);
 
 	// The setScope a page would call (e.g. a deep link). Persists + re-renders; no enumeration side effect.
@@ -227,16 +303,23 @@ export function ScopeProvider({ wire, children }: { wire: WireClient; children: 
 		setProjectsHydrated(true);
 	}, [wire]);
 
-	// Hydrate orgs once on mount (49e-AC-1). The list is privilege-scoped server-side.
+	// Hydrate orgs once on mount (49e-AC-1), reading the REAL active tenancy alongside them so the
+	// persisted/default scope can be reconciled immediately (the "reverts to OSPRY" fix: 49e-AC-1 +
+	// the tenancy read never ran together before, so a stale/unenumerated persisted org silently
+	// desynced the switcher from the credential's real bound org).
 	React.useEffect(() => {
 		let alive = true;
 		void (async () => {
-			const rows = await wire.scopeOrgs();
+			const [rows, tenancy] = await Promise.all([wire.scopeOrgs(), wire.setupTenancy()]);
 			if (!alive) return;
 			setOrgs(rows);
+			reconcileAgainstTenancy(rows, activeTenancyFromRead(tenancy));
 		})();
 		// Also hydrate the workspaces + projects for the initial (persisted/default) org so the dropdowns
-		// are populated on first render without requiring an org re-select.
+		// are populated on first render without requiring an org re-select. `scopeWorkspaces()` with no
+		// `org` argument enumerates the DAEMON's current credential org (the real active one), so this
+		// already agrees with the tenancy read above regardless of what the (possibly stale) persisted
+		// scope says.
 		void (async () => {
 			const ws = await wire.scopeWorkspaces();
 			if (!alive) return;
@@ -246,7 +329,25 @@ export function ScopeProvider({ wire, children }: { wire: WireClient; children: 
 		return () => {
 			alive = false;
 		};
-	}, [wire, loadProjects]);
+	}, [wire, loadProjects, reconcileAgainstTenancy]);
+
+	// Reconcile again after any switch COMPLETES (persisted, not pending): the fix's "on mount AND
+	// after any switch completes" requirement. A successful switch's `commitScope` already reflects
+	// the just-persisted ack, so this is a defensive re-read of the credential's ground truth (mirrors
+	// `ActiveTenancyDisplay`'s own tv-AC-5 re-hydrate-after-switch pattern) rather than a load-bearing
+	// correction on the happy path.
+	React.useEffect(() => {
+		if (switchFeedback?.kind !== "persisted" || switchFeedback.pending === true) return;
+		let alive = true;
+		void (async () => {
+			const tenancy = await wire.setupTenancy();
+			if (!alive) return;
+			reconcileAgainstTenancy(orgs, activeTenancyFromRead(tenancy));
+		})();
+		return () => {
+			alive = false;
+		};
+	}, [switchFeedback, wire, orgs, reconcileAgainstTenancy]);
 
 	// IRD-122 (122-AC-1 / 122-AC-2): selecting an org now PERSISTS a real org switch via the daemon
 	// (re-mint the org-bound token + save to credentials.json — the SAME mechanic as `honeycomb org
@@ -254,17 +355,25 @@ export function ScopeProvider({ wire, children }: { wire: WireClient; children: 
 	// success `whoami` reflects it. Feedback is surfaced (122-AC-4) — pending while re-minting, then
 	// persisted or error; a FAILED persist does NOT silently change the dashboard view (we keep the prior
 	// scope so the control never lies about what is active).
-	const selectOrg = React.useCallback(
+	//
+	// "Switch freeze" fix: every wire call this makes (`switchOrg`, `scopeWorkspaces`) is now bounded
+	// (see `wire.ts`'s `SCOPE_REQUEST_TIMEOUT_MS`), so this `async` IIFE always settles; the `finally`
+	// always runs, `loadingWorkspaces` always clears, and a failure surfaces an honest error with a
+	// `retrySwitch` that re-issues this EXACT call rather than leaving the control disabled forever.
+	const runOrgSwitch = React.useCallback(
 		(org: string): void => {
+			setRetrySwitch(null);
 			setLoadingWorkspaces(true);
 			setSwitchFeedback({ kind: "persisted", message: "switching org…", pending: true });
 			void (async () => {
 				try {
 					const ack = await wire.switchOrg(org);
 					if (!ack.switched) {
-						// The persist failed (no credential / unknown org / re-mint error). Surface it; do NOT
-						// mutate the active scope — the switcher honestly reflects that nothing changed.
+						// The persist failed (no credential / unknown org / re-mint error / a bounded timeout).
+						// Surface it; do NOT mutate the active scope (the switcher honestly reflects that
+						// nothing changed), and offer a Retry that re-issues this exact org switch.
 						setSwitchFeedback({ kind: "error", message: ack.error !== undefined && ack.error !== "" ? `could not switch: ${ack.error}` : "could not switch org" });
+						setRetrySwitch(() => () => runOrgSwitch(org));
 						return;
 					}
 					// Persisted (re-minted if the org changed). Commit the view to the now-active org + reset the
@@ -275,6 +384,12 @@ export function ScopeProvider({ wire, children }: { wire: WireClient; children: 
 					setProjects([]);
 					setProjectsHydrated(true);
 					setSwitchFeedback({ kind: "persisted", message: ack.reminted ? `switched to ${ack.orgName ?? ack.org} · re-minted` : `switched to ${ack.orgName ?? ack.org}` });
+				} catch {
+					// Every wire call above is fail-soft by construction and should never throw; this is a
+					// last-resort net so an unforeseen exception still clears the pending state honestly
+					// rather than leaving the switcher wedged.
+					setSwitchFeedback({ kind: "error", message: "could not switch org" });
+					setRetrySwitch(() => () => runOrgSwitch(org));
 				} finally {
 					setLoadingWorkspaces(false);
 				}
@@ -282,25 +397,41 @@ export function ScopeProvider({ wire, children }: { wire: WireClient; children: 
 		},
 		[wire, commitScope],
 	);
+	const selectOrg = runOrgSwitch;
 
 	// IRD-122: selecting a workspace PERSISTS the workspace switch via the daemon (write the workspace id
 	// to credentials.json — no re-mint), THEN re-enumerates its projects. Failure is surfaced, never silent.
-	const selectWorkspace = React.useCallback(
+	// "Switch freeze" fix: `switchWorkspace` + `scopeProjects` (via `loadProjects`) are both bounded, and a
+	// Retry re-issues this exact workspace switch.
+	const runWorkspaceSwitch = React.useCallback(
 		(workspace: string): void => {
+			setRetrySwitch(null);
 			setSwitchFeedback({ kind: "persisted", message: "switching workspace…", pending: true });
 			void (async () => {
-				const ack = await wire.switchWorkspace(workspace);
-				if (!ack.switched) {
-					setSwitchFeedback({ kind: "error", message: ack.error !== undefined && ack.error !== "" ? `could not switch: ${ack.error}` : "could not switch workspace" });
-					return;
+				try {
+					const ack = await wire.switchWorkspace(workspace);
+					if (!ack.switched) {
+						setSwitchFeedback({ kind: "error", message: ack.error !== undefined && ack.error !== "" ? `could not switch: ${ack.error}` : "could not switch workspace" });
+						setRetrySwitch(() => () => runWorkspaceSwitch(workspace));
+						return;
+					}
+					commitScope({ org: scope.org, workspace: ack.workspace, project: undefined });
+					await loadProjects();
+					setSwitchFeedback({ kind: "persisted", message: `switched to ${ack.workspace}` });
+				} catch {
+					setSwitchFeedback({ kind: "error", message: "could not switch workspace" });
+					setRetrySwitch(() => () => runWorkspaceSwitch(workspace));
 				}
-				commitScope({ org: scope.org, workspace: ack.workspace, project: undefined });
-				await loadProjects();
-				setSwitchFeedback({ kind: "persisted", message: `switched to ${ack.workspace}` });
 			})();
 		},
 		[wire, commitScope, scope.org, loadProjects],
 	);
+	const selectWorkspace = runWorkspaceSwitch;
+
+	// Gates the org/workspace/project `<select>`s: true while an org switch is re-minting/re-enumerating
+	// OR any switch's feedback is still `pending` (the "switch freeze" fix: both flags are now always
+	// bounded, so this can never stay true past SCOPE_REQUEST_TIMEOUT_MS).
+	const switching = loadingWorkspaces || switchFeedback?.pending === true;
 
 	// 122-AC-3: the project dropdown is a VIEW FILTER. Selecting a project re-scopes the pages
 	// (viewer-side; NO registry write — 49e-AC-4) and surfaces "view filter" feedback so the user
@@ -316,8 +447,20 @@ export function ScopeProvider({ wire, children }: { wire: WireClient; children: 
 
 	const scopeValue = React.useMemo<ScopeContextValue>(() => ({ scope, setScope }), [scope, setScope]);
 	const switcherValue = React.useMemo<ScopeSwitcherValue>(
-		() => ({ orgs, workspaces, projects, projectsHydrated, loadingWorkspaces, switchFeedback, selectOrg, selectWorkspace, selectProject }),
-		[orgs, workspaces, projects, projectsHydrated, loadingWorkspaces, switchFeedback, selectOrg, selectWorkspace, selectProject],
+		() => ({
+			orgs,
+			workspaces,
+			projects,
+			projectsHydrated,
+			loadingWorkspaces,
+			switching,
+			switchFeedback,
+			retrySwitch,
+			selectOrg,
+			selectWorkspace,
+			selectProject,
+		}),
+		[orgs, workspaces, projects, projectsHydrated, loadingWorkspaces, switching, switchFeedback, retrySwitch, selectOrg, selectWorkspace, selectProject],
 	);
 
 	return (
@@ -403,12 +546,28 @@ export function ScopeSwitcherSlot({ collapsed }: ScopeSwitcherSlotProps): React.
 	// is where scope is switched). This keeps the collapsed layout identical to 050b.
 	if (collapsed) return null;
 
+	// The "reverts to OSPRY" fix's UI-level safety net: a `<select>` must NEVER render with a `value`
+	// that matches none of its `<option>`s (the native element silently falls back to the first
+	// option, looking like the wrong tenant is active). Once an enumeration has actually loaded
+	// (`options.length > 0`) and the current value is not among the known ids, an explicit disabled
+	// placeholder option is inserted FOR that value, so the select stays honest (shows the genuinely
+	// unresolved value, not a fabricated "first in the list") while `reconcileScope` (see
+	// `scope-context.tsx`'s module doc) corrects the underlying state as soon as the real tenancy
+	// resolves.
+	const orgUnresolved = switcher.orgs.length > 0 && !switcher.orgs.some((o) => o.id === scope.org);
+	const workspaceUnresolved = switcher.workspaces.length > 0 && !switcher.workspaces.some((w) => w.id === scope.workspace);
+
 	return (
 		<div data-testid="scope-switcher" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-			<SwitcherSelect label="org" testId="scope-org" value={scope.org} onChange={switcher.selectOrg}>
+			<SwitcherSelect label="org" testId="scope-org" value={scope.org} disabled={switcher.switching} onChange={switcher.selectOrg}>
 				{/* The active org is always offered, even before the enumeration resolves, so the control never
 				    renders blank (the resolved/persisted scope shows immediately). */}
 				{switcher.orgs.length === 0 && <option value={scope.org}>{scope.org}</option>}
+				{orgUnresolved && (
+					<option value={scope.org} disabled>
+						{scope.org === "" ? "(unresolved)" : `${scope.org} (unresolved)`}
+					</option>
+				)}
 				{switcher.orgs.map((o) => (
 					<option key={o.id} value={o.id}>
 						{o.name !== "" ? o.name : o.id}
@@ -420,10 +579,15 @@ export function ScopeSwitcherSlot({ collapsed }: ScopeSwitcherSlotProps): React.
 				label="workspace"
 				testId="scope-workspace"
 				value={scope.workspace}
-				disabled={switcher.loadingWorkspaces}
+				disabled={switcher.switching}
 				onChange={switcher.selectWorkspace}
 			>
 				{switcher.workspaces.length === 0 && <option value={scope.workspace}>{switcher.loadingWorkspaces ? "loading…" : scope.workspace}</option>}
+				{workspaceUnresolved && (
+					<option value={scope.workspace} disabled>
+						{scope.workspace === "" ? "(unresolved)" : `${scope.workspace} (unresolved)`}
+					</option>
+				)}
 				{switcher.workspaces.map((w) => (
 					<option key={w.id} value={w.id}>
 						{w.name !== "" ? w.name : w.id}
@@ -438,6 +602,7 @@ export function ScopeSwitcherSlot({ collapsed }: ScopeSwitcherSlotProps): React.
 				label="project · view filter"
 				testId="scope-project"
 				value={scope.project ?? NO_PROJECT_VALUE}
+				disabled={switcher.switching}
 				onChange={(v) => switcher.selectProject(v === NO_PROJECT_VALUE ? undefined : v)}
 			>
 				{/* The needs-selection sentinel (49e-AC-5): with nothing selected the pages render the
@@ -457,23 +622,46 @@ export function ScopeSwitcherSlot({ collapsed }: ScopeSwitcherSlotProps): React.
 			    org/workspace switch (saved to credentials.json), a project view-filter change, or a failure
 			    each show here, distinctly toned. */}
 			{switcher.switchFeedback !== null && (
-				<span
-					data-testid="switch-feedback"
-					data-kind={switcher.switchFeedback.kind}
-					style={{
-						fontFamily: "var(--font-mono)",
-						fontSize: 10,
-						color:
-							switcher.switchFeedback.kind === "error"
-								? "var(--severity-critical)"
-								: switcher.switchFeedback.kind === "persisted"
-									? "var(--verified)"
-									: "var(--text-tertiary)",
-					}}
-				>
-					{switcher.switchFeedback.pending === true ? "⟳ " : switcher.switchFeedback.kind === "persisted" ? "✓ " : ""}
-					{switcher.switchFeedback.message}
-				</span>
+				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+					<span
+						data-testid="switch-feedback"
+						data-kind={switcher.switchFeedback.kind}
+						style={{
+							fontFamily: "var(--font-mono)",
+							fontSize: 10,
+							color:
+								switcher.switchFeedback.kind === "error"
+									? "var(--severity-critical)"
+									: switcher.switchFeedback.kind === "persisted"
+										? "var(--verified)"
+										: "var(--text-tertiary)",
+						}}
+					>
+						{switcher.switchFeedback.pending === true ? "⟳ " : switcher.switchFeedback.kind === "persisted" ? "✓ " : ""}
+						{switcher.switchFeedback.message}
+					</span>
+					{/* "Switch freeze" fix: a failed (incl. timed-out) switch always offers a Retry that
+					    re-issues the EXACT same action: no dead-end error with no way forward. */}
+					{switcher.switchFeedback.kind === "error" && switcher.retrySwitch !== null && (
+						<button
+							type="button"
+							data-testid="switch-retry"
+							onClick={() => switcher.retrySwitch?.()}
+							style={{
+								fontFamily: "var(--font-mono)",
+								fontSize: 10,
+								color: "var(--text-secondary)",
+								background: "var(--bg-elevated)",
+								border: "1px solid var(--border-default)",
+								borderRadius: "var(--radius-sm)",
+								padding: "1px 6px",
+								cursor: "pointer",
+							}}
+						>
+							Retry
+						</button>
+					)}
+				</div>
 			)}
 		</div>
 	);

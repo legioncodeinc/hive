@@ -42,8 +42,62 @@ function humanizeMetricKey(key: string): string {
 	return key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Health page honesty (client-reported gap): the badges below come from doctor's RELAYED
+// heartbeats (`useFleetTelemetry`'s SSE/REST snapshot), never a live probe of the daemon's own
+// `/health`. A relay can lag or drop, so a tile reading "Deeplake not reached / last seen never"
+// can CONTRADICT a currently-healthy daemon the relay simply hasn't reported on yet. This does not
+// change the data source (still doctor-relayed, never a direct browser→daemon probe): it only
+// labels the badges with WHEN the data is from and whether the relay is currently caught up, so a
+// stale/reconnecting snapshot never reads as an unqualified current fact.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Render `asOf` (an ISO timestamp) as a short "as of Xs/Xm ago" freshness label, or an honest
+ * "no data yet" when there is none. `nowMs` is threaded in (rather than read internally) so the
+ * label is a pure function of its inputs and ages correctly on every re-render, which
+ * `useFleetTelemetry`'s own 1s clock tick already drives (see its module doc), so this needs no
+ * second timer.
+ */
+export function formatTelemetryFreshness(asOf: string | null, nowMs: number): string {
+	if (asOf === null) return "no data yet";
+	const ageMs = nowMs - Date.parse(asOf);
+	if (Number.isNaN(ageMs)) return "no data yet";
+	if (ageMs < 1500) return "as of just now";
+	const secs = Math.round(ageMs / 1000);
+	if (secs < 60) return `as of ${secs}s ago`;
+	const mins = Math.round(secs / 60);
+	if (mins < 60) return `as of ${mins}m ago`;
+	const hours = Math.round(mins / 60);
+	return `as of ${hours}h ago`;
+}
+
+/**
+ * The per-tile freshness annotation: "as of Xs ago via doctor" when the relay is caught up, or an
+ * explicit "reconnecting" honesty flag when `useFleetTelemetry`'s `reconnecting` bit is set (a
+ * transient blip or an unreachable supervisor, see that hook's `applyRestFallback` doc) so a
+ * possibly-stale badge is never mistaken for a live, current reading.
+ */
+function TelemetryFreshness({ serviceName, asOf, reconnecting }: { readonly serviceName: string; readonly asOf: string | null; readonly reconnecting: boolean }): React.JSX.Element {
+	const [nowMs, setNowMs] = React.useState(() => Date.now());
+	React.useEffect(() => {
+		const id = setInterval(() => setNowMs(Date.now()), 1000);
+		return () => clearInterval(id);
+	}, []);
+
+	return (
+		<div
+			data-testid={`health-freshness-${serviceName}`}
+			data-reconnecting={reconnecting}
+			style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: reconnecting ? "var(--severity-warning)" : "var(--text-tertiary)" }}
+		>
+			{reconnecting ? "⟳ reconnecting to doctor: may be stale" : `${formatTelemetryFreshness(asOf, nowMs)} via doctor`}
+		</div>
+	);
+}
+
 /** One service's metrics + Deep Lake block (hm-AC-1..3, hm-AC-5..7). Renders whatever keys are present. */
-function ServiceHealthCard({ service }: { readonly service: ServiceView }): React.JSX.Element {
+function ServiceHealthCard({ service, asOf, reconnecting }: { readonly service: ServiceView; readonly asOf: string | null; readonly reconnecting: boolean }): React.JSX.Element {
 	const metricEntries = Object.entries(service.metrics);
 	return (
 		<div
@@ -114,6 +168,12 @@ function ServiceHealthCard({ service }: { readonly service: ServiceView }): Reac
 					</>
 				)}
 			</div>
+
+			{/* Client robustness (operator-reported gap): this tile's badges are a doctor-RELAYED
+			    snapshot, never a live daemon probe (see the module doc). This annotation says WHEN the
+			    snapshot is from, and honestly flags a currently-reconnecting relay, so a stale reading
+			    is never mistaken for a live one. */}
+			<TelemetryFreshness serviceName={service.name} asOf={asOf} reconnecting={reconnecting} />
 		</div>
 	);
 }
@@ -215,7 +275,7 @@ export function HealthPage(_props: PageProps): React.JSX.Element {
 				) : (
 					<div data-testid="health-service-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
 						{telemetry.services.map((service) => (
-							<ServiceHealthCard key={service.name} service={service} />
+							<ServiceHealthCard key={service.name} service={service} asOf={telemetry.asOf} reconnecting={telemetry.reconnecting} />
 						))}
 					</div>
 				)}
