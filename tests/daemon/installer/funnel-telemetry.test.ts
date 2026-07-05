@@ -13,6 +13,8 @@ import {
   MANIFEST_URL
 } from "../../../src/daemon/installer/config.js";
 import { NPM_INSTALL_NETWORK_FLAGS } from "../../../src/daemon/installer/install-state.js";
+// The real ship-time snapshot: the offline-fallback assertion reads its doctor pin (see below).
+import manifestSnapshot from "../../../src/daemon/installer/manifest-snapshot.json" with { type: "json" };
 import {
   ALLOWED_PROPERTY_KEYS,
   FUNNEL_PROPERTY_KEYS,
@@ -504,7 +506,17 @@ describe("PRD-009 MV-2 manifest URL primary and fallback", () => {
         "https://primary.example/hive-release.json",
         "https://fallback.example/hive-release.json"
       ]);
-      expect(spawnCalls[0]?.args).toEqual([NPM_CLI, "install", "-g", ...NPM_INSTALL_NETWORK_FLAGS, "@legioncodeinc/doctor@0.2.1"]);
+      // The offline fallback pins against the REAL ship-time snapshot's doctor version, so a
+      // release-time snapshot bump never breaks this test with a stale literal.
+      const snapshotDoctorVersion = (manifestSnapshot as { products: { doctor: { version: string } } }).products
+        .doctor.version;
+      expect(spawnCalls[0]?.args).toEqual([
+        NPM_CLI,
+        "install",
+        "-g",
+        ...NPM_INSTALL_NETWORK_FLAGS,
+        `@legioncodeinc/doctor@${snapshotDoctorVersion}`
+      ]);
     } finally {
       cleanup();
     }

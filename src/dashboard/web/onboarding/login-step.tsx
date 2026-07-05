@@ -14,6 +14,7 @@
 
 import React from "react";
 
+import { Button } from "../primitives.js";
 import { createWireClient, FRESH_SETUP_STATE, type SetupLoginWire, type SetupStateWire, type WireClient } from "../wire.js";
 import type { OnboardingClient } from "./onboarding-client.js";
 
@@ -32,9 +33,11 @@ export interface LoginStepProps {
 
 /**
  * The grant display (ob-AC-14): the `user_code` prominently, plus `verification_uri_complete`
- * falling back to `verification_uri`, byte-identical fallback rule to `GuidedSetup`'s.
+ * falling back to `verification_uri`, byte-identical fallback rule to `GuidedSetup`'s. Carries a
+ * restart affordance: a non-technical operator who closed the verification tab (or let the code
+ * expire) gets a one-click fresh code instead of a dead end.
  */
-function LoginGrant({ grant }: { readonly grant: SetupLoginWire }): React.JSX.Element {
+function LoginGrant({ grant, onRestart }: { readonly grant: SetupLoginWire; readonly onRestart: () => void }): React.JSX.Element {
 	return (
 		<div data-testid="onboarding-login-grant" style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "center" }}>
 			<p style={{ fontFamily: "var(--font-sans)", fontSize: "var(--text-sm)", color: "var(--text-secondary)", margin: 0 }}>
@@ -56,6 +59,9 @@ function LoginGrant({ grant }: { readonly grant: SetupLoginWire }): React.JSX.El
 				Open the verification page
 			</a>
 			<span style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>Waiting for you to finish in the browser…</span>
+			<Button variant="secondary" size="sm" onClick={onRestart} data-testid="onboarding-login-restart">
+				Closed the window? Restart login
+			</Button>
 		</div>
 	);
 }
@@ -70,20 +76,31 @@ export function LoginStep({ onboardingClient, wire: wireOverride, onAuthenticate
 	const grantShownEventRef = React.useRef(false);
 	const authenticatedHandledRef = React.useRef(false);
 
+	// One shared "mint a grant" routine: the on-mount auto-begin and the user-facing restart both
+	// go through here, so a closed verification tab / expired code / failed first attempt is always
+	// recoverable with one click (never a dead end for a non-technical operator).
+	const beginLogin = React.useCallback(async (): Promise<void> => {
+		setError(false);
+		const result = await wire.setupLogin();
+		if (result === null) {
+			setError(true);
+			return;
+		}
+		setGrant(result);
+	}, [wire]);
+
+	const restartLogin = React.useCallback((): void => {
+		setGrant(null);
+		void beginLogin();
+	}, [beginLogin]);
+
 	// Auto-begin the device flow on mount (see module doc for why onboarding skips the button
 	// `GuidedSetup` shows on the standalone `/login` route).
 	React.useEffect(() => {
 		if (beginRef.current) return;
 		beginRef.current = true;
-		void (async (): Promise<void> => {
-			const result = await wire.setupLogin();
-			if (result === null) {
-				setError(true);
-				return;
-			}
-			setGrant(result);
-		})();
-	}, [wire]);
+		void beginLogin();
+	}, [beginLogin]);
 
 	// ob-AC-14, `login_shown` fires the moment the grant (the code the operator must see) renders.
 	React.useEffect(() => {
@@ -146,11 +163,16 @@ export function LoginStep({ onboardingClient, wire: wireOverride, onAuthenticate
 			</div>
 
 			{grant !== null ? (
-				<LoginGrant grant={grant} />
+				<LoginGrant grant={grant} onRestart={restartLogin} />
 			) : error ? (
-				<p data-testid="onboarding-login-error" style={{ fontSize: "var(--text-sm)", color: "var(--severity-critical)", margin: 0 }}>
-					Could not start the login. Retry, or run <code>honeycomb login</code> in your terminal.
-				</p>
+				<div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "center" }}>
+					<p data-testid="onboarding-login-error" style={{ fontSize: "var(--text-sm)", color: "var(--severity-critical)", margin: 0 }}>
+						Could not start the login.
+					</p>
+					<Button variant="primary" size="md" onClick={restartLogin} data-testid="onboarding-login-retry">
+						Retry login
+					</Button>
+				</div>
 			) : (
 				<p style={{ fontSize: "var(--text-sm)", color: "var(--text-secondary)", margin: 0 }}>Starting login…</p>
 			)}

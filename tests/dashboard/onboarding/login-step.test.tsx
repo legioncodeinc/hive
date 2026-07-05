@@ -61,6 +61,36 @@ describe("LoginStep", () => {
 		);
 	});
 
+	it("a failed device-flow begin shows a Retry button that mints a fresh grant (never a dead end)", async () => {
+		const setupLogin = vi
+			.fn<() => Promise<SetupLoginWire | null>>()
+			.mockResolvedValueOnce(null)
+			.mockResolvedValue({ user_code: "NEWC-0001", verification_uri: "https://deeplake.ai/device" });
+		const wire = fakeWire({ setupLogin: setupLogin as unknown as WireClient["setupLogin"] });
+
+		render(<LoginStep onboardingClient={fakeOnboardingClient()} wire={wire} />);
+
+		await waitFor(() => expect(screen.getByTestId("onboarding-login-error")).toBeTruthy());
+		screen.getByTestId("onboarding-login-retry").click();
+		await waitFor(() => expect(screen.getByTestId("onboarding-login-code").textContent).toBe("NEWC-0001"));
+		expect(setupLogin).toHaveBeenCalledTimes(2);
+	});
+
+	it("the grant view carries a Restart-login button that replaces a stale code with a fresh one", async () => {
+		const setupLogin = vi
+			.fn<() => Promise<SetupLoginWire | null>>()
+			.mockResolvedValueOnce({ user_code: "OLDC-0000", verification_uri: "https://deeplake.ai/device" })
+			.mockResolvedValue({ user_code: "NEWC-1111", verification_uri: "https://deeplake.ai/device" });
+		const wire = fakeWire({ setupLogin: setupLogin as unknown as WireClient["setupLogin"] });
+
+		render(<LoginStep onboardingClient={fakeOnboardingClient()} wire={wire} />);
+
+		await waitFor(() => expect(screen.getByTestId("onboarding-login-code").textContent).toBe("OLDC-0000"));
+		screen.getByTestId("onboarding-login-restart").click();
+		await waitFor(() => expect(screen.getByTestId("onboarding-login-code").textContent).toBe("NEWC-1111"));
+		expect(setupLogin).toHaveBeenCalledTimes(2);
+	});
+
 	it("ts-AC-1: once authenticated flips true, reports up to the parent without terminal handoff", async () => {
 		let authenticated = false;
 		const wire = fakeWire({

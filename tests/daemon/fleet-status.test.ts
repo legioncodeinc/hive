@@ -132,13 +132,13 @@ describe("isFleetReady", () => {
     expect(isFleetReady(readyPayload)).toBe(true);
   });
 
-  it("fs-AC-7 returns false when aggregate health is degraded", () => {
+  it("fs-AC-7 returns true when aggregate health is degraded (an answering daemon is UP; honeycomb/nectar boot degraded until a workspace is bound)", () => {
     expect(
       isFleetReady({
         ...readyPayload,
         health: "degraded"
       })
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("fs-AC-7 returns false when aggregate health is unreachable", () => {

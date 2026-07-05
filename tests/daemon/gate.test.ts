@@ -10,16 +10,20 @@ import type { FetchImpl as FleetFetchImpl } from "../../src/daemon/fleet-status.
 import type { SetupAuthFetchImpl } from "../../src/daemon/setup-auth.js";
 import type { SetupTenancyFetchImpl } from "../../src/daemon/setup-tenancy.js";
 
-function fleetStatusFetch(health: "ok" | "degraded" | "unreachable"): FleetFetchImpl {
+function fleetStatusFetch(health: "ok" | "degraded" | "daemon-down" | "unreachable"): FleetFetchImpl {
   if (health === "unreachable") {
     return async () => new Response("boom", { status: 502 });
   }
+  // "daemon-down": doctor answers, but honeycomb gives an explicit no-response — the only
+  // answered state that reads NOT ready ("degraded" is UP: honeycomb/nectar boot degraded until
+  // a workspace is bound, and readiness must not gate on a state only login can produce).
+  const daemonHealth = health === "daemon-down" ? "unreachable" : health;
   return async () =>
     new Response(
       JSON.stringify({
-        health,
+        health: daemonHealth,
         asOf: "2026-07-01T12:00:00.000Z",
-        daemons: [{ name: "honeycomb", health: health === "ok" ? "ok" : "degraded", escalation: null }]
+        daemons: [{ name: "honeycomb", health: daemonHealth, escalation: null }]
       }),
       { status: 200, headers: { "content-type": "application/json" } }
     );
@@ -44,7 +48,7 @@ const throwingSetupTenancyFetch: SetupTenancyFetchImpl = async () => {
 };
 
 const HEALTHY = fleetStatusFetch("ok");
-const UNHEALTHY = fleetStatusFetch("degraded");
+const UNHEALTHY = fleetStatusFetch("daemon-down");
 const UNREACHABLE = fleetStatusFetch("unreachable");
 const LOGGED_IN = setupAuthFetch(true);
 const LOGGED_OUT = setupAuthFetch(false);
@@ -98,6 +102,13 @@ describe("PRD-003a portal landing gate — precedence", () => {
   it("g-AC-4 redirects to /login when the fleet is healthy but not authenticated", async () => {
     const daemon = gatedDaemon({ fleetStatusFetch: HEALTHY, setupAuthFetch: LOGGED_OUT });
     const response = await requestPath(daemon, "/projects");
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/login");
+  });
+
+  it("treats a DEGRADED-but-answering fleet as ready: a logged-out operator reaches /login, not /buzzing (pre-workspace-bind daemons are degraded by design)", async () => {
+    const daemon = gatedDaemon({ fleetStatusFetch: fleetStatusFetch("degraded"), setupAuthFetch: LOGGED_OUT });
+    const response = await requestPath(daemon, "/");
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe("/login");
   });

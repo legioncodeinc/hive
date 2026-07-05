@@ -65,4 +65,31 @@ describe("LoginScreen", () => {
 		await waitFor(() => expect(screen.getByTestId("guided-setup")).toBeTruthy());
 		expect(assignSpy).not.toHaveBeenCalled();
 	});
+
+	it("the grant view offers a Restart-login button that mints a fresh code (closed-tab recovery)", async () => {
+		const codes = ["OLDC-0000", "NEWC-1111"];
+		let loginCalls = 0;
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+				if (url.includes("/setup/login")) {
+					const user_code = codes[Math.min(loginCalls, codes.length - 1)];
+					loginCalls += 1;
+					return jsonResponse({ user_code, verification_uri: "https://deeplake.ai/device" });
+				}
+				return jsonResponse({ authenticated: false, credentials: { deeplake: false, honeycomb: false, hivemind: false }, phase: "fresh", priorTool: { hivemind: "absent" }, firstTimeSetupComplete: false, warmup: { enabled: false, live: false, warm: false } });
+			}),
+		);
+
+		render(<LoginScreen assetBase="assets" />);
+		await waitFor(() => expect(screen.getByTestId("guided-setup")).toBeTruthy());
+
+		screen.getByText("First time setup").click();
+		await waitFor(() => expect(screen.getByTestId("setup-grant").textContent).toContain("OLDC-0000"));
+
+		screen.getByTestId("setup-restart-login").click();
+		await waitFor(() => expect(screen.getByTestId("setup-grant").textContent).toContain("NEWC-1111"));
+		expect(loginCalls).toBe(2);
+	});
 });

@@ -120,11 +120,13 @@ describe("BuzzingScreen", () => {
 	});
 
 	it("bz-AC-10: stays mounted (no dismissal call) while the fleet is not yet ready", async () => {
+		// An explicit no-response (unreachable) is the only answered-doctor state that reads
+		// not-ready: degraded is UP (honeycomb/nectar boot degraded until a workspace is bound).
 		fleetStatusResponse = {
 			supervisor: "reachable",
-			health: "degraded",
+			health: "unreachable",
 			asOf: "2026-07-01T12:00:00.000Z",
-			daemons: [{ name: "honeycomb", health: "degraded", escalation: null }],
+			daemons: [{ name: "honeycomb", health: "unreachable", escalation: null }],
 		};
 		const onReady = vi.fn();
 		render(<BuzzingScreen assetBase="assets" pollMs={10} onReady={onReady} />);

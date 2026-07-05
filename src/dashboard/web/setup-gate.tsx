@@ -123,6 +123,17 @@ export function GuidedSetup({
 		// authenticated dashboard once the credential lands. The button stays disabled meanwhile.
 	}, [wire]);
 
+	// Restart the login from the grant state: a non-technical operator who closed the verification
+	// tab (or let the code expire) needs a one-click way to mint a FRESH code — never a dead end.
+	// Resets the in-flight guard so beginSetup fires a new device flow; the daemon's pending-link
+	// slot replaces the stale flow.
+	const restartSetup = React.useCallback((): void => {
+		inFlightRef.current = false;
+		setBusy(false);
+		setGrant(null);
+		void beginSetup();
+	}, [beginSetup]);
+
 	// A prior Hivemind install is a HINT for the copy (050d owns the migration path); 050b only
 	// surfaces it as a sub-line so the fresh-install vs has-prior-tool states read differently.
 	const hasPriorHivemind = state.priorTool.hivemind === "present" || state.credentials.hivemind;
@@ -162,7 +173,7 @@ export function GuidedSetup({
 					</Button>
 					{error && (
 						<p data-testid="setup-error" style={{ fontSize: "var(--text-sm)", color: "var(--severity-critical)", margin: 0 }}>
-							Could not start setup. Retry, or run <code>honeycomb login</code> in your terminal.
+							Could not start setup. Click the button above to try again.
 						</p>
 					)}
 				</>
@@ -185,6 +196,9 @@ export function GuidedSetup({
 						Open the verification page
 					</a>
 					<span style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>Waiting for you to finish in the browser…</span>
+					<Button variant="secondary" size="sm" onClick={restartSetup} data-testid="setup-restart-login">
+						Closed the window? Restart login
+					</Button>
 				</div>
 			)}
 		</div>

@@ -5,6 +5,9 @@
  */
 
 import { NPM_INSTALL_NETWORK_FLAGS } from "../../../src/daemon/installer/install-state.js";
+// The real ship-time snapshot: the offline-fallback test pins against whatever it carries, so a
+// release-time snapshot bump never silently breaks the test with a stale literal.
+import manifestSnapshot from "../../../src/daemon/installer/manifest-snapshot.json" with { type: "json" };
 import {
   DEFAULT_MANIFEST,
   Deferred,
@@ -103,7 +106,9 @@ describe("PRD-009a install allowlist + manifest pinning", () => {
   });
 
   it("falls back to the bundled snapshot when the network manifest fetch fails (still pins, never @latest)", async () => {
-    // A throwing manifest fetch: the bundled snapshot still resolves @legioncodeinc/doctor@0.2.1.
+    // A throwing manifest fetch: the bundled snapshot still pins doctor to ITS ship-time version.
+    const snapshotDoctorVersion = (manifestSnapshot as { products: { doctor: { version: string } } }).products.doctor
+      .version;
     const { app, service, spawnCalls } = makeHarness({
       files: {
         [pkgJsonKey("@legioncodeinc/doctor")]: JSON.stringify({ bin: { doctor: "dist/cli.js" } }),
@@ -119,7 +124,13 @@ describe("PRD-009a install allowlist + manifest pinning", () => {
     const res = await request(app, "/api/onboarding/install", { method: "POST", body: { product: "doctor" } });
     expect(res.status).toBe(202);
     await service.store.settled("doctor");
-    expect(spawnCalls[0].args).toEqual([NPM_CLI, "install", "-g", ...NPM_INSTALL_NETWORK_FLAGS, "@legioncodeinc/doctor@0.2.1"]);
+    expect(spawnCalls[0].args).toEqual([
+      NPM_CLI,
+      "install",
+      "-g",
+      ...NPM_INSTALL_NETWORK_FLAGS,
+      `@legioncodeinc/doctor@${snapshotDoctorVersion}`
+    ]);
   });
 
   it("is-AC-15 short-circuits to installed (no spawn) when already at the pinned version", async () => {
