@@ -260,7 +260,10 @@ export function DashboardPage({ wire, pollinating = false, healthReasons = null 
 		const q = query.trim();
 		if (q === "" || recallBusy) return;
 		setRecallBusy(true);
-		const { memories, degraded } = await wire.recall(q);
+		// PRD-049e: scope recall to the selected project (mirrors how `hydrate` passes `scope.project`
+		// to `wire.kpis`). Without this the recall POST carries no `x-honeycomb-project` header and
+		// honeycomb returns workspace-wide hits regardless of the selected Org > Workspace > Project.
+		const { memories, degraded } = await wire.recall(q, scope.project);
 		setResults(memories);
 		setRecalled(true);
 		setRecallDegraded(degraded);
@@ -268,7 +271,7 @@ export function DashboardPage({ wire, pollinating = false, healthReasons = null 
 		const top = memories.length > 0 ? ` · ${memories[0]?.score.toFixed(2)} top` : "";
 		pushNote(`recall    "${q}" → ${memories.length} hits${top}`);
 		setRecallBusy(false);
-	}, [query, recallBusy, wire, pushNote]);
+	}, [query, recallBusy, wire, pushNote, scope.project]);
 
 	// The live-log feed merges client notes (recall) ahead of the polled daemon lines.
 	const feed = React.useMemo(() => [...notes, ...logLines].slice(0, MAX_LOG_LINES), [notes, logLines]);

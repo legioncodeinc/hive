@@ -146,7 +146,7 @@ function ServiceHealthCard({ service, asOf, reconnecting }: { readonly service: 
 				data-testid={`health-deeplake-${service.name}`}
 				style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 8, borderTop: "1px solid var(--border-subtle)" }}
 			>
-				<span style={{ fontSize: 12, color: "var(--text-secondary)" }}>Deep Lake</span>
+				<span style={{ fontSize: 12, color: "var(--text-secondary)" }}>Deeplake</span>
 				{service.deeplake === null ? (
 					<span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-tertiary)" }}>not reported</span>
 				) : (
