@@ -152,7 +152,7 @@ interface WhileYouWaitEntry {
 function whileYouWaitEntries(assetBase: string): readonly WhileYouWaitEntry[] {
 	return [
 		{ name: "Hive", blurb: "Your one dashboard: the front door to the whole fleet.", icon: "/assets/brand/hive-mark.svg" },
-		{ name: "Honeycomb", blurb: "Shared AI memory your coding tools carry across sessions.", icon: `${assetBase}/honeycomb-memory-cluster.svg` },
+		{ name: "Honeycomb", blurb: "Shared AI memory your coding tools carry across sessions.", icon: "/assets/brand/honeycomb-mark.svg" },
 		{ name: "Nectar", blurb: "Gives every file a stable identity, so recall survives renames.", icon: "/assets/brand/nectar-mark.svg" },
 		{ name: "Doctor", blurb: "The watchdog that restarts crashed daemons and keeps the fleet healthy.", icon: "/assets/brand/doctor-mark.svg" },
 	];
@@ -291,7 +291,7 @@ export function BuzzingScreen({ assetBase, pollMs = 1500, onReady }: BuzzingScre
 						animation: "hc-badge-breathe 2.4s var(--ease-in-out) infinite alternate",
 					}}
 				>
-					<img src={`${assetBase}/honeycomb-memory-cluster.svg`} width={48} height={48} alt="" />
+					<img src="/assets/brand/hive-mark.svg" width={48} height={48} alt="" />
 				</span>
 
 				<h1 style={{ fontSize: "var(--text-xl)", fontWeight: 700, color: "var(--text-primary)", margin: 0, letterSpacing: "-0.02em" }}>

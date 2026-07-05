@@ -8,7 +8,7 @@
  * an existing `var(--…)` token already served in `/dashboard/styles.css` (037a AC-7, D-3).
  *
  * Layout (D-3 / D-4):
- *   - Top: the honeycomb mark + `honeycomb` wordmark + the org/workspace mono sub-line — the exact
+ *   - Top: the hive mark + `hive` wordmark + the org/workspace mono sub-line — the exact
  *     type treatment the old `Header` used (mark 34px; wordmark 700/19/-0.03em; sub-line mono/11).
  *   - Middle: the seven nav items from the registry, each icon + label, in registry order. The item
  *     matching `activeRoute` is highlighted with the honey accent (`--honey` / `--honey-subtle` /
@@ -185,10 +185,10 @@ export function Sidebar({
 		>
 			{/* Brand chrome — mark + wordmark + org/workspace sub-line (mirrors the old Header). */}
 			<div style={{ display: "flex", alignItems: "center", gap: 10, paddingLeft: collapsed ? 0 : 2, justifyContent: collapsed ? "center" : "flex-start" }}>
-				<img src={`${assetBase}/honeycomb-memory-cluster.svg`} width={collapsed ? 28 : 34} height={collapsed ? 28 : 34} alt="" style={{ flex: "none" }} />
+				<img src={`${assetBase}/hive-mark.svg`} width={collapsed ? 28 : 34} height={collapsed ? 28 : 34} alt="" style={{ flex: "none" }} />
 				{!collapsed && (
 					<div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-						<span style={{ fontWeight: 700, fontSize: 19, letterSpacing: "-0.03em", color: "var(--text-primary)", lineHeight: 1.1 }}>honeycomb</span>
+						<span style={{ fontWeight: 700, fontSize: 19, letterSpacing: "-0.03em", color: "var(--text-primary)", lineHeight: 1.1 }}>hive</span>
 						<span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-tertiary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
 							{identity}
 						</span>

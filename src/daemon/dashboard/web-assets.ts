@@ -12,7 +12,7 @@
  *   GET /                              → the index SHELL (`<div id="root">` + <link> + <script>)
  *   GET /app.js                       → the esbuild bundle (React + ReactDOM + the app)
  *   GET /styles.css                   → the concatenated DS CSS (tokens + base, no @import chain)
- *   GET /honeycomb-memory-cluster.svg → the brand mark
+ *   GET /hive-mark.svg                → the brand mark
  *   GET /fonts/:name                  → an allow-listed brand font
  *
  * This module owns LOCATING those source assets on disk and reading them. It lives under
@@ -39,7 +39,7 @@ import { fileURLToPath } from "node:url";
 const CSS_FILES = ["tokens/fonts.css", "tokens/colors.css", "tokens/typography.css", "tokens/spacing.css", "tokens/base.css"] as const;
 
 /** The design-system logo the header renders. */
-const LOGO_FILE = "logos/honeycomb-memory-cluster.svg";
+const LOGO_FILE = "logos/hive-mark.svg";
 
 /**
  * The on-disk dir (under `assets/`) the brand fonts live in, and the FIXED allow-list of the

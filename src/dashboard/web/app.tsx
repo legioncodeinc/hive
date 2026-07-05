@@ -78,7 +78,7 @@ function Outlet({ route, pageProps, navigate }: { route: string; pageProps: Page
 	const { projects, projectsHydrated } = useScopeSwitcher();
 	// 037c OQ-2: per-route document title from the registry label (cheap, nice for deep links).
 	React.useEffect(() => {
-		if (typeof document !== "undefined") document.title = `honeycomb · ${entry.label}`;
+		if (typeof document !== "undefined") document.title = `hive · ${entry.label}`;
 	}, [entry.label]);
 
 	// b-AC-1: zero locally-bound projects (after the read resolved) + the Dashboard route → the first-run
