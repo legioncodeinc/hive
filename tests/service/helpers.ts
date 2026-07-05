@@ -49,6 +49,9 @@ export function createMemoryFs(failWrite = false): MemoryFs {
     removeFile(path: string): void {
       removed.push(path);
       files.delete(path);
+    },
+    fileExists(path: string): boolean {
+      return files.has(path);
     }
   };
 }

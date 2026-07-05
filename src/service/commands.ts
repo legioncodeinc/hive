@@ -37,6 +37,17 @@ export function installCommands(plan: ServicePlan, uid: number): readonly Servic
   }
 }
 
+export function stopCommands(plan: ServicePlan, uid: number): readonly ServiceCommand[] {
+  switch (plan.manager) {
+    case "launchd":
+      return [{ command: "launchctl", args: ["bootout", launchdServiceTarget(plan, uid)] }];
+    case "systemd":
+      return [{ command: "systemctl", args: ["--user", "stop", SYSTEMD_UNIT_NAME] }];
+    case "schtasks":
+      return [{ command: "schtasks", args: ["/End", "/TN", WINDOWS_TASK_NAME] }];
+  }
+}
+
 export function uninstallCommands(plan: ServicePlan, uid: number): readonly ServiceCommand[] {
   switch (plan.manager) {
     case "launchd":

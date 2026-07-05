@@ -1,7 +1,8 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-import { resolveHiveRegistryPidPath } from "../shared/apiary-root.js";
+import { resolveFleetRegistryPath, resolveHiveRegistryPidPath } from "../shared/apiary-root.js";
+import { resolveLegacyDoctorRegistryPath } from "../shared/legacy-paths.js";
 import { resolveRegistryWritePath } from "../shared/registry-paths.js";
 
 // NOTE: there is deliberately NO exported DOCTOR_REGISTRY_PATH constant on the write side.
@@ -155,6 +156,83 @@ export function registerHiveWithDoctor(options: RegistryUpsertOptions = {}): Reg
     registryPath,
     updatedExistingEntry: index >= 0
   };
+}
+
+export interface RegistryDeleteResult {
+  readonly removed: boolean;
+  readonly registryPaths: readonly string[];
+}
+
+function registryHasHiveEntry(path: string, fs: RegistryFs): boolean {
+  const parsed = readRegistryDocument(path, fs);
+  return parsed.daemons.some((entry) => entry["name"] === HIVE_REGISTRY_NAME);
+}
+
+function deleteHiveEntryAtPath(path: string, fs: RegistryFs): boolean {
+  let parsed: ParsedRegistryDocument;
+  try {
+    parsed = readRegistryDocument(path, fs);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return false;
+    throw error;
+  }
+
+  const index = parsed.daemons.findIndex((entry) => entry["name"] === HIVE_REGISTRY_NAME);
+  if (index < 0) return false;
+
+  const nextDaemons = parsed.daemons.filter((_, entryIndex) => entryIndex !== index);
+  const nextRoot: Record<string, unknown> = { ...parsed.root, daemons: nextDaemons };
+  const serialized = `${JSON.stringify(nextRoot, null, 2)}\n`;
+  const tempPath = nextTempPath(path);
+
+  fs.mkdirp(dirname(path));
+  fs.writeFile(tempPath, serialized);
+  try {
+    fs.rename(tempPath, path);
+  } catch (error) {
+    fs.removeFile(tempPath);
+    throw error;
+  }
+
+  return true;
+}
+
+export function deleteHiveFromDoctor(options: RegistryUpsertOptions = {}): RegistryDeleteResult {
+  const fs = options.fs ?? createNodeRegistryFs();
+  const explicitPath = options.registryPath;
+  const candidatePaths =
+    explicitPath !== undefined
+      ? [explicitPath]
+      : [resolveRegistryWritePath(), resolveFleetRegistryPath(), resolveLegacyDoctorRegistryPath()];
+
+  const registryPaths: string[] = [];
+  for (const path of [...new Set(candidatePaths)]) {
+    if (deleteHiveEntryAtPath(path, fs)) registryPaths.push(path);
+  }
+
+  return {
+    removed: registryPaths.length > 0,
+    registryPaths
+  };
+}
+
+export function registryContainsHiveEntry(options: RegistryUpsertOptions = {}): boolean {
+  const fs = options.fs ?? createNodeRegistryFs();
+  const explicitPath = options.registryPath;
+  const candidatePaths =
+    explicitPath !== undefined
+      ? [explicitPath]
+      : [resolveRegistryWritePath(), resolveFleetRegistryPath(), resolveLegacyDoctorRegistryPath()];
+
+  for (const path of [...new Set(candidatePaths)]) {
+    try {
+      if (registryHasHiveEntry(path, fs)) return true;
+    } catch {
+      // Unreadable registry files are treated as absent for uninstall no-op detection.
+    }
+  }
+  return false;
 }
 
 export { resolveRegistryWritePath } from "../shared/registry-paths.js";

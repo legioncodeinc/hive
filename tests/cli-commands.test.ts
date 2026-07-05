@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -6,9 +6,12 @@ import {
   runInstallServiceCommand,
   runRegisterCommand,
   runStartCommand,
+  runStopCommand,
+  runUninstallCommand,
   runUninstallServiceCommand
 } from "../src/cli-commands.js";
-import type { ServiceModule, ServiceResult } from "../src/service/index.js";
+import { registerHiveWithDoctor } from "../src/install/registry.js";
+import type { ServiceModule, ServiceResult, ServiceUninstallResult } from "../src/service/index.js";
 import { loadLedger, type EmitDeps, type TelemetryFetch, type TelemetryFetchRequestInit } from "../src/telemetry/emit.js";
 
 interface RecordedPost {
@@ -33,10 +36,25 @@ function createFetchRecorder(respond?: () => { ok: boolean; status: number } | P
   };
 }
 
-function createFakeService(overrides: Partial<Record<"install" | "uninstall", ServiceResult>> = {}): ServiceModule {
+function resolveServiceResult<T>(value: T | (() => Promise<T>) | undefined, fallback: T): Promise<T> {
+  if (value === undefined) return Promise.resolve(fallback);
+  return typeof value === "function" ? (value as () => Promise<T>)() : Promise.resolve(value);
+}
+
+function createFakeService(
+  overrides: {
+    install?: ServiceResult | (() => Promise<ServiceResult>);
+    stop?: ServiceResult | (() => Promise<ServiceResult>);
+    uninstall?: ServiceUninstallResult | (() => Promise<ServiceUninstallResult>);
+    isRegistered?: () => Promise<boolean>;
+  } = {}
+): ServiceModule {
   return {
-    install: () => Promise.resolve(overrides.install ?? { ok: true, message: "installed" }),
-    uninstall: () => Promise.resolve(overrides.uninstall ?? { ok: true, message: "uninstalled" })
+    install: () => resolveServiceResult(overrides.install, { ok: true, message: "installed" }),
+    stop: () => resolveServiceResult(overrides.stop, { ok: true, message: "stopped" }),
+    uninstall: () =>
+      resolveServiceResult(overrides.uninstall, { ok: true, alreadyAbsent: false, message: "uninstalled" }),
+    isRegistered: overrides.isRegistered ?? (() => Promise.resolve(false))
   };
 }
 
@@ -137,11 +155,32 @@ describe("uninstall-service firing point", () => {
     return withTempDir(async (dir) => {
       const recorder = createFetchRecorder();
       const code = await runUninstallServiceCommand("/tmp/cli.js", {
-        service: createFakeService({ uninstall: { ok: false, message: "deregister failed" } }),
+        service: createFakeService({
+          uninstall: { ok: false, alreadyAbsent: false, message: "deregister failed" }
+        }),
         telemetry: telemetryDeps(dir, recorder),
         out: silentOut
       });
       expect(code).toBe(1);
+      expect(recorder.calls.map((call) => call.body["event"])).toEqual(["hive_uninstalled"]);
+    });
+  });
+
+  it("M-2 treats an already-absent current unit as a friendly no-op (exit 0)", () => {
+    return withTempDir(async (dir) => {
+      const recorder = createFetchRecorder();
+      const code = await runUninstallServiceCommand("/tmp/cli.js", {
+        service: createFakeService({
+          uninstall: {
+            ok: false,
+            alreadyAbsent: true,
+            message: "hive launchd unit was already absent (nothing to remove)."
+          }
+        }),
+        telemetry: telemetryDeps(dir, recorder),
+        out: silentOut
+      });
+      expect(code).toBe(0);
       expect(recorder.calls.map((call) => call.body["event"])).toEqual(["hive_uninstalled"]);
     });
   });
@@ -236,6 +275,241 @@ describe("register verb", () => {
       });
       expect(code).toBe(0);
       // No telemetry seam exists on this verb by design; nothing to record.
+    });
+  });
+});
+
+describe("stop verb", () => {
+  it("b-AC-1 exits 0 with a friendly message when hive is not running", async () => {
+    const lines: string[] = [];
+    const code = await runStopCommand("/tmp/cli.js", {
+      service: createFakeService({ isRegistered: async () => false }),
+      pidPath: "/tmp/nonexistent/hive.pid",
+      readPid: () => null,
+      out: (text) => {
+        lines.push(text);
+      }
+    });
+    expect(code).toBe(0);
+    expect(lines.join("")).toContain("not running");
+  });
+
+  it("b-AC-1 sends SIGTERM to a live pid when no service is registered", async () => {
+    const lines: string[] = [];
+    const killed: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const code = await runStopCommand("/tmp/cli.js", {
+      service: createFakeService({ isRegistered: async () => false }),
+      pidPath: "/tmp/hive.pid",
+      readPid: () => 4242,
+      isPidAlive: () => true,
+      kill: (pid, signal) => {
+        killed.push({ pid, signal });
+      },
+      out: (text) => {
+        lines.push(text);
+      }
+    });
+    expect(code).toBe(0);
+    expect(killed).toEqual([{ pid: 4242, signal: "SIGTERM" }]);
+    expect(lines.join("")).toContain("SIGTERM");
+  });
+
+  it("b-AC-1 stops through the service manager when registered", async () => {
+    const lines: string[] = [];
+    const code = await runStopCommand("/tmp/cli.js", {
+      service: createFakeService({
+        isRegistered: async () => true,
+        stop: { ok: true, message: "hive service stopped (systemd)." }
+      }),
+      out: (text) => {
+        lines.push(text);
+      }
+    });
+    expect(code).toBe(0);
+    expect(lines.join("")).toContain("stopped");
+  });
+
+  it("AC-9 a genuine stop failure with the daemon still running exits 1 with the error", async () => {
+    const lines: string[] = [];
+    const code = await runStopCommand("/tmp/cli.js", {
+      service: createFakeService({
+        isRegistered: async () => true,
+        stop: {
+          ok: false,
+          message: "A service-manager stop command (systemctl) reported an error: Access denied."
+        }
+      }),
+      pidPath: "/tmp/hive.pid",
+      readPid: () => 4242,
+      isPidAlive: () => true,
+      out: (text) => {
+        lines.push(text);
+      }
+    });
+    expect(code).toBe(1);
+    expect(lines.join("")).toContain("Access denied.");
+    expect(lines.join("")).not.toContain("not running");
+  });
+});
+
+describe("uninstall verb", () => {
+  it("b-AC-6 exits 0 when hive is not installed", () => {
+    return withTempDir(async (dir) => {
+      const home = join(dir, "home");
+      const lines: string[] = [];
+      const code = await runUninstallCommand("/tmp/cli.js", {
+        service: createFakeService({ isRegistered: async () => false }),
+        registry: { registryPath: join(dir, "registry.json") },
+        fleetRoot: { home },
+        stateDirFs: { exists: () => false, lstat: () => ({ isSymbolicLink: () => false }), removeDir: () => {} },
+        out: (text) => {
+          lines.push(text);
+        }
+      });
+      expect(code).toBe(0);
+      expect(lines.join("")).toContain("nothing to remove");
+    });
+  });
+
+  it("b-AC-2/3/4 runs stop, service removal, registry delete, and state dir removal", () => {
+    return withTempDir(async (dir) => {
+      const home = join(dir, "home");
+      const fleetRoot = join(home, ".apiary");
+      const hiveStateDir = join(fleetRoot, "hive");
+      const registryPath = join(fleetRoot, "registry.json");
+      mkdirSync(hiveStateDir, { recursive: true });
+      registerHiveWithDoctor({ registryPath });
+
+      const recorder = createFetchRecorder();
+      const lines: string[] = [];
+      const removedDirs: string[] = [];
+      const code = await runUninstallCommand("/tmp/cli.js", {
+        service: createFakeService({
+          isRegistered: async () => true,
+          stop: { ok: true, message: "stopped" },
+          uninstall: { ok: true, alreadyAbsent: false, message: "service unregistered" }
+        }),
+        registry: { registryPath },
+        fleetRoot: { home },
+        stateDirFs: {
+          exists: (path) => path === hiveStateDir,
+          lstat: () => ({ isSymbolicLink: () => false }),
+          removeDir: (path) => {
+            removedDirs.push(path);
+          }
+        },
+        stop: async () => 0,
+        telemetry: telemetryDeps(dir, recorder),
+        out: (text) => {
+          lines.push(text);
+        }
+      });
+
+      expect(code).toBe(0);
+      expect(removedDirs).toEqual([hiveStateDir]);
+      expect(lines.join("")).toContain("Stopped hive daemon.");
+      expect(lines.join("")).toContain("Removed hive from doctor registry");
+      expect(lines.join("")).toContain("Removed hive state dir.");
+      expect(recorder.calls.map((call) => call.body["event"])).toEqual(["hive_uninstalled"]);
+    });
+  });
+
+  it("AC-9 telemetry failure does not change uninstall exit code", () => {
+    return withTempDir(async (dir) => {
+      const home = join(dir, "home");
+      const fleetRoot = join(home, ".apiary");
+      const hiveStateDir = join(fleetRoot, "hive");
+      mkdirSync(hiveStateDir, { recursive: true });
+      const throwing = createFetchRecorder(() => Promise.reject(new Error("offline")));
+      const code = await runUninstallCommand("/tmp/cli.js", {
+        service: createFakeService({ isRegistered: async () => true }),
+        registry: { registryPath: join(fleetRoot, "registry.json") },
+        fleetRoot: { home },
+        stateDirFs: {
+          exists: (path) => path === hiveStateDir,
+          lstat: () => ({ isSymbolicLink: () => false }),
+          removeDir: () => {}
+        },
+        stop: async () => 0,
+        telemetry: telemetryDeps(dir, throwing),
+        out: silentOut
+      });
+      expect(code).toBe(0);
+    });
+  });
+
+  it("M-2 macOS stop-then-uninstall sequence exits 0 despite the second bootout failing", () => {
+    // Reproduces the finding: `stop` already boot-ed the launchd unit out, so
+    // `service.uninstall()`'s own bootout of the current unit finds nothing and
+    // is classified `alreadyAbsent: true`. The whole verb must still exit 0.
+    return withTempDir(async (dir) => {
+      const home = join(dir, "home");
+      const fleetRoot = join(home, ".apiary");
+      const hiveStateDir = join(fleetRoot, "hive");
+      mkdirSync(hiveStateDir, { recursive: true });
+      const lines: string[] = [];
+      const code = await runUninstallCommand("/tmp/cli.js", {
+        service: createFakeService({
+          isRegistered: async () => true,
+          stop: { ok: true, message: "hive service stopped (launchd)." },
+          uninstall: {
+            ok: false,
+            alreadyAbsent: true,
+            message: "hive launchd unit was already absent (nothing to remove)."
+          }
+        }),
+        registry: { registryPath: join(fleetRoot, "registry.json") },
+        fleetRoot: { home },
+        stateDirFs: {
+          exists: (path) => path === hiveStateDir,
+          lstat: () => ({ isSymbolicLink: () => false }),
+          removeDir: () => {}
+        },
+        stop: async () => 0,
+        out: (text) => {
+          lines.push(text);
+        }
+      });
+      expect(code).toBe(0);
+      expect(lines.join("")).toContain("already absent");
+    });
+  });
+
+  it("M-2 a genuine current-unit failure exits nonzero naming the underlying failure", () => {
+    return withTempDir(async (dir) => {
+      const home = join(dir, "home");
+      const fleetRoot = join(home, ".apiary");
+      const hiveStateDir = join(fleetRoot, "hive");
+      mkdirSync(hiveStateDir, { recursive: true });
+      const lines: string[] = [];
+      const code = await runUninstallCommand("/tmp/cli.js", {
+        service: createFakeService({
+          isRegistered: async () => true,
+          stop: { ok: true, message: "hive service stopped (systemd)." },
+          uninstall: {
+            ok: false,
+            alreadyAbsent: false,
+            message:
+              "Removed hive unit file; a deregister command (systemctl) reported an error: Access is denied."
+          }
+        }),
+        registry: { registryPath: join(fleetRoot, "registry.json") },
+        fleetRoot: { home },
+        stateDirFs: {
+          exists: (path) => path === hiveStateDir,
+          lstat: () => ({ isSymbolicLink: () => false }),
+          removeDir: () => {}
+        },
+        stop: async () => 0,
+        out: (text) => {
+          lines.push(text);
+        }
+      });
+      expect(code).toBe(1);
+      expect(lines.join("")).toContain("Access is denied.");
+      // AC-9: the failure path must not print the contradictory success line.
+      expect(lines.join("")).not.toContain("hive uninstalled.\n");
+      expect(lines.join("")).toContain("completed with errors");
     });
   });
 });
