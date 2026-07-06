@@ -545,7 +545,7 @@ function LifecycleConfigSection(): React.JSX.Element {
 /** The honest embeddings state (mirrors the daemon `reasons.embeddingsState`): off | warming | on | failed. */
 type EmbeddingsState = "off" | "warming" | "on" | "failed";
 
-/** How often {@link EmbeddingsSection} re-polls `/health` WHILE warming, so the badge auto-advances to on/failed. */
+/** How often {@link EmbeddingsSection} re-polls `/api/status` WHILE warming, so the badge auto-advances to on/failed. */
 const EMBED_WARMING_POLL_MS = 2500;
 
 /** Render one embeddings state → its badge tone, badge label, and whether embeddings are enabled. */
@@ -563,24 +563,27 @@ function embeddingsView(state: EmbeddingsState): { tone: "verified" | "neutral" 
 }
 
 /**
- * The embeddings toggle. Reads the HONEST live state from `wire.health()` — `reasons.embeddingsState`
- * (`off | warming | on | failed`), falling back to the coarse `reasons.embeddings` for a pre-honesty
- * daemon. Flips it through `wire.setEmbeddings(...)`, which actuates the daemon's embed supervisor
- * (spawn+warm / stop) AND persists the choice so it survives a restart. Off = lexical (BM25) recall
- * only. The state re-reads from `health()` after a toggle AND polls WHILE `warming` so the badge
- * advances from "warming…" to "on" (or "failed") on its own — never an optimistic flip.
+ * The embeddings toggle. Reads the HONEST live state from `wire.status()` — honeycomb's `/api/status`
+ * `reasons.embeddingsState` (`off | warming | on | failed`), falling back to the coarse `reasons.embeddings`
+ * for a pre-honesty daemon. `/api/status` (BFF-proxied to honeycomb) is the reliably-populated `reasons`
+ * source — hive's own `/health` is liveness only and carries NO `reasons` (which is why reading it here
+ * fail-closed to "off" regardless of the real daemon state). Flips it through `wire.setEmbeddings(...)`,
+ * which actuates the daemon's embed supervisor (spawn+warm / stop) AND persists the choice so it survives a
+ * restart. Off = lexical (BM25) recall only. The state re-reads from `status()` after a toggle AND polls
+ * WHILE `warming` so the badge advances from "warming…" to "on" (or "failed") on its own — never an
+ * optimistic flip.
  */
 export function EmbeddingsSection({ wire }: { wire: PageProps["wire"] }): React.JSX.Element {
-	// `null` while the first health read is in flight (so we never render a wrong default).
+	// `null` while the first status read is in flight (so we never render a wrong default).
 	const [state, setState] = React.useState<EmbeddingsState | null>(null);
 	const [busy, setBusy] = React.useState(false);
 
 	const load = React.useCallback(async (): Promise<void> => {
-		// Fail-soft like the rest of the dashboard: a failed/absent health read degrades to "off"
+		// Fail-soft like the rest of the dashboard: a failed/absent status read degrades to "off"
 		// rather than throwing into React (the badge shows off; the toggle still works).
 		try {
-			const health = await wire.health();
-			const reasons = health?.reasons;
+			const status = await wire.status();
+			const reasons = status?.reasons;
 			// Prefer the honest fine-grained state; fall back to the coarse enabled/disabled field.
 			const next: EmbeddingsState = reasons?.embeddingsState ?? (reasons?.embeddings === "on" ? "on" : "off");
 			setState(next);
@@ -593,7 +596,7 @@ export function EmbeddingsSection({ wire }: { wire: PageProps["wire"] }): React.
 		void load();
 	}, [load]);
 
-	// While warming, re-poll `/health` so the badge advances to "on"/"failed" without a manual refresh.
+	// While warming, re-poll `/api/status` so the badge advances to "on"/"failed" without a manual refresh.
 	React.useEffect(() => {
 		if (state !== "warming") return;
 		if (isTabHidden()) return;
@@ -646,6 +649,195 @@ export function EmbeddingsSection({ wire }: { wire: PageProps["wire"] }): React.
 				>
 					{busy ? "saving…" : view?.enabled ? "Turn off" : "Turn on"}
 				</Button>
+			</div>
+		</Panel>
+	);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Memory Formation (dashboard action) — the PROMINENT, provider-gated control that
+// turns memory formation on/off. The SIBLING of the embeddings toggle above: it reads
+// its state from `wire.status()` (honeycomb's `/api/status`) `reasons.memory` (`{ enabled,
+// provider }`) and flips it through `wire.setMemory(...)` (`POST /api/actions/memory`).
+// `/api/status` is the reliably-populated `reasons` source — hive's own `/health` is liveness
+// only and carries NO `reasons` (reading it there fail-closed to "provider needed" regardless
+// of the real daemon state). UNLIKE embeddings it is NOT
+// live — the daemon persists the choice and it takes effect on the NEXT restart, so the
+// section says so honestly and (when the portal has a restart action) offers it inline.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The two provider states the daemon reports for memory formation (mirrors `reasons.memory.provider`). */
+type MemoryProvider = "configured" | "unconfigured";
+
+/** The honest memory-formation view derived from `reasons.memory` (or the safe default when absent). */
+interface MemoryView {
+	/** Whether a model provider is configured — memory formation needs one to run (the gate). */
+	readonly provider: MemoryProvider;
+	/** The persisted `memory.enabled` preference (what a restart will apply). */
+	readonly enabled: boolean;
+}
+
+/** The safe default when `/api/status` omits/malforms `reasons.memory` — unconfigured + off (fail-closed). */
+const MEMORY_DEFAULT: MemoryView = { provider: "unconfigured", enabled: false };
+
+/**
+ * The PROMINENT, provider-gated Memory Formation control. Mirrors {@link EmbeddingsSection}'s data path
+ * exactly — reads the HONEST live state from `wire.status()` (honeycomb's `/api/status`
+ * `reasons.memory = { enabled, provider }`, fail-soft to unconfigured/off), flips it through
+ * `wire.setMemory(...)` (the `POST /api/actions/memory` sibling of the embeddings action), and RE-READS
+ * `status()` after a toggle so the rendered state is the persisted truth, never an optimistic flip.
+ *
+ * Two states, honestly:
+ *   · provider `unconfigured` → a prominent explanatory prompt ("configure a model provider…"), the enable
+ *     action HIDDEN (not merely disabled — there is nothing to enable yet), pointing at the Provider keys /
+ *     Portkey sections on this same page.
+ *   · provider `configured` → the enable control reflecting `enabled`, PLUS the honest "applies on next
+ *     daemon restart" note (the toggle is `appliesOnRestart: true`, NOT live) and — when the portal has a
+ *     restart action — an inline "Restart now" affordance (mirrors {@link SystemActionsSection}'s restart).
+ */
+export function MemoryFormationSection({ wire }: { wire: PageProps["wire"] }): React.JSX.Element {
+	// `null` while the first status read is in flight (so we never render a wrong default).
+	const [view, setView] = React.useState<MemoryView | null>(null);
+	const [busy, setBusy] = React.useState(false);
+	// True after a successful toggle — surfaces the "restart to apply" affordance (the choice is persisted
+	// but not live). Cleared once the daemon restart is kicked off.
+	const [pendingRestart, setPendingRestart] = React.useState(false);
+	const [restarting, setRestarting] = React.useState(false);
+
+	const load = React.useCallback(async (): Promise<void> => {
+		// Fail-soft like the rest of the dashboard: a failed/absent status read degrades to the safe
+		// unconfigured/off default rather than throwing into React.
+		try {
+			const status = await wire.status();
+			const mem = status?.reasons?.memory;
+			setView(mem ? { provider: mem.provider, enabled: mem.enabled } : MEMORY_DEFAULT);
+		} catch {
+			setView(MEMORY_DEFAULT);
+		}
+	}, [wire]);
+
+	React.useEffect(() => {
+		void load();
+	}, [load]);
+
+	const toggle = React.useCallback(async (): Promise<void> => {
+		if (view === null || view.provider !== "configured") return;
+		setBusy(true);
+		const want = !view.enabled;
+		const ok = await wire.setMemory(want);
+		setBusy(false);
+		if (ok) {
+			// The write is persisted but NOT live — surface the restart-to-apply affordance, then re-read
+			// the persisted truth (the badge reflects the newly-persisted `enabled`).
+			setPendingRestart(true);
+		}
+		await load();
+	}, [view, wire, load]);
+
+	const doRestart = React.useCallback(async (): Promise<void> => {
+		setRestarting(true);
+		const ok = await wire.restartDaemon();
+		// Leave `restarting` true on success — the daemon is going down + coming back; the shell re-hydrates
+		// from live endpoints once it answers again. On failure, clear it so the button is usable again.
+		if (!ok) setRestarting(false);
+		else setPendingRestart(false);
+	}, [wire]);
+
+	const configured = view?.provider === "configured";
+	const badge = view === null ? { tone: "neutral" as const, label: "…" } : !configured ? { tone: "warning" as const, label: "provider needed" } : view.enabled ? { tone: "verified" as const, label: "on" } : { tone: "neutral" as const, label: "off" };
+
+	return (
+		<Panel
+			title="Memory Formation"
+			eyebrow="turn agent memory on · provider-gated"
+			right={
+				<Badge tone={badge.tone} mono dot>
+					{badge.label}
+				</Badge>
+			}
+			// Prominence: an accented left rail + honey-tinted border so this reads as a real, discoverable
+			// feature on the page rather than a buried toggle.
+			style={{ borderColor: "var(--honey)", borderLeftWidth: 3, boxShadow: "0 0 0 1px color-mix(in srgb, var(--honey) 22%, transparent)" }}
+		>
+			<div data-testid="memory-formation" style={{ display: "flex", flexDirection: "column", gap: 14, padding: "4px 2px" }}>
+				{/* The lede — always visible, explains the feature so it is discoverable. */}
+				<div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+					<span style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)" }}>Let your agents form long-term memory</span>
+					<span style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+						Memory formation distills each session into durable, recallable memories so your agents carry context forward across
+						conversations. It runs a model provider under the hood, so a provider must be configured before it can be enabled.
+					</span>
+				</div>
+
+				{view === null ? (
+					<div data-testid="memory-loading" style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--text-tertiary)" }}>loading…</div>
+				) : !configured ? (
+					/* Provider UNCONFIGURED — a prominent explanatory prompt; the enable action is HIDDEN. */
+					<div
+						data-testid="memory-unconfigured"
+						style={{
+							display: "flex",
+							flexDirection: "column",
+							gap: 8,
+							padding: "12px 14px",
+							background: "color-mix(in srgb, var(--honey) 8%, transparent)",
+							border: "1px solid color-mix(in srgb, var(--honey) 30%, transparent)",
+							borderRadius: "var(--radius-md)",
+						}}
+					>
+						<span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>Configure a model provider to enable memory formation</span>
+						<span style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+							Add a key for Portkey, Anthropic, OpenAI, or OpenRouter in the <strong>Provider keys</strong> (or <strong>Portkey gateway</strong>)
+							section on this page, then return here to turn memory formation on.
+						</span>
+					</div>
+				) : (
+					/* Provider CONFIGURED — the enable control + the applies-on-restart honesty. */
+					<div data-testid="memory-configured" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+						<div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+							<div style={{ display: "flex", flexDirection: "column", minWidth: 200, flex: 1 }}>
+								<span style={{ fontSize: 14, color: "var(--text-primary)" }}>Memory formation is {view.enabled ? "on" : "off"}</span>
+								<span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
+									{view.enabled
+										? "New sessions will be distilled into long-term memories."
+										: "Sessions are not distilled into long-term memories."}
+								</span>
+							</div>
+							<Button
+								variant={view.enabled ? "secondary" : "primary"}
+								size="sm"
+								disabled={busy}
+								onClick={() => void toggle()}
+								data-testid="memory-toggle"
+							>
+								{busy ? "saving…" : view.enabled ? "Turn off" : "Turn on"}
+							</Button>
+						</div>
+
+						{/* Applies-on-restart honesty — always shown when configured; the toggle is NOT live. */}
+						<div
+							data-testid="memory-restart-note"
+							style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)", flexWrap: "wrap" }}
+						>
+							<span style={{ fontSize: 12, color: "var(--text-secondary)", flex: 1, minWidth: 200 }}>
+								This preference is saved immediately, but takes effect on the <strong>next daemon restart</strong>.
+								{pendingRestart ? " Restart now to apply your change." : ""}
+							</span>
+							{restarting ? (
+								<span data-testid="memory-restarting" style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-secondary)" }}>restarting…</span>
+							) : (
+								<Button
+									variant={pendingRestart ? "primary" : "secondary"}
+									size="sm"
+									onClick={() => void doRestart()}
+									data-testid="memory-restart-button"
+								>
+									Restart now
+								</Button>
+							)}
+						</div>
+					</div>
+				)}
 			</div>
 		</Panel>
 	);
@@ -813,6 +1005,9 @@ export function SettingsPage({ wire }: PageProps): React.JSX.Element {
 				<ProviderKeysSection wire={wire} secretNames={secretNames} onSaved={() => void hydrateSecretNames()} />
 				{/* Dashboard action: turn semantic embeddings on/off (live + persisted). */}
 				<EmbeddingsSection wire={wire} />
+				{/* Dashboard action: the PROMINENT, provider-gated Memory Formation control (persisted;
+				    applies on next daemon restart). Mirrors the embeddings toggle's wire/health seam. */}
+				<MemoryFormationSection wire={wire} />
 				{/* PRD-063a: Portkey gateway section — toggle, config id, write-only key, fallback toggle. */}
 				<PortkeyGatewaySection
 					settings={vault.settings}
