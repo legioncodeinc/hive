@@ -545,7 +545,7 @@ function LifecycleConfigSection(): React.JSX.Element {
 /** The honest embeddings state (mirrors the daemon `reasons.embeddingsState`): off | warming | on | failed. */
 type EmbeddingsState = "off" | "warming" | "on" | "failed";
 
-/** How often {@link EmbeddingsSection} re-polls `/health` WHILE warming, so the badge auto-advances to on/failed. */
+/** How often {@link EmbeddingsSection} re-polls `/api/status` WHILE warming, so the badge auto-advances to on/failed. */
 const EMBED_WARMING_POLL_MS = 2500;
 
 /** Render one embeddings state → its badge tone, badge label, and whether embeddings are enabled. */
@@ -563,24 +563,27 @@ function embeddingsView(state: EmbeddingsState): { tone: "verified" | "neutral" 
 }
 
 /**
- * The embeddings toggle. Reads the HONEST live state from `wire.health()` — `reasons.embeddingsState`
- * (`off | warming | on | failed`), falling back to the coarse `reasons.embeddings` for a pre-honesty
- * daemon. Flips it through `wire.setEmbeddings(...)`, which actuates the daemon's embed supervisor
- * (spawn+warm / stop) AND persists the choice so it survives a restart. Off = lexical (BM25) recall
- * only. The state re-reads from `health()` after a toggle AND polls WHILE `warming` so the badge
- * advances from "warming…" to "on" (or "failed") on its own — never an optimistic flip.
+ * The embeddings toggle. Reads the HONEST live state from `wire.status()` — honeycomb's `/api/status`
+ * `reasons.embeddingsState` (`off | warming | on | failed`), falling back to the coarse `reasons.embeddings`
+ * for a pre-honesty daemon. `/api/status` (BFF-proxied to honeycomb) is the reliably-populated `reasons`
+ * source — hive's own `/health` is liveness only and carries NO `reasons` (which is why reading it here
+ * fail-closed to "off" regardless of the real daemon state). Flips it through `wire.setEmbeddings(...)`,
+ * which actuates the daemon's embed supervisor (spawn+warm / stop) AND persists the choice so it survives a
+ * restart. Off = lexical (BM25) recall only. The state re-reads from `status()` after a toggle AND polls
+ * WHILE `warming` so the badge advances from "warming…" to "on" (or "failed") on its own — never an
+ * optimistic flip.
  */
 export function EmbeddingsSection({ wire }: { wire: PageProps["wire"] }): React.JSX.Element {
-	// `null` while the first health read is in flight (so we never render a wrong default).
+	// `null` while the first status read is in flight (so we never render a wrong default).
 	const [state, setState] = React.useState<EmbeddingsState | null>(null);
 	const [busy, setBusy] = React.useState(false);
 
 	const load = React.useCallback(async (): Promise<void> => {
-		// Fail-soft like the rest of the dashboard: a failed/absent health read degrades to "off"
+		// Fail-soft like the rest of the dashboard: a failed/absent status read degrades to "off"
 		// rather than throwing into React (the badge shows off; the toggle still works).
 		try {
-			const health = await wire.health();
-			const reasons = health?.reasons;
+			const status = await wire.status();
+			const reasons = status?.reasons;
 			// Prefer the honest fine-grained state; fall back to the coarse enabled/disabled field.
 			const next: EmbeddingsState = reasons?.embeddingsState ?? (reasons?.embeddings === "on" ? "on" : "off");
 			setState(next);
@@ -593,7 +596,7 @@ export function EmbeddingsSection({ wire }: { wire: PageProps["wire"] }): React.
 		void load();
 	}, [load]);
 
-	// While warming, re-poll `/health` so the badge advances to "on"/"failed" without a manual refresh.
+	// While warming, re-poll `/api/status` so the badge advances to "on"/"failed" without a manual refresh.
 	React.useEffect(() => {
 		if (state !== "warming") return;
 		if (isTabHidden()) return;
@@ -654,8 +657,11 @@ export function EmbeddingsSection({ wire }: { wire: PageProps["wire"] }): React.
 // ─────────────────────────────────────────────────────────────────────────────
 // Memory Formation (dashboard action) — the PROMINENT, provider-gated control that
 // turns memory formation on/off. The SIBLING of the embeddings toggle above: it reads
-// its state from `wire.health()` `reasons.memory` (`{ enabled, provider }`) and flips it
-// through `wire.setMemory(...)` (`POST /api/actions/memory`). UNLIKE embeddings it is NOT
+// its state from `wire.status()` (honeycomb's `/api/status`) `reasons.memory` (`{ enabled,
+// provider }`) and flips it through `wire.setMemory(...)` (`POST /api/actions/memory`).
+// `/api/status` is the reliably-populated `reasons` source — hive's own `/health` is liveness
+// only and carries NO `reasons` (reading it there fail-closed to "provider needed" regardless
+// of the real daemon state). UNLIKE embeddings it is NOT
 // live — the daemon persists the choice and it takes effect on the NEXT restart, so the
 // section says so honestly and (when the portal has a restart action) offers it inline.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -671,15 +677,15 @@ interface MemoryView {
 	readonly enabled: boolean;
 }
 
-/** The safe default when `/health` omits/malforms `reasons.memory` — unconfigured + off (fail-closed). */
+/** The safe default when `/api/status` omits/malforms `reasons.memory` — unconfigured + off (fail-closed). */
 const MEMORY_DEFAULT: MemoryView = { provider: "unconfigured", enabled: false };
 
 /**
  * The PROMINENT, provider-gated Memory Formation control. Mirrors {@link EmbeddingsSection}'s data path
- * exactly — reads the HONEST live state from `wire.health()` (`reasons.memory = { enabled, provider }`,
- * fail-soft to unconfigured/off), flips it through `wire.setMemory(...)` (the `POST /api/actions/memory`
- * sibling of the embeddings action), and RE-READS `health()` after a toggle so the rendered state is the
- * persisted truth, never an optimistic flip.
+ * exactly — reads the HONEST live state from `wire.status()` (honeycomb's `/api/status`
+ * `reasons.memory = { enabled, provider }`, fail-soft to unconfigured/off), flips it through
+ * `wire.setMemory(...)` (the `POST /api/actions/memory` sibling of the embeddings action), and RE-READS
+ * `status()` after a toggle so the rendered state is the persisted truth, never an optimistic flip.
  *
  * Two states, honestly:
  *   · provider `unconfigured` → a prominent explanatory prompt ("configure a model provider…"), the enable
@@ -690,7 +696,7 @@ const MEMORY_DEFAULT: MemoryView = { provider: "unconfigured", enabled: false };
  *     restart action — an inline "Restart now" affordance (mirrors {@link SystemActionsSection}'s restart).
  */
 export function MemoryFormationSection({ wire }: { wire: PageProps["wire"] }): React.JSX.Element {
-	// `null` while the first health read is in flight (so we never render a wrong default).
+	// `null` while the first status read is in flight (so we never render a wrong default).
 	const [view, setView] = React.useState<MemoryView | null>(null);
 	const [busy, setBusy] = React.useState(false);
 	// True after a successful toggle — surfaces the "restart to apply" affordance (the choice is persisted
@@ -699,11 +705,11 @@ export function MemoryFormationSection({ wire }: { wire: PageProps["wire"] }): R
 	const [restarting, setRestarting] = React.useState(false);
 
 	const load = React.useCallback(async (): Promise<void> => {
-		// Fail-soft like the rest of the dashboard: a failed/absent health read degrades to the safe
+		// Fail-soft like the rest of the dashboard: a failed/absent status read degrades to the safe
 		// unconfigured/off default rather than throwing into React.
 		try {
-			const health = await wire.health();
-			const mem = health?.reasons?.memory;
+			const status = await wire.status();
+			const mem = status?.reasons?.memory;
 			setView(mem ? { provider: mem.provider, enabled: mem.enabled } : MEMORY_DEFAULT);
 		} catch {
 			setView(MEMORY_DEFAULT);

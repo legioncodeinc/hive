@@ -90,6 +90,10 @@ export const ENDPOINTS = Object.freeze({
 	assets: "/api/diagnostics/assets",
 	syncAction: "/api/diagnostics/sync",
 	health: "/health",
+	// honeycomb `GET /api/status` (proxied via the BFF). Unlike hive's own `/health` (liveness only),
+	// this carries the additive per-subsystem `reasons` block (honeycomb PRD-029 / #248) — the source
+	// the settings memory/embeddings controls read for the REAL daemon state.
+	status: "/api/status",
 	pollinate: "/api/diagnostics/pollinate",
 	// PRD-032c — the vault `setting`-class surface (Wave 1 `vault/api.ts`) + the names-only
 	// secrets surface (PRD-012a `secrets/api.ts`, used ONLY for presence, never a value).
@@ -1127,6 +1131,30 @@ export interface HealthProbe {
 	readonly reasons: HealthReasonsWire | null;
 }
 
+/**
+ * The honeycomb `GET /api/status` body the Hive portal reads over the BFF proxy (honeycomb
+ * PRD-029 / #248). honeycomb serves the per-subsystem `reasons` block ADDITIVELY here — the
+ * SAME shape and source as its `/health.reasons` (single-sourced in the daemon), so the two can
+ * never drift. The Hive portal's own `/health` is hive's LIVENESS only (`{status,uptimeMs,version}`)
+ * and carries NO `reasons`; `/api/status` (proxied to honeycomb) is the reliably-populated source
+ * the settings controls read.
+ *
+ * Only `reasons` is modeled — the settings controls need nothing else off this body, and every
+ * other field (version/config/providers/tenancy/catalog) stays untyped/ignored. `reasons` is
+ * OPTIONAL — absent on honeycomb's mode-gated public body or a pre-#248 daemon → the whole probe
+ * degrades to `null` reasons (fail-closed at the call site), never a throw. The unrelated keys are
+ * dropped rather than matched, so an evolving `/api/status` payload never breaks this parse.
+ */
+export const StatusBodySchema = z.object({
+	reasons: HealthReasonsSchema.optional(),
+});
+
+/** The result of an `/api/status` probe: the parsed honeycomb per-subsystem reasons (or null). */
+export interface StatusProbe {
+	/** The per-subsystem reasons (PRD-029), or `null` when the body omits/malforms them. */
+	readonly reasons: HealthReasonsWire | null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PRD-032c — the vault `setting`-class surface (`GET`/`POST /api/settings`) + the
 // curated provider→model catalog. Every field defaults so a partial/malformed payload
@@ -1948,6 +1976,13 @@ export interface WireClient {
 		input: { assetType: "skill" | "agent"; name: string; native?: string; honeycombId?: string; harness?: string },
 	): Promise<SyncActionResultWire | null>;
 	health(): Promise<HealthProbe>;
+	/**
+	 * Read the honeycomb `GET /api/status` per-subsystem `reasons` (proxied via the BFF). This is the
+	 * reliably-populated `reasons` source for the settings controls — hive's own `/health` is liveness
+	 * only and carries NO `reasons`. Degrades to `{ reasons: null }` on any non-2xx / network / malformed
+	 * / absent-reasons body (fail-closed), NEVER throws into React. Read-only, no secret in the body.
+	 */
+	status(): Promise<StatusProbe>;
 	pollinate(): Promise<PollinateAck>;
 	/**
 	 * PRD-041a — trigger the codebase-graph BUILD (`POST /api/graph/build`). The daemon runs the REAL
@@ -2514,6 +2549,25 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 				return { up, reasons };
 			} catch {
 				return { up: false, reasons: null };
+			}
+		},
+		async status(): Promise<StatusProbe> {
+			// Read honeycomb's `/api/status` (BFF-proxied) for the reliably-populated `reasons` block.
+			// Every failure mode — a non-2xx, a non-JSON body, a malformed shape, an absent `reasons`
+			// (mode-gated public body / pre-#248 daemon) — degrades to `null` reasons (fail-closed at the
+			// call site), NEVER a throw. The IO boundary is fully defended, mirroring `health()`.
+			try {
+				const res = await fetchImpl(url(ENDPOINTS.status), { headers: { accept: "application/json", ...DASHBOARD_SESSION_HEADERS } });
+				if (!res.ok) return { reasons: null };
+				try {
+					const body: unknown = await res.json();
+					const parsed = StatusBodySchema.safeParse(body);
+					return { reasons: parsed.success ? parsed.data.reasons ?? null : null };
+				} catch {
+					return { reasons: null };
+				}
+			} catch {
+				return { reasons: null };
 			}
 		},
 		async pollinate(): Promise<PollinateAck> {

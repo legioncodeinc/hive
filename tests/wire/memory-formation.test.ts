@@ -9,10 +9,13 @@ import {
 } from "../../src/dashboard/web/wire.js";
 
 // Memory Formation — the SIBLING of the embeddings toggle. The daemon exposes:
-//   1. `GET /health` → `reasons.memory = { enabled, provider: "configured" | "unconfigured" }`
+//   1. `GET /api/status` → `reasons.memory = { enabled, provider: "configured" | "unconfigured" }`
+//      (honeycomb's status, BFF-proxied — the reliably-populated `reasons` source; hive's own `/health`
+//      is liveness only and carries NO reasons, which is why the settings controls read `/api/status`).
 //   2. `POST /api/actions/memory { enabled }` → `{ ok, enabled, persisted, appliesOnRestart: true }`
-// These assert the wire schema parses both (fail-soft + back-compat) and that `setMemory` POSTs the
-// right payload to the right endpoint and only reports success when the ack echoes the requested state.
+// These assert the wire schema parses both (fail-soft + back-compat), that `wire.status()` reads the
+// `reasons` off `/api/status` fail-soft, and that `setMemory` POSTs the right payload to the right
+// endpoint and only reports success when the ack echoes the requested state.
 
 function requestUrl(input: Parameters<FetchLike>[0]): string {
 	if (typeof input === "string") return input;
@@ -59,6 +62,38 @@ describe("MemoryActionSchema — POST /api/actions/memory ack", () => {
 
 	it("FAILS the parse when ok/enabled are missing (strict, so a bad body reads as failure)", () => {
 		expect(MemoryActionSchema.safeParse({ persisted: true }).success).toBe(false);
+	});
+});
+
+describe("wire.status — GET /api/status reasons", () => {
+	it("reads reasons.memory off /api/status (the reliably-populated source, not reasons-less /health)", async () => {
+		const fetchImpl = vi.fn(async (input: Parameters<FetchLike>[0]) => {
+			if (requestUrl(input) === ENDPOINTS.status) {
+				return jsonResponse({
+					version: "x",
+					reasons: { storage: "reachable", embeddings: "on", schema: "ok", portkey: "ok", memory: { enabled: true, provider: "configured" } },
+				});
+			}
+			return jsonResponse({}, 404);
+		}) as unknown as FetchLike;
+
+		const wire = createWireClient({ fetchImpl });
+		const probe = await wire.status();
+		expect(requestUrl((fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0])).toBe(ENDPOINTS.status);
+		expect(probe.reasons?.memory).toEqual({ enabled: true, provider: "configured" });
+		expect(probe.reasons?.embeddings).toBe("on");
+	});
+
+	it("degrades to { reasons: null } on a non-2xx body (fail-closed, never a throw)", async () => {
+		const fetchImpl = vi.fn(async () => jsonResponse({}, 500)) as unknown as FetchLike;
+		const wire = createWireClient({ fetchImpl });
+		await expect(wire.status()).resolves.toEqual({ reasons: null });
+	});
+
+	it("degrades to { reasons: null } when the body omits reasons (mode-gated / pre-#248 daemon)", async () => {
+		const fetchImpl = vi.fn(async () => jsonResponse({ version: "x", config: {} })) as unknown as FetchLike;
+		const wire = createWireClient({ fetchImpl });
+		await expect(wire.status()).resolves.toEqual({ reasons: null });
 	});
 });
 
