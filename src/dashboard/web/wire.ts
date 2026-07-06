@@ -152,6 +152,10 @@ export const ENDPOINTS = Object.freeze({
 	// the guided removal (detected harnesses + the exact CLI command). No token/secret crosses any.
 	actionsLogout: "/api/actions/logout",
 	actionsEmbeddings: "/api/actions/embeddings",
+	// Memory formation on/off (`POST /api/actions/memory` with `{ enabled }`) — the SIBLING of the
+	// embeddings action. Persists the `memory.enabled` preference; the ack echoes `appliesOnRestart:
+	// true` because (unlike embeddings) the choice takes effect on the NEXT daemon restart, not live.
+	actionsMemory: "/api/actions/memory",
 	actionsRestart: "/api/actions/restart",
 	actionsUninstall: "/api/actions/uninstall",
 } as const);
@@ -1028,6 +1032,21 @@ export const ActionOkSchema = z.object({ ok: z.boolean().catch(false) });
  */
 export const EmbeddingsActionSchema = z.object({ ok: z.boolean(), enabled: z.boolean() });
 
+/**
+ * The `POST /api/actions/memory` ack: `{ ok, enabled, persisted, appliesOnRestart }` — the SIBLING of
+ * {@link EmbeddingsActionSchema}. `ok` + `enabled` are STRICT (no `.catch`) for the same reason: a
+ * malformed/partial body must FAIL the parse → `postJson` returns null → `setMemory` reports failure,
+ * so a call can never falsely "succeed" against a response that never echoed the real state. `persisted`
+ * and `appliesOnRestart` are honesty-render fields (the daemon always returns `appliesOnRestart: true`
+ * because the memory toggle takes effect on the next restart, not live); they `.catch()` a safe default.
+ */
+export const MemoryActionSchema = z.object({
+	ok: z.boolean(),
+	enabled: z.boolean(),
+	persisted: z.boolean().catch(false),
+	appliesOnRestart: z.boolean().catch(true),
+});
+
 /** The `POST /api/actions/restart` ack: `{ ok, restarting }`. */
 export const RestartActionSchema = z.object({ ok: z.boolean().catch(false), restarting: z.boolean().catch(false) });
 
@@ -1063,6 +1082,20 @@ export const HealthReasonsSchema = z.object({
 	// model is downloading vs actually working vs could-not-load) instead of a coarse `on` that only
 	// means "enabled". Optional: a pre-honesty daemon omits it → the UI falls back to `embeddings`.
 	embeddingsState: z.enum(["off", "warming", "on", "failed"]).optional().catch(undefined),
+	// Memory formation (the SIBLING of `embeddings`): the daemon reports whether memory formation is
+	// enabled AND whether a model provider is configured (memory formation needs a provider to run).
+	// `provider` gates the UI: `unconfigured` → render the "configure a provider" prompt with the enable
+	// action hidden/disabled; `configured` → render the enable control. OPTIONAL so a pre-memory daemon
+	// (no `memory` block) parses cleanly → the section falls back to its safe unconfigured/off default.
+	// `.catch(undefined)` keeps the whole `reasons` block alive if the sub-object itself is malformed;
+	// each inner field `.catch()`es to the SAFE value (off / unconfigured) so a partial body never throws.
+	memory: z
+		.object({
+			enabled: z.boolean().catch(false),
+			provider: z.enum(["configured", "unconfigured"]).catch("unconfigured"),
+		})
+		.optional()
+		.catch(undefined),
 	schema: z.enum(["ok", "missing_table"]).catch("ok"),
 	// PRD-063b (b-AC-7): the Portkey gateway reason. `.catch("off")` so a pre-063b daemon (no
 	// `portkey` field) or an unknown future state degrades to "off" (Portkey not in force) rather
@@ -2000,6 +2033,14 @@ export interface WireClient {
 	 */
 	setEmbeddings(enabled: boolean): Promise<boolean>;
 	/**
+	 * Dashboard actions — turn memory formation on/off (`POST /api/actions/memory` with `{ enabled }`).
+	 * The SIBLING of {@link setEmbeddings}: the daemon persists the `memory.enabled` preference. UNLIKE
+	 * embeddings, the choice takes effect on the NEXT daemon restart (the ack carries `appliesOnRestart:
+	 * true`), so the UI surfaces that honesty and re-reads {@link health} for the persisted truth. Returns
+	 * `true` iff accepted (2xx + echoed `enabled` matches the request); a non-2xx / network failure → false.
+	 */
+	setMemory(enabled: boolean): Promise<boolean>;
+	/**
 	 * Dashboard actions — restart the daemon (`POST /api/actions/restart`). The daemon spawns a
 	 * detached respawn helper, then gracefully shuts down; a fresh daemon comes back on the same port.
 	 * Returns `true` iff the restart was acknowledged (2xx + `{ restarting: true }`); the caller then
@@ -2677,6 +2718,13 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 			// POST the toggle; the daemon actuates the supervisor live + persists the choice. Success is a
 			// 2xx whose echoed `enabled` matches the request; a non-2xx / network failure → false.
 			const ack = await postJson(fetchImpl, url(ENDPOINTS.actionsEmbeddings), { enabled }, EmbeddingsActionSchema);
+			return ack?.ok === true && ack.enabled === enabled;
+		},
+		async setMemory(enabled: boolean): Promise<boolean> {
+			// POST the toggle (the SIBLING of setEmbeddings); the daemon PERSISTS the choice — it takes
+			// effect on the next restart (appliesOnRestart: true), not live. Success is a 2xx whose echoed
+			// `enabled` matches the request; a non-2xx / network failure → false (never a throw into React).
+			const ack = await postJson(fetchImpl, url(ENDPOINTS.actionsMemory), { enabled }, MemoryActionSchema);
 			return ack?.ok === true && ack.enabled === enabled;
 		},
 		async restartDaemon(): Promise<boolean> {
