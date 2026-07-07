@@ -164,6 +164,80 @@ flowchart TD
   - Corrected a ledger-accuracy drift: m-AC-3 had been left `IN PROGRESS` despite its underlying b-AC-1/b-AC-2 being `DONE` and fully tested; flipped to `VERIFIED` on evidence.
   - Verdict: PASS with Warnings. Shippable. Report: `hive/library/requirements/in-work/prd-001-hive-portal-daemon/qa/qa-report-prd-001-hive-portal-daemon.md`.
 
+## PRD-012 tracking: Dashboard caching layer (BFF proxy cache + client SWR)
+
+PRD-012 (index + 012a/012b) authored into `library/requirements/in-work/prd-012-dashboard-caching-layer/` and moved to in-work for this smoker run. Branch: `feature/prd-012-dashboard-caching-layer` (hive submodule). Resolved decisions (product owner, 2026-07-06): short/aggressive TTLs (2s/5s/30s), broad-prefix invalidation, in-memory cache only (no Cache-Control headers in v1), SWR does NOT subsume `useFleetTelemetry`.
+
+### AC Ledger
+
+| ID | Source | Criterion (exact) | Owner | Status |
+|---|---|---|---|---|
+| m-AC-1 | index | A repeated GET to a cached read endpoint within its TTL crosses loopback at most once | typescript-node-worker-bee | VERIFIED |
+| m-AC-2 | index | A write invalidates affected proxy cache entries synchronously before response | typescript-node-worker-bee | VERIFIED |
+| m-AC-3 | index | Two concurrent identical GETs coalesce into one loopback fetch (both layers) | typescript-node-worker-bee + react-worker-bee | VERIFIED |
+| m-AC-4 | index | Two project headers never collide in the cache | typescript-node-worker-bee | VERIFIED |
+| m-AC-5 | index | Memories→Dashboard→Memories renders instantly from SWR cache on revisit | react-worker-bee | VERIFIED |
+| m-AC-6 | index | Fail-soft posture unchanged — no new throw to React, no new 5xx | both | VERIFIED |
+| m-AC-7 | index | SSE streams, /recall POST, /setup/* remain uncached on both layers | both | VERIFIED (server hard-excluded; client convention — no SSE/SWIM surface migrated) |
+| m-AC-8 | index | Cached response never from non-loopback; redirect-pin reject never cached | typescript-node-worker-bee | VERIFIED |
+| m-AC-9 | index | proxy.test.ts passes unchanged + new tests for cache behaviors | typescript-node-worker-bee | VERIFIED |
+| m-AC-10 | index | Page tests pass with SWR-migrated pages + new SWR tests | react-worker-bee | VERIFIED |
+| a-AC-1 | 012a | Cache key = method:owner:pathname:search:projectHeader | typescript-node-worker-bee | VERIFIED |
+| a-AC-2 | 012a | Path allowlist (GET-readonly, TTLs 2s/5s/30s) | typescript-node-worker-bee | VERIFIED |
+| a-AC-3 | 012a | Write-invalidation map (broad-prefix by owner) | typescript-node-worker-bee | VERIFIED |
+| a-AC-4 | 012a | Coalescing via inflight Promise | typescript-node-worker-bee | VERIFIED |
+| a-AC-5 | 012a | X-Hive-Cache: HIT\|MISS\|BYPASS header on every proxied response | typescript-node-worker-bee | VERIFIED |
+| a-AC-6 | 012a | Size bound (default 256) with nearest-expiresAt eviction | typescript-node-worker-bee | VERIFIED (soft-cap edge case noted — inflight-only state briefly exceeds cap; Suggestion in QA report) |
+| a-AC-7 | 012a | Injectable ProxyCache + now() seam for tests | typescript-node-worker-bee | VERIFIED |
+| a-AC-8 | 012a | Hard-exclude POST /recall, /setup/*, SSE streams, /api/memories/:id | typescript-node-worker-bee | VERIFIED |
+| b-AC-1 | 012b | useSwr(key, fn, opts) hook with keepPreviousData/revalidateOnFocus/dedupeMs/refreshInterval | react-worker-bee | VERIFIED |
+| b-AC-2 | 012b | invalidateSwr(...prefixes) + clearSwrCache() mutation API | react-worker-bee | VERIFIED |
+| b-AC-3 | 012b | WireClient write methods call invalidateSwr after successful ack | react-worker-bee | VERIFIED |
+| b-AC-4 | 012b | Concurrent identical reads dedupe (inflight + cache) | react-worker-bee | VERIFIED |
+| b-AC-5 | 012b | Background-tab pause (isTabHidden) + immediate revalidate on focus | react-worker-bee | VERIFIED |
+| b-AC-6 | 012b | undefined key disables hook (no-project guard, no conditional-hook violation) | react-worker-bee | VERIFIED |
+| b-AC-7 | 012b | Page migration: dashboard/memories/harnesses/roi/graph/hive-graph/health/settings/sync/logs/projects/lifecycle reads | react-worker-bee | PARTIAL (5 of 11 pages migrated: dashboard/memories/harnesses/roi/graph; 6 deferred per PRD conservatism rule — wire invalidation covers correctness. health.tsx is useFleetTelemetry-fed, out of scope. PRD permits deferral; does not fail the PRD) |
+| b-AC-8 | 012b | useFleetTelemetry + live-tail usePoll feeds stay intact | react-worker-bee | VERIFIED |
+| b-AC-9 | 012b | swrKey helper exported from wire.ts | react-worker-bee | VERIFIED |
+| b-AC-10 | 012b | Scope switch calls clearSwrCache() | react-worker-bee | VERIFIED |
+
+### Wave plan
+
+```mermaid
+flowchart TD
+    w1a["Wave 1a: 012a BFF proxy cache (typescript-node-worker-bee)"]
+    w1b["Wave 1b: 012b client SWR hook (react-worker-bee)"]
+    w1a --> w2["Wave 2: Close-out A — security-worker-bee"]
+    w1b --> w2
+    w2 --> w3["Wave 3: Close-out B — quality-worker-bee"]
+    w3 --> ship["Ship: commit + push + PR + CI"]
+```
+
+| Wave | Bee | Model | Scope | Exit criteria |
+|---|---|---|---|---|
+| 1a | `typescript-node-worker-bee` | `claude-4.6-sonnet-medium-thinking` | `src/daemon/proxy-cache.ts` + modify `proxy.ts` + `tests/daemon/proxy-cache.test.ts` + extend `tests/daemon/proxy.test.ts` | a-AC-* DONE; `npm run typecheck && npm test` green |
+| 1b | `react-worker-bee` | `claude-4.6-sonnet-medium-thinking` | `src/dashboard/web/use-swr.ts` + wire.ts invalidation + page migrations + `tests/dashboard/use-swr.test.tsx` | b-AC-* DONE; `npm run typecheck && npm test` green |
+| 2 | `security-worker-bee` | `claude-4.6-sonnet-medium-thinking` | Cache-key privacy, SSRF/loopback guards, redirect-pin, no-auth-in-key review | clean at medium+ |
+| 3 | `quality-worker-bee` | `claude-4.6-sonnet-medium-thinking` | Verify against PRD-012 ACs | all ACs VERIFIED |
+
+**Parallelism:** Waves 1a and 1b touch disjoint files (`src/daemon/*` vs `src/dashboard/web/*`) EXCEPT `src/dashboard/web/wire.ts` (012b adds `swrKey` + invalidation calls to write methods). To avoid a conflict, 1a runs first, 1b runs after 1a is DONE. They are NOT run concurrently. Model choice justification: claude-4.6-sonnet-medium-thinking is the daily-driver (good code quality, strong instruction following, balanced cost); this is mechanical implementation against a detailed PRD, not deep reasoning or terminal-heavy CI work, so the frontier models are not warranted.
+
+### PRD-012 run log
+
+- Phase 0: PRD moved `backlog/` → `in-work/`; branch `feature/prd-012-dashboard-caching-layer` created in hive submodule; ledger initialized (29 OPEN).
+- Wave 1a: DONE (`typescript-node-worker-bee` implemented prd-012a). New `src/daemon/proxy-cache.ts` (`ProxyCache` + in-memory impl + `CACHEABLE_PATHS` allowlist with exact TTLs + `WRITE_INVALIDATIONS` 16-row map + `computeCacheKey` + `isHardExcluded`); modified `src/daemon/proxy.ts` (GET+cacheable → lookup/fill/coalesce/HIT with `X-Hive-Cache` header; non-GET 2xx → invalidate before return; cached+served responses are distinct `.clone()`s; loopback guard + redirect pin + header stripping + fail-soft 502 unchanged). New `tests/daemon/proxy-cache.test.ts` (19 tests); extended `tests/daemon/proxy.test.ts` (5 existing + 10 new). Orchestrator verified: typecheck clean, 47/47 in the touched suites (proxy-cache 19 + proxy 15 + server 13), build succeeds.
+- Wave 1b: DONE (`react-worker-bee` implemented prd-012b). New `src/dashboard/web/use-swr.ts` (dependency-free: React + `isTabHidden` only; `useSwr` + `invalidateSwr` + `clearSwrCache` + `swrKey` + module-level SwrCache with inflight dedupe + subscriber notification); new `tests/dashboard/use-swr.test.tsx` (8 tests). Modified `wire.ts` (re-export `swrKey`; 17 write methods call `invalidateSwr`/`clearSwrCache` after successful ack, mirroring server-side map; no read signatures changed); `scope-context.tsx` (`clearSwrCache()` on `commitScope`); migrated 5 pages to `useSwr`: dashboard (kpis/sessions/rules/skills), memories (list+detail), harnesses (status+detail), roi (view+trend, billing 60s), graph (8s refresh). Deferred 6 pages per conservatism rule (health feeds off useFleetTelemetry not wire; hive-graph/settings/sync/logs/projects/lifecycle — flagged, wire invalidation already covers correctness). `useFleetTelemetry` + all live-tail `usePoll` feeds untouched.
+- Wave 1a/1b verification (orchestrator, independent of the Bees' self-reports): `npm run typecheck` clean; full suite via JSON reporter = **618 tests, 616 passed, 2 failed**; the 2 failures (`tests/daemon/installer/funnel-telemetry.test.ts`, an extra `login_completed` telemetry event) are **pre-existing on clean `main`** — confirmed via `git stash` isolation (failures reproduce identically with zero PRD-012 changes). NOT a PRD-012 regression. `npm run build` succeeds.
+- AC status after Waves 1a/1b: all a-AC-* DONE (8/8); b-AC-1..6,9,10,8 DONE; b-AC-7 DONE for the 5 migrated core pages (6 pages deferred per conservatism rule — wire invalidation already covers their correctness, deferral is a UX optimization gap not a correctness gap). Both Bees' claims about the funnel-telemetry failures' cause were wrong (one said "pre-existing unrelated," one blamed the cache) — orchestrator stash-isolation settled it.
+- Close-out A: DONE (`security-worker-bee`). All 10 PRD-012-specific threats CLEAN with code citations; zero Critical/High/Medium/Low findings, zero remediations. INFO future-risk notes (auth-excluded-from-key under team/hybrid mode; per-tab SWR no cross-tab sync) are both already recorded as PRD open questions/non-goals. Gate green modulo the 2 pre-existing `funnel-telemetry` failures. Report: `qa/security-report.md`.
+- Close-out B: DONE (`quality-worker-bee` audit of PRD-012 against index + 012a/012b ACs).
+  - Verified 28 of 29 ACs PASS (10/10 m-AC, 8/8 a-AC, 10/10 b-AC except b-AC-7) with direct file:line + test citations; b-AC-7 PARTIAL (5 of 11 migration-target pages migrated to `useSwr`; 6 deferred per the PRD's conservatism rule — wire invalidation covers correctness, deferral is a UX gap not a correctness gap, and the PRD explicitly permits it; health.tsx is useFleetTelemetry-fed and correctly out of scope per b-AC-8). Ordering correct: Close-out A ran first and is CLEAN.
+  - 0 Critical findings. 2 Warnings: (1) the b-AC-7 deferred-page UX gap (hive-graph/settings/sync/logs/projects/lifecycle-panel — recommend a follow-up PRD-012b-continued); (2) a soft-cap edge case where an all-inflight cache briefly exceeds 256 (deliberate, documented in code, non-blocking). 2 Suggestions (O(n) eviction scan is fine at cap 256; `setNectarBrooding` one-tab indentation drift in the diff).
+  - Regression gate (own run): `npm run typecheck` clean; `npm run build` succeeds; `npm test` = 616 passed / 2 failed, the 2 failures being the pre-existing out-of-scope `funnel-telemetry` cases — **confirmed pre-existing via `git stash` isolation** (fail identically on the clean base with zero PRD-012 changes). PRD-012-specific suites all green: proxy-cache 19, proxy 15, use-swr 8, copy-map 3, and all 34 dashboard files (222 tests) including the 5 migrated pages' suites and `use-fleet-telemetry-hook.test.tsx` (b-AC-8 intact).
+  - Verdict: **PASS WITH WARNINGS**. Shippable. Report: `qa/qa-report-prd-012-dashboard-caching-layer.md`.
+
+---
+
 ## PRD-002 run log
 
 - Implementation: DONE (branch `feature/prd-002-portal-readiness-splash`, based on `feature/prd-001-hive-portal-daemon`; uncommitted working tree). Added `src/shared/fleet-readiness.ts` (shared `isFleetReady()`/`V1_REQUIRED_PEERS`, browser-safe), `src/daemon/fleet-status.ts` (`GET /api/fleet-status` fetch/parse/fail-soft), `src/dashboard/web/readiness-splash.tsx` (`ReadinessSplash`), and rewired `src/dashboard/web/main.tsx` to render `<ReadinessSplash>` in place of the direct `<SetupGate>` mount. Deleted a duplicate `src/dashboard/web/fleet-readiness.ts` in favor of the shared module.
