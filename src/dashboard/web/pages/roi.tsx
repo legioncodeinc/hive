@@ -49,8 +49,10 @@ import { EMPTY_ROI_TREND, EMPTY_ROI_VIEW } from "../../contracts.js";
 import { Badge, Button, type BadgeTone } from "../primitives.js";
 import { Panel } from "../panels.js";
 import type { PageProps } from "../page-frame.js";
-import { PageFrame, usePoll } from "../page-frame.js";
+import { PageFrame } from "../page-frame.js";
 import { useScope } from "../scope-context.js";
+import { useSwr } from "../use-swr.js";
+import { ENDPOINTS, swrKey } from "../wire.js";
 import { RoiTrendChart } from "./roi-chart.js";
 
 /** The Settings hash route the not-authenticated gate sends the operator to (e-AC-7). */
@@ -671,47 +673,32 @@ export function RoiPage({ wire }: PageProps): React.JSX.Element {
 	const { scope } = useScope();
 	const projectId = scope.project;
 
-	const [view, setView] = React.useState<RoiView>(EMPTY_ROI_VIEW);
-	const [trend, setTrend] = React.useState<RoiTrendView>(EMPTY_ROI_TREND);
 	const [range, setRange] = React.useState<string>(DEFAULT_RANGE);
 	const [retrying, setRetrying] = React.useState(false);
 
-	// Hydrate the composite view. Both poll loops call the SAME read (the daemon assembles billing +
-	// token into one view-model); the two cadences exist per the page-frame idiom — a slow billing loop
-	// and a faster token loop — so a token change surfaces sooner than the ~60s billing refresh.
-	const loadView = React.useCallback(async (): Promise<void> => {
-		const next = await wire.roi(projectId);
-		setView(next);
-	}, [wire, projectId]);
-
-	// Two usePoll loops (e-AC: page-frame idiom): billing (~60s) + token (per-session/faster).
-	usePoll(loadView, BILLING_POLL_MS);
-	usePoll(loadView, TOKEN_POLL_MS);
-
-	// The trend needs an EXPLICIT fetch-on-change effect: usePoll only re-arms on `ms`, so a range change
-	// would not refetch under it. This effect refetches whenever the range (or scope/project) changes.
-	React.useEffect(() => {
-		let alive = true;
-		void (async () => {
-			const next = await wire.roiTrend(range, projectId);
-			if (alive) setTrend(next);
-		})();
-		return () => {
-			alive = false;
-		};
-	}, [wire, range, projectId]);
+	// PRD-012b: the composite view + trend are now SWR hooks. The billing ~60s poll becomes the view
+	// hook's `refreshInterval` (one cadence — the former faster token loop is subsumed by SWR's
+	// focus-revalidation). The trend key encodes `range` so a range change naturally refetches (the
+	// former explicit fetch-on-change effect is no longer needed).
+	const { data: view = EMPTY_ROI_VIEW, mutate: mutateView } = useSwr<RoiView>(
+		swrKey(ENDPOINTS.roi, projectId),
+		async () => wire.roi(projectId),
+		{ refreshInterval: BILLING_POLL_MS },
+	);
+	const { data: trend = EMPTY_ROI_TREND, mutate: mutateTrend } = useSwr<RoiTrendView>(
+		swrKey(`${ENDPOINTS.roiTrend}?range=${range}`, projectId),
+		async () => wire.roiTrend(range, projectId),
+	);
 
 	// The scoped Retry (e-AC-6): re-read the view (and the trend) when billing was unreachable.
 	const onRetry = React.useCallback(async (): Promise<void> => {
 		setRetrying(true);
 		try {
-			await loadView();
-			const t = await wire.roiTrend(range, projectId);
-			setTrend(t);
+			await Promise.all([mutateView(), mutateTrend()]);
 		} finally {
 			setRetrying(false);
 		}
-	}, [loadView, wire, range, projectId]);
+	}, [mutateView, mutateTrend]);
 
 	// e-AC-7: the entire ledger is gated when the savings read is unauthenticated (no credentials). Only a
 	// redacted status renders — no figure, no token, no secret.

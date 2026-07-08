@@ -29,9 +29,12 @@ import { LiveLog, RulesPanel, SessionsPanel, SkillSyncPanel } from "../panels.js
 import { HarnessStrip } from "../harness-strip.js";
 import { useScope } from "../scope-context.js";
 import { usePoll, type PageProps } from "../page-frame.js";
+import { useSwr } from "../use-swr.js";
 import {
 	EMPTY_KPIS,
+	ENDPOINTS,
 	formatLogLine,
+	swrKey,
 	type HarnessStatusWire,
 	type HealthReasonsWire,
 	type KpisWire,
@@ -168,13 +171,28 @@ export function DashboardPage({ wire, pollinating = false, healthReasons = null 
 	// project-bearing counts (Memories / Turns / Est. savings). Absent → the workspace-wide view.
 	const { scope } = useScope();
 
-	// ── view state (hydrated from the shared wire) ──
+	// ── view state (hydrated via useSwr — stale-while-revalidate, PRD-012b) ──
 	// `healthReasons` is no longer polled here — the SHELL owns the single /health poll and passes the
 	// reasons down via PageProps (the former double-poll is gone). It still feeds the subsystem strip.
-	const [kpis, setKpis] = React.useState<KpisWire>(EMPTY_KPIS);
-	const [sessions, setSessions] = React.useState<readonly SessionRowWire[]>([]);
-	const [rules, setRules] = React.useState<readonly RuleRowWire[]>([]);
-	const [skills, setSkills] = React.useState<readonly SkillRowWire[]>([]);
+	// The four reads below replace the former `hydrate` Promise.all bundle (dashboard.tsx ≤012a). The
+	// SWR key includes `scope.project` so a project switch naturally re-fetches without a stale-overwrite
+	// guard (the former `hydrateSeqRef` is no longer needed — the key change handles invalidation).
+	const { data: kpis = EMPTY_KPIS } = useSwr<KpisWire>(
+		swrKey(ENDPOINTS.kpis, scope.project),
+		async () => wire.kpis(scope.project),
+	);
+	const { data: sessions = [] } = useSwr<readonly SessionRowWire[]>(
+		swrKey(ENDPOINTS.sessions, scope.project),
+		async () => wire.sessions(),
+	);
+	const { data: rules = [] } = useSwr<readonly RuleRowWire[]>(
+		swrKey(ENDPOINTS.rules, scope.project),
+		async () => wire.rules(),
+	);
+	const { data: skills = [] } = useSwr<readonly SkillRowWire[]>(
+		swrKey(ENDPOINTS.skills, scope.project),
+		async () => wire.skills(),
+	);
 
 	// ── harness-area state (038c) — the PRD-039 registry/telemetry backbone (`wire.harnesses()`) ──
 	const [harnesses, setHarnesses] = React.useState<readonly HarnessStatusWire[]>([]);
@@ -195,40 +213,6 @@ export function DashboardPage({ wire, pollinating = false, healthReasons = null 
 	const pushNote = React.useCallback((text: string): void => {
 		setNotes((prev) => [`${clockPrefix()}  ${text}`, ...prev].slice(0, MAX_LOG_LINES));
 	}, []);
-
-	// PRD-049e: a monotonic request token guarding `hydrate` against a stale-overwrite race. Since the
-	// hydrate effect now re-runs on `scope.project` change, a SLOWER response for the PREVIOUS project can
-	// resolve AFTER the newer selection's and repaint the band with stale data. Each hydrate bumps this and
-	// captures its own token; only the LATEST run commits its state (older in-flight runs bail post-await).
-	const hydrateSeqRef = React.useRef(0);
-
-	/**
-	 * Hydrate the diagnostics views from the live endpoints (AC-2), in ONE batched `Promise.all`
-	 * round-trip (parity with the old app). Provider/model/pollinating settings live on the SETTINGS
-	 * page (not the home) — the dashboard no longer renders the settings panel, so it hydrates only the
-	 * KPI band, recall, and the below-the-fold diagnostics grid it actually shows.
-	 */
-	const hydrate = React.useCallback(async (): Promise<void> => {
-		const seq = ++hydrateSeqRef.current;
-		const [k, sess, r, sk] = await Promise.all([
-			wire.kpis(scope.project),
-			wire.sessions(),
-			wire.rules(),
-			wire.skills(),
-		]);
-		// A newer hydrate (a faster project switch) superseded this one → drop this stale result wholesale
-		// so the band never flickers back to the previous project's numbers.
-		if (seq !== hydrateSeqRef.current) return;
-		setKpis(k);
-		setSessions(sess);
-		setRules(r);
-		setSkills(sk);
-	}, [wire, scope.project]);
-
-	// AC-2: hydrate once on mount.
-	React.useEffect(() => {
-		void hydrate();
-	}, [hydrate]);
 
 	// Defer the below-the-fold harness area to a SECOND paint so the KPI band + recall (what the operator
 	// looks at) are interactive first. The flag flips in a passive effect (after the first commit paints),

@@ -25,9 +25,10 @@ import React from "react";
 import { Badge, Kpi } from "../primitives.js";
 import { AGENT_DOT, AGENT_DOT_FALLBACK, LiveLog, Panel } from "../panels.js";
 import type { PageProps } from "../page-frame.js";
-import { PageFrame, usePoll } from "../page-frame.js";
+import { PageFrame } from "../page-frame.js";
 import { usePathRoute } from "../router.js";
-import { formatLogLine, type HarnessCapabilitiesWire, type HarnessStatusWire, type LogRecordWire } from "../wire.js";
+import { useSwr } from "../use-swr.js";
+import { ENDPOINTS, formatLogLine, swrKey, type HarnessCapabilitiesWire, type HarnessStatusWire, type LogRecordWire } from "../wire.js";
 
 /** How often the overview/detail re-hydrate the 039a status (ms) — light refresh, stopped on unmount. */
 const STATUS_POLL_MS = 5000;
@@ -382,23 +383,27 @@ export function HarnessesPage({ wire }: PageProps): React.JSX.Element {
 	const { route, navigate } = usePathRoute();
 	const detailName = harnessNameFromRoute(route);
 
-	const [harnesses, setHarnesses] = React.useState<readonly HarnessStatusWire[]>([]);
-	const [lines, setLines] = React.useState<readonly string[]>([]);
+	// PRD-012b: the six statuses + the detail logs read are now SWR hooks with interval refresh (the
+	// page's former usePoll calls become SWR `refreshInterval`). The status hook is always active; the
+	// detail-logs hook is disabled (undefined key) on the overview route so it fetches nothing.
+	const { data: harnesses = [] } = useSwr<readonly HarnessStatusWire[]>(
+		swrKey(ENDPOINTS.harnesses),
+		async () => wire.harnesses(),
+		{ refreshInterval: STATUS_POLL_MS },
+	);
 
-	// Hydrate the six statuses (the backbone). A light poll keeps last-seen fresh; stops on unmount.
-	usePoll(async () => setHarnesses(await wire.harnesses()), STATUS_POLL_MS);
-
-	// On a detail route, poll /api/logs and filter the records to this harness (client-side — c-OQ-1).
-	// On the overview route `detailName` is null, so this poll is inert (it sets an empty feed).
-	usePoll(async () => {
-		if (detailName === null) {
-			setLines([]);
-			return;
-		}
-		const records = await wire.logs(MAX_STREAM_LINES * 4);
-		const filtered = filterRecordsForHarness(records, detailName);
-		setLines(filtered.slice(-MAX_STREAM_LINES).reverse().map(formatLogLine));
-	}, STREAM_POLL_MS);
+	// On a detail route, read /api/logs and filter the records to this harness (client-side — c-OQ-1).
+	// On the overview route `detailName` is null, so the key is undefined → the hook is disabled (no fetch).
+	const logsKey = detailName !== null ? swrKey(`${ENDPOINTS.logs}?h=${detailName}`) : undefined;
+	const { data: records = [] } = useSwr<readonly LogRecordWire[]>(
+		logsKey,
+		async () => wire.logs(MAX_STREAM_LINES * 4),
+		{ refreshInterval: STREAM_POLL_MS },
+	);
+	const lines = React.useMemo<readonly string[]>(() => {
+		if (detailName === null) return [];
+		return filterRecordsForHarness(records, detailName).slice(-MAX_STREAM_LINES).reverse().map(formatLogLine);
+	}, [records, detailName]);
 
 	const onOpen = React.useCallback((name: string): void => navigate(`/harnesses/${name}`), [navigate]);
 	const onBack = React.useCallback((): void => navigate("/harnesses"), [navigate]);

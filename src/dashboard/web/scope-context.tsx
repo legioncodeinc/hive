@@ -26,6 +26,10 @@
 import React from "react";
 
 import type { ScopeOrgWire, ScopeProjectWire, ScopeWorkspaceWire, SetupTenancyResultWire, WireClient } from "./wire.js";
+// PRD-012b: clear the SWR cache on a scope switch so every scoped read re-fetches against the new
+// org/workspace/project (all scoped keys include the project id, but an org switch re-mints the token
+// so even unscoped reads are potentially different — clearSwrCache is the safe broad reset).
+import { clearSwrCache } from "./use-swr.js";
 
 /**
  * The active scope the dashboard reads (the 049e contract). `org` is always present; `workspace`
@@ -282,6 +286,10 @@ export function ScopeProvider({ wire, children }: { wire: WireClient; children: 
 	const commitScope = React.useCallback((next: DashboardScope): void => {
 		setScopeState(next);
 		persistScope(next);
+		// PRD-012b: every scope switch potentially changes every scoped read (org switch re-mints the
+		// token; workspace/project switch changes the project header). Clear the SWR cache so the next
+		// read reflects the new scope — no stale cross-scope data renders for one frame.
+		clearSwrCache();
 	}, []);
 
 	/** Reconcile `current` against `orgs` + the REAL active tenancy; persist + commit only on an actual correction. */

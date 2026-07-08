@@ -32,6 +32,7 @@ import { Badge, Button, Input, MemoryCard } from "../primitives.js";
 import { LifecycleHealthPanel } from "./lifecycle-panel.js";
 import { isTabHidden, PageFrame, type PageProps } from "../page-frame.js";
 import { useScope } from "../scope-context.js";
+import { useSwr } from "../use-swr.js";
 import { NeedsProjectSelection } from "../needs-project.js";
 import {
 	DEFAULT_MEMORY_TYPE,
@@ -39,7 +40,9 @@ import {
 	MEMORY_TYPES,
 } from "../../../shared/memory-types.js";
 import {
+	ENDPOINTS,
 	formatLogLine,
+	swrKey,
 	type CompactSummaryWire,
 	type PollinateAck,
 	type MemoryRecordWire,
@@ -561,10 +564,20 @@ export function MemoriesPage({ wire, pollinating = false }: PageProps): React.JS
 	// the page shows ONLY that project's memories; `undefined` → the needs-selection state (49e-AC-5).
 	const { scope } = useScope();
 	const project = scope.project;
-	// ── browse list (040a) ──
-	const [records, setRecords] = React.useState<readonly MemoryRecordWire[]>([]);
+	// ── browse list (040a) — via useSwr (PRD-012b). The key encodes both the limit (Load more) and the
+	// selected project (re-scope on switch). `undefined` project disables the hook (no fetch, no
+	// conditional-hook violation). After a write (add/modify/forget/compact), `wire` calls
+	// `invalidateSwr("/api/memories", ...)` which auto-revalidates this hook — so the explicit `reList`
+	// calls are replaced by `mutate()` (a no-op revalidate trigger that's already implicit via the wire).
 	const [limit, setLimit] = React.useState(LIST_STEP);
-	const [hydrated, setHydrated] = React.useState(false);
+	const listKey = project !== undefined ? swrKey(`${ENDPOINTS.memories}?limit=${limit}`, project) : undefined;
+	const { data: records = [], loading: listLoading, mutate: mutateList } = useSwr<readonly MemoryRecordWire[]>(
+		listKey,
+		async () => wire.listMemories(limit, project),
+	);
+	// `hydrated` = the first load has resolved (replaces the former `hydrated` useState flag). After the
+	// first resolve, keepPreviousData keeps the prior data rendered during revalidations (no empty flash).
+	const hydrated = !listLoading;
 
 	// ── search (040a) ──
 	const [query, setQuery] = React.useState("");
@@ -582,29 +595,11 @@ export function MemoriesPage({ wire, pollinating = false }: PageProps): React.JS
 	const [watching, setWatching] = React.useState(false);
 	const [watchLines, setWatchLines] = React.useState<readonly string[]>([]);
 
-	/** Re-list the browse corpus from the daemon (the persisted truth), narrowed to the selected project. */
-	const reList = React.useCallback(
-		async (nextLimit: number): Promise<MemoryRecordWire[]> => {
-			// 49e-AC-2: stamp the selected project so the list re-scopes; no project → empty (49e-AC-5).
-			if (project === undefined) {
-				setRecords([]);
-				setHydrated(true);
-				return [];
-			}
-			const rows = await wire.listMemories(nextLimit, project);
-			setRecords(rows);
-			setHydrated(true);
-			return rows;
-		},
-		[wire, project],
-	);
-
-	// 040a-AC-1: hydrate the list on mount + whenever the limit bumps (load more) OR the selected
-	// project changes (49e-AC-2 re-scope on the next render). `reList` is keyed on `project` so the
-	// dependency is the callback identity.
-	React.useEffect(() => {
-		void reList(limit);
-	}, [reList, limit]);
+	/** Re-list the browse corpus after a write (the wire's invalidateSwr already dropped the cache;
+	 * `mutateList()` is the explicit re-read-after-write trigger the PRD preserves — 040b-AC-4). */
+	const reList = React.useCallback(async (): Promise<void> => {
+		await mutateList();
+	}, [mutateList]);
 
 	// 040c-AC-3: Watch — poll `/api/logs` filtered to memory routes; stop clears the interval; cleanup on unmount.
 	React.useEffect(() => {
@@ -705,10 +700,10 @@ export function MemoriesPage({ wire, pollinating = false }: PageProps): React.JS
 			const persisted = await rereadUntil(id, (rec) => rec.content === content || rec.version > 0);
 			if (persisted !== null) setDetail(persisted);
 			// Refresh the browse list so the row preview reflects the new persisted content.
-			void reList(limit);
+			void reList();
 			return "saved · new version";
 		},
-		[wire, rereadUntil, reList, limit],
+		[wire, rereadUntil, reList],
 	);
 
 	// ── forget (040b-OQ-1) ──
@@ -718,10 +713,10 @@ export function MemoriesPage({ wire, pollinating = false }: PageProps): React.JS
 			if (ack === null) return null;
 			// Re-read: a forgotten memory reads as null (tombstone). Close the detail + re-list.
 			closeDetail();
-			void reList(limit);
+			void reList();
 			return "forgotten";
 		},
-		[wire, closeDetail, reList, limit],
+		[wire, closeDetail, reList],
 	);
 
 	// ── add (040b-AC-1) ──
@@ -730,10 +725,10 @@ export function MemoriesPage({ wire, pollinating = false }: PageProps): React.JS
 			const ack = await wire.addMemory({ content, ...(type !== "" ? { type } : {}) });
 			if (ack === null) return null;
 			// RE-READ, never optimistic: re-list so the new memory appears from the daemon's truth.
-			await reList(limit);
+			await reList();
 			return ack.id !== null ? `stored · ${ack.id}` : `stored · ${ack.action || "ok"}`;
 		},
-		[wire, reList, limit],
+		[wire, reList],
 	);
 
 	// ── compact + pollinate (040c) ──

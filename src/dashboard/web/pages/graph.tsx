@@ -34,10 +34,11 @@ import { layout, neighborsOf, splitNeighbors, type Point } from "../graph-layout
 import { KIND_COLOR, KIND_COLOR_FALLBACK } from "../panels.js";
 import { Badge } from "../primitives.js";
 import type { PageProps } from "../page-frame.js";
-import { isTabHidden, PageFrame } from "../page-frame.js";
+import { PageFrame } from "../page-frame.js";
 import { useScope } from "../scope-context.js";
+import { useSwr } from "../use-swr.js";
 import { NeedsProjectSelection } from "../needs-project.js";
-import { capGraphForRender, EMPTY_GRAPH, MAX_RENDER_NODES, type GraphWire } from "../wire.js";
+import { capGraphForRender, EMPTY_GRAPH, ENDPOINTS, MAX_RENDER_NODES, swrKey, type GraphWire } from "../wire.js";
 
 /** How often the page re-hydrates the memory graph (ms). Light refresh, stopped on unmount. */
 const GRAPH_POLL_MS = 8000;
@@ -437,36 +438,20 @@ export function GraphPage({ wire }: PageProps): React.JSX.Element {
 	// switch re-queries for the new project on the NEXT render) and gating the needs-selection state.
 	const { scope } = useScope();
 	const project = scope.project;
-	const [graph, setGraph] = React.useState<GraphWire>(EMPTY_GRAPH);
 	const [selected, setSelected] = React.useState<string | null>(null);
 	const [hiddenKinds, setHiddenKinds] = React.useState<ReadonlySet<string>>(new Set());
 	const [search, setSearch] = React.useState("");
 	const [transform, setTransform] = React.useState<ViewTransform>(IDENTITY_TRANSFORM);
 
-	// Hydrate the MEMORY graph. Fetches immediately, then a light poll keeps it fresh. A failure degrades
-	// to EMPTY_GRAPH (the wire is fail-soft) → the empty state. An `alive` guard prevents a late-resolving
-	// fetch from updating after unmount/scope-switch.
-	React.useEffect(() => {
-		// 49e-AC-5: with NO project selected, do not fetch (and below we render the needs-selection
-		// state) — never show another project's graph. The effect is keyed on `project` so a scope
-		// switch re-fetches for the new project on the next render (49e-AC-2).
-		if (project === undefined) {
-			setGraph(EMPTY_GRAPH);
-			return;
-		}
-		let alive = true;
-		const tick = async (): Promise<void> => {
-			if (!alive || isTabHidden()) return; // background-tab pause: no graph poll while hidden
-			const next = await wire.memoryGraph(project);
-			if (alive) setGraph(next);
-		};
-		void tick();
-		const id = setInterval(() => void tick(), GRAPH_POLL_MS);
-		return () => {
-			alive = false;
-			clearInterval(id);
-		};
-	}, [wire, project]);
+	// PRD-012b: the memory graph is now an SWR read with interval refresh. The key encodes the project
+	// (re-scopes on switch). `undefined` project disables the hook (no fetch, no conditional-hook
+	// violation). The former `alive`/`isTabHidden` guard is now the hook's built-in background-tab pause.
+	const graphKey = project !== undefined ? swrKey(ENDPOINTS.memoryGraph, project) : undefined;
+	const { data: graph = EMPTY_GRAPH } = useSwr<GraphWire>(
+		graphKey,
+		async () => wire.memoryGraph(project),
+		{ refreshInterval: GRAPH_POLL_MS },
+	);
 
 	const kinds = React.useMemo(() => distinctKinds(graph), [graph]);
 	// The visible sub-graph after the kind filter (D-5).

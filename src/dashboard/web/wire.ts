@@ -30,6 +30,13 @@ import { projectionToGraphWire, type PortableProjectionWire, type ProjectionDeri
 // The onboarding step's enumerate/select/create calls go through `onboarding/tenancy-client.ts`
 // exclusively (ts-AC-11), deliberately NOT duplicated here, so the two clients cannot drift.
 import { SetupTenancySchema, UNSELECTED_SETUP_TENANCY, type SetupTenancyWire } from "./onboarding/tenancy-contracts.js";
+// PRD-012b: the SWR cache invalidation helpers. The write methods below call `invalidateSwr` after a
+// successful ack so the next read reflects the write — mirroring the server-side WRITE_INVALIDATIONS
+// map (prd-012a). Re-export `swrKey` so pages build cache keys through one typed helper. `clearSwrCache`
+// is aliased to avoid a name collision with the scope-context's own clear-on-commit call.
+import { clearSwrCache as clearSwrCacheFn, invalidateSwr } from "./use-swr.js";
+
+export { swrKey } from "./use-swr.js";
 
 export type { SetupTenancyWire };
 export { UNSELECTED_SETUP_TENANCY };
@@ -2396,24 +2403,33 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 			const body: Record<string, string> = { content: input.content };
 			if (input.type !== undefined) body.type = input.type;
 			if (input.agentId !== undefined) body.agentId = input.agentId;
-			return postJson(fetchImpl, url(ENDPOINTS.memories), body, StoreAckSchema);
+			const ack = await postJson(fetchImpl, url(ENDPOINTS.memories), body, StoreAckSchema);
+			// PRD-012b: invalidate the memories list + kpis after a successful store (mirrors proxy-cache).
+			if (ack !== null) invalidateSwr(ENDPOINTS.memories, ENDPOINTS.kpis);
+			return ack;
 		},
 		async modifyMemory(id: string, input: { content: string; reason: string; agentId?: string }): Promise<WriteAckWire | null> {
 			// POST content + the REQUIRED reason → a version-bumped, audited edit (never a hard-update).
 			// A non-2xx (e.g. an empty reason the client should have caught) → null; the caller re-reads.
 			const body: Record<string, string> = { content: input.content, reason: input.reason };
 			if (input.agentId !== undefined) body.agentId = input.agentId;
-			return postJson(fetchImpl, url(`${ENDPOINTS.memories}/${encodeURIComponent(id)}/modify`), body, WriteAckSchema);
+			const ack = await postJson(fetchImpl, url(`${ENDPOINTS.memories}/${encodeURIComponent(id)}/modify`), body, WriteAckSchema);
+			if (ack !== null) invalidateSwr(ENDPOINTS.memories, ENDPOINTS.kpis);
+			return ack;
 		},
 		async forgetMemory(id: string, input: { reason: string }): Promise<WriteAckWire | null> {
 			// POST the required reason → a reason-gated soft-delete (a tombstone version). null on failure.
-			return postJson(fetchImpl, url(`${ENDPOINTS.memories}/${encodeURIComponent(id)}/forget`), { reason: input.reason }, WriteAckSchema);
+			const ack = await postJson(fetchImpl, url(`${ENDPOINTS.memories}/${encodeURIComponent(id)}/forget`), { reason: input.reason }, WriteAckSchema);
+			if (ack !== null) invalidateSwr(ENDPOINTS.memories, ENDPOINTS.kpis);
+			return ack;
 		},
 		async compact(table?: string): Promise<CompactSummaryWire | null> {
 			// POST the optional `{ table }` selector (omitted ⇒ all allow-listed tables). The daemon
 			// matches it against its allow-list, so the page sends only a known name — no attacker SQL.
 			const body = table !== undefined && table !== "" ? { table } : {};
-			return postJson(fetchImpl, url(ENDPOINTS.compact), body, CompactSummarySchema);
+			const ack = await postJson(fetchImpl, url(ENDPOINTS.compact), body, CompactSummarySchema);
+			if (ack !== null) invalidateSwr(ENDPOINTS.memories, ENDPOINTS.kpis);
+			return ack;
 		},
 		async lifecycleConflicts(status = "open"): Promise<LifecycleConflictWire[]> {
 			// GET the scoped conflict queue; a malformed/absent body degrades to []. `status` is
@@ -2439,7 +2455,12 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 				});
 				// 2xx → accepted; any non-2xx (400 invalid verdict, 404 not found, 409 already resolved)
 				// reads as "not accepted" so the caller re-reads + polls rather than optimistically flipping.
-				return res.ok;
+				if (res.ok) {
+					// PRD-012b: a resolved conflict changes the conflict queue + the stale-ref list + kpis.
+					invalidateSwr(ENDPOINTS.lifecycleConflicts, ENDPOINTS.lifecycleStaleRefs, ENDPOINTS.kpis);
+					return true;
+				}
+				return false;
 			} catch {
 				return false;
 			}
@@ -2526,7 +2547,10 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 			if (input.native !== undefined) body.native = input.native;
 			if (input.honeycombId !== undefined && input.honeycombId !== "") body.honeycombId = input.honeycombId;
 			if (input.harness !== undefined && input.harness !== "") body.harness = input.harness;
-			return postJson(fetchImpl, url(`${ENDPOINTS.syncAction}/${action}`), body, SyncActionResultSchema);
+			const ack = await postJson(fetchImpl, url(`${ENDPOINTS.syncAction}/${action}`), body, SyncActionResultSchema);
+			// PRD-012b: a sync action changes skills + assets + kpis (mirrors proxy-cache).
+			if (ack !== null) invalidateSwr(ENDPOINTS.skills, ENDPOINTS.assets, ENDPOINTS.kpis);
+			return ack;
 		},
 		async health(): Promise<HealthProbe> {
 			try {
@@ -2574,6 +2598,8 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 			try {
 				const res = await fetchImpl(url(ENDPOINTS.pollinate), { method: "POST", headers: { ...DASHBOARD_SESSION_HEADERS } });
 				const parsed = PollinateAckSchema.safeParse(await res.json());
+				// PRD-012b: a successful pollinate changes skills + kpis + assets (mirrors proxy-cache).
+				if (parsed.success && parsed.data.triggered) invalidateSwr(ENDPOINTS.skills, ENDPOINTS.kpis, ENDPOINTS.assets);
 				return parsed.success ? parsed.data : { triggered: false, status: "skipped", reason: "unavailable" };
 			} catch {
 				return { triggered: false, status: "skipped", reason: "unavailable" };
@@ -2594,6 +2620,8 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 				});
 				if (!res.ok) return FAILED_BUILD_GRAPH_ACK;
 				const parsed = BuildGraphAckSchema.safeParse(await res.json());
+				// PRD-012b: a successful build changes the graph read (mirrors proxy-cache).
+				if (parsed.success && parsed.data.built) invalidateSwr(ENDPOINTS.graph);
 				return parsed.success ? parsed.data : FAILED_BUILD_GRAPH_ACK;
 			} catch {
 				// A timeout/abort, network error, or non-JSON body → the honest failure ack.
@@ -2671,7 +2699,11 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 					const message = typeof rec["message"] === "string" ? rec["message"] : "A brood is already in progress";
 					return { state: "already_running", message };
 				}
-				if (res.ok) return { state: "accepted", message: "Build triggered" };
+				if (res.ok) {
+					// PRD-012b: a successful build changes the hive-graph status + projection (mirrors proxy-cache).
+					invalidateSwr(ENDPOINTS.hiveGraphStatus, ENDPOINTS.hiveGraphProjection);
+					return { state: "accepted", message: "Build triggered" };
+				}
 				if (rec["error"] === "build_failed") {
 					const reason = typeof rec["reason"] === "string" ? rec["reason"] : "Build failed";
 					return { state: "failed", message: reason };
@@ -2696,21 +2728,23 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 				return UNREACHABLE_NECTAR_PROJECTS;
 			}
 		},
-		async setNectarBrooding(body: SetNectarBroodingBody): Promise<NectarBroodingAckWire> {
-			try {
-				const res = await fetchImpl(url(ENDPOINTS.hiveGraphBrooding), {
-					method: "POST",
-					headers: { "content-type": "application/json", accept: "application/json", ...DASHBOARD_SESSION_HEADERS },
-					body: JSON.stringify(body),
-				});
-				if (!res.ok) return UNREACHABLE_NECTAR_PROJECTS;
-				const parsed = NectarProjectsBodySchema.safeParse(await res.json());
-				if (!parsed.success) return UNREACHABLE_NECTAR_PROJECTS;
-				return { ...parsed.data, unreachable: false };
-			} catch {
-				return UNREACHABLE_NECTAR_PROJECTS;
-			}
-		},
+			async setNectarBrooding(body: SetNectarBroodingBody): Promise<NectarBroodingAckWire> {
+				try {
+					const res = await fetchImpl(url(ENDPOINTS.hiveGraphBrooding), {
+						method: "POST",
+						headers: { "content-type": "application/json", accept: "application/json", ...DASHBOARD_SESSION_HEADERS },
+						body: JSON.stringify(body),
+					});
+					if (!res.ok) return UNREACHABLE_NECTAR_PROJECTS;
+					const parsed = NectarProjectsBodySchema.safeParse(await res.json());
+					if (!parsed.success) return UNREACHABLE_NECTAR_PROJECTS;
+					// PRD-012b: a brooding change invalidates the projects list + status (mirrors proxy-cache).
+					invalidateSwr(ENDPOINTS.hiveGraphProjects, ENDPOINTS.hiveGraphStatus);
+					return { ...parsed.data, unreachable: false };
+				} catch {
+					return UNREACHABLE_NECTAR_PROJECTS;
+				}
+			},
 		async vaultSettings(): Promise<VaultSettingsWire> {
 			// GET the `setting` class + catalog; a malformed/absent body degrades to the empty
 			// view (nothing selected, no catalog) so the panel renders its empty state, never throws.
@@ -2727,9 +2761,13 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 					body: JSON.stringify({ value }),
 				});
 				// The daemon answers 201 on a successful write; any non-2xx (400 invalid value,
-				// 502 store failure) reads as "not accepted" so the caller does not optimistically
-				// reflect an un-persisted change — it re-reads and shows whatever actually persisted.
-				return res.ok;
+					// 502 store failure) reads as "not accepted" so the caller does not optimistically
+					// reflect an un-persisted change — it re-reads and shows whatever actually persisted.
+					if (res.ok) {
+						// PRD-012b: a vault-settings write invalidates the settings read (conservative broad-prefix).
+						invalidateSwr(ENDPOINTS.vaultSettings);
+					}
+					return res.ok;
 			} catch {
 				return false;
 			}
@@ -2754,9 +2792,13 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 					body: JSON.stringify({ value }),
 				});
 				// 2xx (the daemon answers 201) → accepted; any non-2xx (400 invalid name/value, 502
-				// store failure) reads as "not accepted" so the caller surfaces "not accepted" and the
-				// input is NOT cleared on a rejected write.
-				return res.ok;
+					// store failure) reads as "not accepted" so the caller surfaces "not accepted" and the
+					// input is NOT cleared on a rejected write.
+					if (res.ok) {
+						// PRD-012b: a secret write changes the names-only presence read.
+						invalidateSwr(ENDPOINTS.secrets);
+					}
+					return res.ok;
 			} catch {
 				// A network error → not accepted (never a throw into React).
 				return false;
@@ -2766,24 +2808,34 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 			// POST the logout action; the daemon removes the shared + legacy credential files. A 2xx +
 			// `{ ok: true }` is success; any non-2xx / network failure → false (the section stays as-is).
 			const ack = await postJson(fetchImpl, url(ENDPOINTS.actionsLogout), {}, ActionOkSchema);
-			return ack?.ok === true;
+			const ok = ack?.ok === true;
+			// PRD-012b: logout invalidates auth/settings/secrets/status/kpis/sessions (mirrors proxy-cache).
+			if (ok) invalidateSwr(ENDPOINTS.authStatus, ENDPOINTS.vaultSettings, ENDPOINTS.secrets, ENDPOINTS.status, ENDPOINTS.kpis, ENDPOINTS.sessions);
+			return ok;
 		},
 		async setEmbeddings(enabled: boolean): Promise<boolean> {
 			// POST the toggle; the daemon actuates the supervisor live + persists the choice. Success is a
 			// 2xx whose echoed `enabled` matches the request; a non-2xx / network failure → false.
 			const ack = await postJson(fetchImpl, url(ENDPOINTS.actionsEmbeddings), { enabled }, EmbeddingsActionSchema);
-			return ack?.ok === true && ack.enabled === enabled;
+			const ok = ack?.ok === true && ack.enabled === enabled;
+			// PRD-012b: the toggle changes status + diagnostics/settings (mirrors proxy-cache).
+			if (ok) invalidateSwr(ENDPOINTS.status, ENDPOINTS.settings);
+			return ok;
 		},
 		async setMemory(enabled: boolean): Promise<boolean> {
 			// POST the toggle (the SIBLING of setEmbeddings); the daemon PERSISTS the choice — it takes
 			// effect on the next restart (appliesOnRestart: true), not live. Success is a 2xx whose echoed
 			// `enabled` matches the request; a non-2xx / network failure → false (never a throw into React).
 			const ack = await postJson(fetchImpl, url(ENDPOINTS.actionsMemory), { enabled }, MemoryActionSchema);
-			return ack?.ok === true && ack.enabled === enabled;
+			const ok = ack?.ok === true && ack.enabled === enabled;
+			// PRD-012b: same invalidation set as setEmbeddings (mirrors proxy-cache).
+			if (ok) invalidateSwr(ENDPOINTS.status, ENDPOINTS.settings);
+			return ok;
 		},
 		async restartDaemon(): Promise<boolean> {
 			// POST the restart; the daemon respawns + shuts down. Success is a 2xx `{ restarting: true }`.
 			// (The connection may drop as the daemon goes down right after — postJson degrades that to null.)
+			// PRD-012b: NO invalidation — the daemon is restarting; the cache misses naturally on the next read.
 			const ack = await postJson(fetchImpl, url(ENDPOINTS.actionsRestart), {}, RestartActionSchema);
 			return ack?.restarting === true;
 		},
@@ -2892,31 +2944,47 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 				// daemon's zod is the source of truth (a 400 degrades to the failed ack). NO secret in the body.
 				const body: Record<string, string> = { path: input.path };
 				if (input.name !== undefined && input.name !== "") body.name = input.name;
-				return (await postJson(fetchImpl, url(ENDPOINTS.projectsBind), body, BindAckSchema)) ?? FAILED_BIND_ACK;
+				const ack = (await postJson(fetchImpl, url(ENDPOINTS.projectsBind), body, BindAckSchema)) ?? FAILED_BIND_ACK;
+				// PRD-012b: a bind changes the scope-projects list (mirrors proxy-cache).
+				if (ack.bound) invalidateSwr(ENDPOINTS.scopeProjects);
+				return ack;
 			},
 			async bindExistingProject(input: { path: string; projectId: string }): Promise<BindAckWire> {
 				// POST the chosen absolute path + the existing registry project_id → the 059d import. A non-2xx
 				// degrades to the failed ack so the modal surfaces an honest error (never an optimistic flip).
 				const body = { path: input.path, projectId: input.projectId };
-				return (await postJson(fetchImpl, url(ENDPOINTS.projectsBindExisting), body, BindAckSchema)) ?? FAILED_BIND_ACK;
+				const ack = (await postJson(fetchImpl, url(ENDPOINTS.projectsBindExisting), body, BindAckSchema)) ?? FAILED_BIND_ACK;
+				if (ack.bound) invalidateSwr(ENDPOINTS.scopeProjects);
+				return ack;
 			},
 			async unbindProject(input: { path: string }): Promise<UnbindAckWire> {
 				// POST the absolute path → remove the LOCAL binding only (059c); the registry row is untouched.
 				// A non-2xx degrades to the failed ack so the page re-reads and reflects what actually persisted.
-				return (await postJson(fetchImpl, url(ENDPOINTS.projectsUnbind), { path: input.path }, UnbindAckSchema)) ?? FAILED_UNBIND_ACK;
+				const ack = (await postJson(fetchImpl, url(ENDPOINTS.projectsUnbind), { path: input.path }, UnbindAckSchema)) ?? FAILED_UNBIND_ACK;
+				if (ack.unbound) invalidateSwr(ENDPOINTS.scopeProjects);
+				return ack;
 			},
 			async switchOrg(org: string): Promise<OrgSwitchAckWire> {
 				// POST the target org → the daemon re-mints + persists (IRD-122 / 122-AC-2), bounded by
 				// SCOPE_REQUEST_TIMEOUT_MS. A non-2xx / network failure / timeout degrades to the failed
 				// ack so the switcher shows an honest "could not switch" rather than a silent no-op OR an
 				// infinite "switching org…" (122-AC-4). NO token rides the ack.
-				return postScopeJson(fetchImpl, url(ENDPOINTS.scopeOrgSwitch), { org }, OrgSwitchAckSchema, FAILED_ORG_SWITCH_ACK);
+				const ack = await postScopeJson(fetchImpl, url(ENDPOINTS.scopeOrgSwitch), { org }, OrgSwitchAckSchema, FAILED_ORG_SWITCH_ACK);
+				// PRD-012b: an org switch re-mints the token → ALL scoped reads are potentially different
+				// (mirrors proxy-cache's prefix:"" → invalidate everything). The scope-context also calls
+				// clearSwrCache() on commit, but we clear here too so a non-UI caller stays consistent.
+				if (ack.switched) clearSwrCacheFn();
+				return ack;
 			},
 			async switchWorkspace(workspace: string): Promise<WorkspaceSwitchAckWire> {
 				// POST the target workspace → the daemon persists the workspace id (no re-mint), bounded
 				// by SCOPE_REQUEST_TIMEOUT_MS. A failure/timeout degrades to the failed ack so the switcher
 				// surfaces an honest error, never a no-op and never a hang.
-				return postScopeJson(fetchImpl, url(ENDPOINTS.scopeWorkspaceSwitch), { workspace }, WorkspaceSwitchAckSchema, FAILED_WORKSPACE_SWITCH_ACK);
+				const ack = await postScopeJson(fetchImpl, url(ENDPOINTS.scopeWorkspaceSwitch), { workspace }, WorkspaceSwitchAckSchema, FAILED_WORKSPACE_SWITCH_ACK);
+				// PRD-012b: a workspace switch changes scope-projects + kpis + sessions + memories + graph
+				// (mirrors proxy-cache). The scope-context also clears on commit; this keeps non-UI callers consistent.
+				if (ack.switched) invalidateSwr(ENDPOINTS.scopeProjects, ENDPOINTS.kpis, ENDPOINTS.sessions, ENDPOINTS.memories, ENDPOINTS.graph);
+				return ack;
 			},
 	};
 }
