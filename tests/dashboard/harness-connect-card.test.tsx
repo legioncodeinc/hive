@@ -72,6 +72,49 @@ describe("HarnessConnectCard", () => {
 		await waitFor(() => expect(screen.getByTestId("harness-connect-row-claude-code").textContent).toContain("wired"));
 	});
 
+	it("d-AC-3: while a repair is in flight, every repair button is disabled (no silent no-op on a second harness)", async () => {
+		let release: (r: HarnessRepairResultWire) => void = () => {};
+		const wire = fakeWire({
+			harnessConnectionStatus: vi.fn(async () => [
+				{ harness: "claude-code", agentPresent: true, pluginEnabled: false, connected: false },
+				{ harness: "codex", agentPresent: true, pluginEnabled: false, connected: false },
+			]),
+			repairHarness: vi.fn(
+				() =>
+					new Promise<HarnessRepairResultWire>((resolve) => {
+						release = resolve;
+					}),
+			),
+		});
+
+		render(<HarnessConnectCard wire={wire} pollMs={0} />);
+
+		await waitFor(() => expect(screen.getByTestId("harness-connect-repair-claude-code")).toBeTruthy());
+		fireEvent.click(screen.getByTestId("harness-connect-repair-claude-code"));
+
+		// The other harness's button is disabled while the first repair is in flight, so a click
+		// cannot silently no-op against the single-in-flight guard.
+		await waitFor(() => expect((screen.getByTestId("harness-connect-repair-codex") as HTMLButtonElement).disabled).toBe(true));
+		expect((screen.getByTestId("harness-connect-repair-claude-code") as HTMLButtonElement).disabled).toBe(true);
+
+		release({ harness: "claude-code", status: "connected", connected: true });
+		await waitFor(() => expect((screen.getByTestId("harness-connect-repair-codex") as HTMLButtonElement).disabled).toBe(false));
+	});
+
+	it("d-AC-2: the eyebrow reflects how many harnesses are connected, not the total row count", async () => {
+		const wire = fakeWire({
+			harnessConnectionStatus: vi.fn(async () => [
+				{ harness: "claude-code", agentPresent: true, pluginEnabled: true, connected: true },
+				{ harness: "codex", agentPresent: true, pluginEnabled: false, connected: false },
+			]),
+		});
+
+		render(<HarnessConnectCard wire={wire} pollMs={0} />);
+
+		await waitFor(() => expect(screen.getByTestId("harness-connect-card")).toBeTruthy());
+		expect(screen.getByTestId("harness-connect-card").textContent).toContain("1 of 2 connected");
+	});
+
 	it("d-AC-5: a repair that cannot complete shows a clear message and never blocks", async () => {
 		const wire = fakeWire({
 			harnessConnectionStatus: vi.fn(async () => [{ harness: "claude-code", agentPresent: false, pluginEnabled: false, connected: false }]),

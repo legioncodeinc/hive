@@ -64,11 +64,13 @@ function repairMessage(result: HarnessRepairResultWire | null): string {
 function HarnessRow({
 	row,
 	busy,
+	anyBusy,
 	repair,
 	repairState,
 }: {
 	readonly row: HarnessConnectionStateWire;
 	readonly busy: boolean;
+	readonly anyBusy: boolean;
 	readonly repair: (harness: string) => void;
 	readonly repairState: RepairState | null;
 }): React.JSX.Element {
@@ -113,7 +115,7 @@ function HarnessRow({
 			<Button
 				variant="secondary"
 				size="sm"
-				disabled={busy}
+				disabled={anyBusy}
 				onClick={() => repair(row.harness)}
 				data-testid={`harness-connect-repair-${row.harness}`}
 			>
@@ -160,15 +162,18 @@ export function HarnessConnectCard({ wire, pollMs = HARNESS_CONNECT_POLL_MS }: H
 	// Self-hide when there is nothing to report (no configured harnesses, or a fail-soft empty read).
 	if (rows.length === 0) return null;
 
+	const connectedCount = rows.filter((row) => row.connected).length;
+
 	return (
 		<div data-testid="harness-connect-card">
-			<Panel title="Coding assistants" eyebrow={`${rows.length} connected checks`}>
+			<Panel title="Coding assistants" eyebrow={`${connectedCount} of ${rows.length} connected`}>
 				<div style={{ display: "flex", flexDirection: "column" }}>
 					{rows.map((row) => (
 						<HarnessRow
 							key={row.harness}
 							row={row}
 							busy={busyHarness === row.harness}
+							anyBusy={busyHarness !== null}
 							repair={(h) => void repair(h)}
 							repairState={repairState}
 						/>

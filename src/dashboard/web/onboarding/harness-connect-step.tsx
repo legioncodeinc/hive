@@ -82,11 +82,16 @@ function SkipButton({ onSkip }: { readonly onSkip: () => void }): React.JSX.Elem
 export function HarnessConnectStep({ onboardingClient, onDone }: HarnessConnectStepProps): React.JSX.Element {
 	const [phase, setPhase] = React.useState<ConnectPhase>({ kind: "connecting" });
 
+	// Guards the post-await state write: if the operator clicks Skip (which unmounts this step) while
+	// a connect is in flight, the resolving `setPhase` would fire on an unmounted component.
+	const mountedRef = React.useRef(true);
+
 	// One shared "run the connect trigger" routine: the on-mount auto-run and the Retry button both
 	// go through here, so an absent agent / failed attempt is always recoverable with one click.
 	const runConnect = React.useCallback(async (): Promise<void> => {
 		setPhase({ kind: "connecting" });
 		const result = await onboardingClient.connectHarness();
+		if (!mountedRef.current) return;
 		setPhase({ kind: "result", result });
 	}, [onboardingClient]);
 
@@ -95,6 +100,9 @@ export function HarnessConnectStep({ onboardingClient, onDone }: HarnessConnectS
 		if (startedRef.current) return;
 		startedRef.current = true;
 		void runConnect();
+		return () => {
+			mountedRef.current = false;
+		};
 	}, [runConnect]);
 
 	if (phase.kind === "connecting") {
