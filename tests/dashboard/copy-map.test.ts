@@ -28,8 +28,9 @@ describe("dashboard copy-map", () => {
   it("b-AC-5 migrated all honeycomb web/ files plus PRD-002b/004/005 readiness+health modules and PRD-003c's boot-route", () => {
     // 36 from the original migration + the PRD-009b `onboarding/` feature-folder files
     // (contracts, the wire client, copy, hooks, the six components, and the resume-selection store)
-    // + PRD-012b `use-swr.ts` (client-side stale-while-revalidate hook).
-    expect(countFiles(WEB_DIR)).toBe(54);
+    // + PRD-012b `use-swr.ts` (client-side stale-while-revalidate hook)
+    // + PRD-006d `harness-connect-card.tsx` and PRD-006c `onboarding/harness-connect-step.tsx`.
+    expect(countFiles(WEB_DIR)).toBe(56);
   });
 
   it("b-AC-5 includes the shell + infra files (21) and the pages (13)", () => {

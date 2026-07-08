@@ -10,6 +10,8 @@
  * the parent brief and PRD-009a's SSE contract call for).
  */
 
+import { z } from "zod";
+
 import {
 	DetectResponseSchema,
 	EMPTY_DETECTION,
@@ -29,6 +31,34 @@ import {
 
 /** The header carrying the one-time onboarding token on every installer call (never the SSE query). */
 export const ONBOARDING_TOKEN_HEADER = "x-onboarding-token" as const;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/onboarding/harness/connect (PRD-006c) — the "Connect your coding assistant" trigger.
+// LOCAL types matching honeycomb's `ConnectSeamResult` field names exactly (the same local-contract
+// discipline the rest of this file uses): a later integration pass can point imports at a shared
+// module without renaming a field.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The default harness the connect trigger targets (matches honeycomb's default). */
+const DEFAULT_HARNESS = "claude-code";
+
+/** The renderable connect statuses hive shows for the harness (mirrors honeycomb's `ConnectStatus`). */
+export const HARNESS_CONNECT_STATUSES = ["connected", "agent-absent", "cli-absent", "error"] as const;
+export type HarnessConnectStatus = (typeof HARNESS_CONNECT_STATUSES)[number];
+
+const HarnessConnectResultSchema = z.object({
+	harness: z.string().catch(DEFAULT_HARNESS),
+	status: z.enum(HARNESS_CONNECT_STATUSES).catch("error"),
+	detail: z.string().optional(),
+});
+export type HarnessConnectResult = z.infer<typeof HarnessConnectResultSchema>;
+
+/**
+ * The honest fail-soft default when hive is unreachable / the body is malformed: an `error` status
+ * (the step offers a generic Retry). A genuine `cli-absent`/`agent-absent` comes from a SUCCESSFUL
+ * read of the honeycomb CLI's own status, never fabricated here.
+ */
+const HARNESS_CONNECT_FAILED: HarnessConnectResult = Object.freeze({ harness: DEFAULT_HARNESS, status: "error" });
 
 /** A fetch-like function, injectable so tests never hit the network (mirrors `wire.ts`'s `FetchLike`). */
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -62,6 +92,13 @@ export interface OnboardingClient {
 	health(): Promise<HealthResponse>;
 	/** `POST /api/onboarding/complete` (204). Best-effort: never throws, never blocks the caller's navigation. */
 	complete(): Promise<void>;
+	/**
+	 * `POST /api/onboarding/harness/connect` (PRD-006c c-AC-1). Shells the honeycomb harness reconcile
+	 * and returns the renderable connect status. Fail-soft: a hive/CLI failure degrades to `error`
+	 * (the step offers Retry), never a throw, so onboarding never hangs or dead-ends (c-AC-5). Retry
+	 * is the caller invoking this again after installing the agent (c-AC-3).
+	 */
+	connectHarness(): Promise<HarnessConnectResult>;
 	/**
 	 * `POST /api/onboarding/event` (202), the UI funnel chokepoint. FIRE-AND-FORGET by design: the
 	 * caller never awaits this (a slow/broken telemetry endpoint must never stall the guided flow).
@@ -172,6 +209,22 @@ export function createOnboardingClient(token: string, options: OnboardingClientO
 			} catch {
 				// Best-effort: the login step navigates to the dashboard regardless (never gets the
 				// operator stuck because a completion beacon failed to land).
+			}
+		},
+
+		async connectHarness(): Promise<HarnessConnectResult> {
+			try {
+				const res = await fetchImpl(url("/api/onboarding/harness/connect"), {
+					method: "POST",
+					headers: { accept: "application/json", ...tokenHeaders(token) },
+				});
+				if (!res.ok) return HARNESS_CONNECT_FAILED;
+				const parsed = HarnessConnectResultSchema.safeParse(await res.json());
+				return parsed.success ? parsed.data : HARNESS_CONNECT_FAILED;
+			} catch {
+				// A network error / abort / non-JSON body degrades to the honest `error` default so the
+				// step offers Retry rather than fabricating a connected/absent state (c-AC-5).
+				return HARNESS_CONNECT_FAILED;
 			}
 		},
 

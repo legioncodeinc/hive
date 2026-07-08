@@ -22,6 +22,7 @@ describe("LoginStep PRD-011 handoff", () => {
 			health: vi.fn(),
 			complete: vi.fn(),
 			sendEvent: vi.fn(),
+			connectHarness: vi.fn(async () => ({ harness: "claude-code", status: "connected" as const })),
 		};
 		let poll = 0;
 		const wire: WireClient = {
