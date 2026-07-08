@@ -1,6 +1,6 @@
 # PRD-011: Onboarding tenancy selection and active-tenancy visibility
 
-> **Status:** Backlog
+> **Status:** Completed
 > **Priority:** P0
 > **Effort:** L
 > **Schema changes:** None in hive (hive holds no Deeplake client; the durable tenancy-selection marker is honeycomb-side state owned by the parallel honeycomb PRD)

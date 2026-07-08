@@ -1,6 +1,6 @@
 # PRD-003: Portal landing gate and path-based routing
 
-> **Status:** Backlog
+> **Status:** Completed
 > **Priority:** P0
 > **Effort:** L
 > **Schema changes:** None (hive stores no credential and persists nothing new; it reads honeycomb's `/setup/state` through the existing BFF proxy)

@@ -1,6 +1,6 @@
 # PRD-001: hive Portal Daemon
 
-> **Status:** In Work
+> **Status:** Completed
 > **Priority:** P0
 > **Effort:** L
 > **Schema changes:** None (hive holds no Deep Lake client; it aggregates workload daemon APIs)

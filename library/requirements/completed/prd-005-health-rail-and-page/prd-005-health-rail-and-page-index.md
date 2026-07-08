@@ -1,6 +1,6 @@
 # PRD-005: Health rail and health page
 
-> **Status:** Backlog
+> **Status:** Completed
 > **Priority:** P1
 > **Effort:** L
 > **Schema changes:** None (hive renders doctor's SSE telemetry; it holds no Deep Lake client and persists nothing new)

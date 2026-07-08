@@ -1,6 +1,6 @@
 # PRD-012: Dashboard caching layer (server-side BFF proxy cache + client SWR)
 
-> **Status:** Backlog
+> **Status:** Completed
 > **Priority:** P1
 > **Effort:** L
 > **Schema changes:** None (no new Deeplake tables; hive holds no client. The cache is in-memory on the server and in React state on the client.)
