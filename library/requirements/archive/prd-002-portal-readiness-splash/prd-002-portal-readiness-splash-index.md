@@ -1,6 +1,6 @@
 # PRD-002: Portal Readiness Splash
 
-> **Status:** In Work
+> **Status:** Superseded — see [`archive/README.md`](../README.md). The client-side `ReadinessSplash` gate this PRD specifies was deliberately retired; the readiness/landing decision moved server-side into [PRD-003](../../completed/prd-003-portal-landing-gate-and-routing/prd-003-portal-landing-gate-and-routing-index.md)'s portal gate (`src/daemon/gate.ts`) plus the [PRD-004](../../completed/prd-004-buzzing-service-loaders/prd-004-buzzing-service-loaders-index.md) `/buzzing` screen. The `/api/fleet-status` proxy (002a) survived as shared infrastructure.
 > **Priority:** P0
 > **Effort:** M
 > **Schema changes:** None (hive holds no Deep Lake client and persists nothing new; it forwards doctor's status-page JSON)

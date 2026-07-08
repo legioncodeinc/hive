@@ -1,6 +1,6 @@
 # PRD-009: The hive onboarding dashboard becomes the fleet installer
 
-> **Status:** Backlog
+> **Status:** Completed
 > **Priority:** P0
 > **Effort:** XL
 > **Schema changes:** None (no new persistent store; a one-time onboarding token file under `~/.honeycomb/hive/` at mode `0600`, removed on completion)

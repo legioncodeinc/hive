@@ -1,6 +1,6 @@
 # PRD-010: Migrate hive's runtime state to the neutral fleet root `~/.apiary/hive/`
 
-> **Status:** Backlog
+> **Status:** Completed
 > **Priority:** P1
 > **Effort:** L
 > **Schema changes:** None (no Deeplake change; this PRD relocates hive's local on-disk runtime state and its doctor-registry coordination paths)

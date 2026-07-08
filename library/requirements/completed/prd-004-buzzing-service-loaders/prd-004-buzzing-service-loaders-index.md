@@ -1,6 +1,6 @@
 # PRD-004: Buzzing readiness screen and service status loaders
 
-> **Status:** Backlog
+> **Status:** Completed
 > **Priority:** P0
 > **Effort:** M
 > **Schema changes:** None (hive renders doctor's registration + telemetry; it persists nothing new)
