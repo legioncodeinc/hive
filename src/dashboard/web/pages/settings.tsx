@@ -38,14 +38,17 @@ import React from "react";
 import { Badge, Button, Input } from "../primitives.js";
 import { Panel, PortkeyGatewaySection, PROVIDER_KEY_NAME, SETTING_KEY, SettingsPanel } from "../panels.js";
 import type { PageProps } from "../page-frame.js";
-import { isTabHidden, PageFrame } from "../page-frame.js";
+import { PageFrame } from "../page-frame.js";
 import { LIFECYCLE_FLAG_REFERENCE } from "../../../shared/lifecycle-flags.js";
+import { useSwr } from "../use-swr.js";
 import {
 	DISCONNECTED_AUTH_STATUS,
 	EMPTY_VAULT_SETTINGS,
+	ENDPOINTS,
 	type AuthStatusWire,
 	type SettingValueWire,
 	type SetupLoginWire,
+	type StatusProbe,
 	type UninstallResultWire,
 	type VaultSettingsWire,
 } from "../wire.js";
@@ -164,43 +167,25 @@ function ConnectHandoff({ wire }: { wire: PageProps["wire"] }): React.JSX.Elemen
  * rendered (the wire schema has no token field by construction).
  */
 export function DeeplakeAuthSection({ wire }: { wire: PageProps["wire"] }): React.JSX.Element {
-	const [status, setStatus] = React.useState<AuthStatusWire>(DISCONNECTED_AUTH_STATUS);
-	const [loading, setLoading] = React.useState(true);
+	// PRD-012b: the auth status is now an SWR read with interval refresh + focus revalidation (the hook's
+	// built-in focus revalidation replaces the manual `window.addEventListener("focus", ...)`). The key
+	// is the plain auth-status endpoint (global, not project-scoped). `authStatus()` never throws — it
+	// degrades to DISCONNECTED on any failure (AC-4), so the fetcher is fail-safe by construction.
+	const { data: status = DISCONNECTED_AUTH_STATUS, loading, mutate: mutateAuth } = useSwr<AuthStatusWire>(
+		ENDPOINTS.authStatus,
+		async () => wire.authStatus(),
+		{ refreshInterval: AUTH_POLL_MS },
+	);
 	const [loggingOut, setLoggingOut] = React.useState(false);
-
-	const load = React.useCallback(async (): Promise<void> => {
-		// `authStatus()` never throws — it degrades to DISCONNECTED on any failure (AC-4).
-		const next = await wire.authStatus();
-		setStatus(next);
-		setLoading(false);
-	}, [wire]);
 
 	// Log out (dashboard action): remove the shared credential through the daemon, then RE-READ the
 	// status so the section flips to the disconnected/connect state on success (never an optimistic flip).
 	const onLogout = React.useCallback(async (): Promise<void> => {
 		setLoggingOut(true);
 		await wire.logout();
-		await load();
+		mutateAuth();
 		setLoggingOut(false);
-	}, [wire, load]);
-
-	// Fetch on mount + re-read on a poll (so a CLI login reflects here) + on window focus.
-	React.useEffect(() => {
-		let alive = true;
-		const tick = async (): Promise<void> => {
-			if (!alive || isTabHidden()) return; // background-tab pause: no auth poll while hidden (focus still refreshes)
-			await load();
-		};
-		void tick();
-		const id = setInterval(() => void tick(), AUTH_POLL_MS);
-		const onFocus = (): void => void tick();
-		if (typeof window !== "undefined") window.addEventListener("focus", onFocus);
-		return () => {
-			alive = false;
-			clearInterval(id);
-			if (typeof window !== "undefined") window.removeEventListener("focus", onFocus);
-		};
-	}, [load]);
+	}, [wire, mutateAuth]);
 
 	return (
 		<Panel
@@ -574,35 +559,28 @@ function embeddingsView(state: EmbeddingsState): { tone: "verified" | "neutral" 
  * optimistic flip.
  */
 export function EmbeddingsSection({ wire }: { wire: PageProps["wire"] }): React.JSX.Element {
-	// `null` while the first status read is in flight (so we never render a wrong default).
-	const [state, setState] = React.useState<EmbeddingsState | null>(null);
+	// PRD-012b: the status read is now an SWR read. While `warming`, the refresh interval shortens so the
+	// badge advances to "on"/"failed" without a manual refresh. The state is DERIVED from the SWR data
+	// (never stored separately); the optimistic flip after a toggle is handled by a local `optimisticState`
+	// that overrides the SWR-derived state until the next revalidate lands.
+	const [optimisticState, setOptimisticState] = React.useState<EmbeddingsState | null>(null);
 	const [busy, setBusy] = React.useState(false);
 
-	const load = React.useCallback(async (): Promise<void> => {
-		// Fail-soft like the rest of the dashboard: a failed/absent status read degrades to "off"
-		// rather than throwing into React (the badge shows off; the toggle still works).
-		try {
-			const status = await wire.status();
-			const reasons = status?.reasons;
-			// Prefer the honest fine-grained state; fall back to the coarse enabled/disabled field.
-			const next: EmbeddingsState = reasons?.embeddingsState ?? (reasons?.embeddings === "on" ? "on" : "off");
-			setState(next);
-		} catch {
-			setState("off");
-		}
-	}, [wire]);
+	// Derive the embeddings state from the SWR data. Fail-soft: a failed/absent read → "off".
+	const deriveState = React.useCallback((status: StatusProbe | undefined): EmbeddingsState => {
+		const reasons = status?.reasons;
+		return reasons?.embeddingsState ?? (reasons?.embeddings === "on" ? "on" : "off");
+	}, []);
 
-	React.useEffect(() => {
-		void load();
-	}, [load]);
-
-	// While warming, re-poll `/api/status` so the badge advances to "on"/"failed" without a manual refresh.
-	React.useEffect(() => {
-		if (state !== "warming") return;
-		if (isTabHidden()) return;
-		const id = setInterval(() => void load(), EMBED_WARMING_POLL_MS);
-		return () => clearInterval(id);
-	}, [state, load]);
+	const { data: status, mutate: mutateStatus } = useSwr<StatusProbe>(
+		ENDPOINTS.status,
+		async () => wire.status(),
+		{ refreshInterval: optimisticState === "warming" ? EMBED_WARMING_POLL_MS : 0 },
+	);
+	const swrState: EmbeddingsState | null = status === undefined ? null : deriveState(status);
+	// The effective state: the optimistic override takes precedence (it reflects the user's INTENT after a
+	// toggle) until the next SWR revalidate lands the real value.
+	const state = optimisticState ?? swrState;
 
 	const view = state === null ? null : embeddingsView(state);
 
@@ -612,11 +590,13 @@ export function EmbeddingsSection({ wire }: { wire: PageProps["wire"] }): React.
 		const want = !view.enabled;
 		const ok = await wire.setEmbeddings(want);
 		// Optimistically reflect the INTENT (enabling → warming; disabling → off), then re-read the live
-		// truth. The warming poll takes it the rest of the way to on/failed.
-		if (ok) setState(want ? "warming" : "off");
+		// truth. The warming-poll refresh interval takes it the rest of the way to on/failed.
+		if (ok) setOptimisticState(want ? "warming" : "off");
 		setBusy(false);
-		void load();
-	}, [view, wire, load]);
+		mutateStatus();
+		// Clear the optimistic override after a short delay so the real SWR value takes over.
+		if (ok) setTimeout(() => setOptimisticState(null), 1000);
+	}, [view, wire, mutateStatus]);
 
 	const hint =
 		state === "warming"
@@ -696,29 +676,23 @@ const MEMORY_DEFAULT: MemoryView = { provider: "unconfigured", enabled: false };
  *     restart action — an inline "Restart now" affordance (mirrors {@link SystemActionsSection}'s restart).
  */
 export function MemoryFormationSection({ wire }: { wire: PageProps["wire"] }): React.JSX.Element {
-	// `null` while the first status read is in flight (so we never render a wrong default).
-	const [view, setView] = React.useState<MemoryView | null>(null);
+	// PRD-012b: the status read is now an SWR read (mount + focus only — the daemon persists the choice
+	// and it takes effect on the NEXT restart, so there is no warming-poll here). Fail-soft: a failed/
+	// absent status read degrades to the safe unconfigured/off default rather than throwing into React.
+	const deriveView = React.useCallback((status: StatusProbe | undefined): MemoryView => {
+		const mem = status?.reasons?.memory;
+		return mem ? { provider: mem.provider, enabled: mem.enabled } : MEMORY_DEFAULT;
+	}, []);
+	const { data: status, mutate: mutateStatus } = useSwr<StatusProbe>(
+		ENDPOINTS.status,
+		async () => wire.status(),
+	);
+	const view = status === undefined ? null : deriveView(status);
 	const [busy, setBusy] = React.useState(false);
 	// True after a successful toggle — surfaces the "restart to apply" affordance (the choice is persisted
 	// but not live). Cleared once the daemon restart is kicked off.
 	const [pendingRestart, setPendingRestart] = React.useState(false);
 	const [restarting, setRestarting] = React.useState(false);
-
-	const load = React.useCallback(async (): Promise<void> => {
-		// Fail-soft like the rest of the dashboard: a failed/absent status read degrades to the safe
-		// unconfigured/off default rather than throwing into React.
-		try {
-			const status = await wire.status();
-			const mem = status?.reasons?.memory;
-			setView(mem ? { provider: mem.provider, enabled: mem.enabled } : MEMORY_DEFAULT);
-		} catch {
-			setView(MEMORY_DEFAULT);
-		}
-	}, [wire]);
-
-	React.useEffect(() => {
-		void load();
-	}, [load]);
 
 	const toggle = React.useCallback(async (): Promise<void> => {
 		if (view === null || view.provider !== "configured") return;
@@ -731,8 +705,8 @@ export function MemoryFormationSection({ wire }: { wire: PageProps["wire"] }): R
 			// the persisted truth (the badge reflects the newly-persisted `enabled`).
 			setPendingRestart(true);
 		}
-		await load();
-	}, [view, wire, load]);
+		mutateStatus();
+	}, [view, wire, mutateStatus]);
 
 	const doRestart = React.useCallback(async (): Promise<void> => {
 		setRestarting(true);
@@ -952,21 +926,18 @@ export function SystemActionsSection({ wire }: { wire: PageProps["wire"] }): Rea
  * page state, the DOM, a response, or a log line.
  */
 export function SettingsPage({ wire }: PageProps): React.JSX.Element {
-	const [vault, setVault] = React.useState<VaultSettingsWire>(EMPTY_VAULT_SETTINGS);
-	const [secretNames, setSecretNames] = React.useState<readonly string[]>([]);
-
-	// Hydrate the vault settings + the names-only secret presence (both already-served, secret-free).
-	const hydrateSettings = React.useCallback(async (): Promise<void> => {
-		setVault(await wire.vaultSettings());
-	}, [wire]);
-	const hydrateSecretNames = React.useCallback(async (): Promise<void> => {
-		setSecretNames(await wire.secretNames());
-	}, [wire]);
-
-	React.useEffect(() => {
-		void hydrateSettings();
-		void hydrateSecretNames();
-	}, [hydrateSettings, hydrateSecretNames]);
+	// PRD-012b: the vault settings + the names-only secret presence are now SWR reads (mount + focus
+	// only — these are settings, not live-tail data). Both are already-served, secret-free. After a
+	// successful setting/secret write, `mutate` revalidates so the rendered value is the PERSISTED vault
+	// value, never a local-only optimistic toggle.
+	const { data: vault = EMPTY_VAULT_SETTINGS, mutate: mutateVault } = useSwr<VaultSettingsWire>(
+		ENDPOINTS.vaultSettings,
+		async () => wire.vaultSettings(),
+	);
+	const { data: secretNames = [], mutate: mutateSecretNames } = useSwr<readonly string[]>(
+		ENDPOINTS.secrets,
+		async () => wire.secretNames(),
+	);
 
 	// Persist one setting then RE-READ so the rendered value is the PERSISTED vault value, never a
 	// local-only optimistic toggle (mirrors the dashboard `SettingsPanel` contract). A rejected
@@ -975,10 +946,10 @@ export function SettingsPage({ wire }: PageProps): React.JSX.Element {
 	const onSaveSetting = React.useCallback(
 		async (key: string, value: SettingValueWire): Promise<boolean> => {
 			const ok = await wire.setSetting(key, value);
-			await hydrateSettings();
+			mutateVault();
 			return ok;
 		},
-		[wire, hydrateSettings],
+		[wire, mutateVault],
 	);
 
 	// PRD-063a (D-2): derive portkeyEnabled from persisted vault settings so the SearchAndInference
@@ -992,17 +963,17 @@ export function SettingsPage({ wire }: PageProps): React.JSX.Element {
 	const onSavePortkeyKey = React.useCallback(
 		async (value: string): Promise<boolean> => {
 			const ok = await wire.setSecret(PROVIDER_KEY_NAME.portkey, value);
-			await hydrateSecretNames();
+			mutateSecretNames();
 			return ok;
 		},
-		[wire, hydrateSecretNames],
+		[wire, mutateSecretNames],
 	);
 
 	return (
 		<PageFrame title="Settings" eyebrow="deeplake · provider keys · search mode">
 			<div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 				<DeeplakeAuthSection wire={wire} />
-				<ProviderKeysSection wire={wire} secretNames={secretNames} onSaved={() => void hydrateSecretNames()} />
+				<ProviderKeysSection wire={wire} secretNames={secretNames} onSaved={mutateSecretNames} />
 				{/* Dashboard action: turn semantic embeddings on/off (live + persisted). */}
 				<EmbeddingsSection wire={wire} />
 				{/* Dashboard action: the PROMINENT, provider-gated Memory Formation control (persisted;

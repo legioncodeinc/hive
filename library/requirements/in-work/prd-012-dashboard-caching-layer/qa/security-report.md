@@ -466,3 +466,232 @@ No other residual risks identified. The implementation is safe to ship.
 | `npm test` green modulo the 2 pre-existing out-of-scope `funnel-telemetry` failures | ✅ |
 | Report written to `library/requirements/in-work/prd-012-dashboard-caching-layer/qa/security-report.md` | ✅ |
 | `quality-worker-bee` may now run (no stale-QA ordering inversion) | ✅ |
+
+---
+
+## PRD-012b-continued addendum
+
+> **Auditor:** `security-worker-bee`
+> **Date:** 2026-07-06
+> **Branch:** `feature/prd-012b-continued-page-migrations` (hive submodule)
+> **Scope:** 6 deferred read-model page migrations from `useEffect`/`usePoll` → `useSwr`
+> **PR context:** The `useSwr` hook, the wire-client `invalidateSwr` call sites, and the server-side
+> proxy cache were ALL audited CLEAN in the report above (10/10 threats clean). This addendum covers
+> ONLY the 6 page-file deltas — they are new consumers of already-audited infrastructure.
+
+### Scope note (reduced coverage)
+
+The 6 audited files are React/TSX dashboard pages — a browser surface outside the Stinger's primary
+catalog (Deep Lake SQL, pre-tool-use gate, credentials, capture/PII). Per operating rule #8 (degraded
+fidelity, not silence), the applicable universal patterns were checked (token/credential exposure,
+new logging surfaces, cache-key correctness) and the PRD-012b-continued page-migration threat model
+supplied with this audit is the primary authority. The Stinger catalogs are a secondary signal.
+
+### Files in scope (the entire delta)
+
+- `src/dashboard/web/pages/hive-graph.tsx`
+- `src/dashboard/web/pages/settings.tsx`
+- `src/dashboard/web/pages/sync.tsx`
+- `src/dashboard/web/pages/logs.tsx`
+- `src/dashboard/web/pages/projects.tsx`
+- `src/dashboard/web/pages/lifecycle-panel.tsx`
+
+### Ordering check
+
+`library/qa/` holds no `*-qa-report.md` for this branch (only PRD-003 reports exist). No ordering
+inversion — `quality-worker-bee` may run after this addendum without a stale-QA warning.
+
+### Threat-by-threat findings
+
+Every one of the 5 page-migration threats gets an explicit finding below. **CLEAN** = the migration
+is safe against this threat as written.
+
+---
+
+#### T1 (page) — Cache-key collisions from wrong/missing `swrKey` → **CLEAN**
+
+Each migrated `useSwr` call was verified to use the correct key: `swrKey(ENDPOINTS.x, project)` for
+project-scoped reads, a plain `ENDPOINTS.x` for project-agnostic reads, and a filter-encoding key for
+the paginated logs history.
+
+**(a) `hive-graph.tsx` — project-scoped reads use `swrKey(..., project)`; nectar reads use the plain
+endpoint (correctly NOT project-scoped) — clean.**
+
+`hive-graph.tsx:489-509`: the two project-scoped reads build their keys as
+```ts
+const fileGraphKey = project !== undefined ? swrKey(ENDPOINTS.hiveGraphProjection, project) : undefined;
+const statusKey    = project !== undefined ? swrKey(ENDPOINTS.hiveGraphStatus, project) : undefined;
+```
+so two projects produce distinct keys (`/api/hive-graph/projection:projA` vs `:projB`). The wire
+methods also append the project via `?project=` in the actual fetch (`wire.ts:2635/2670`,
+`hiveGraphProjectQuery` at `wire.ts:189`), so the fetcher is project-correct too. No collision.
+
+The nectar reads (`NectarProjectsPanel`, `hive-graph.tsx:103-114`) use the PLAIN endpoints
+`ENDPOINTS.hiveGraphProjects` and `ENDPOINTS.setupTenancy` — this is CORRECT, not a bug: the wire
+methods `nectarProjects()` (`wire.ts:2718`) and `setupTenancy()` (`wire.ts:2865`) take NO `projectId`
+and stamp NO `?project=` query — they are fleet-wide/tenancy reads by design (the brooding panel
+lists all nectar projects across the device, not per-selected-project). So a `swrKey(..., project)`
+suffix would be wrong here; the plain key is right.
+
+**(b) `logs.tsx` — the SWR key encodes the FULL filter set (highest-risk page) — clean.**
+
+`logs.tsx:511`:
+```ts
+const historyKey = `${ENDPOINTS.logs}/history${buildHistoryQueryString(toWireFilters(appliedFilters))}`;
+```
+`buildHistoryQueryString` (`wire.ts:2279-2293`) serializes EVERY filter field — `since`, `until`,
+`status`, `path`, `org`, `limit`, and `cursor` — into the query string, omitting only empty values.
+Two different filter views therefore produce two different `historyKey` strings → two distinct cache
+entries. One operator's filtered view CANNOT be served as another's. The `cursor` is part of the key
+for the imperative "load more" path (`logs.tsx:541` uses `moreCursor` in the direct fetch), and the
+first-page SWR key (which has no cursor) is distinct from any cursor-bearing key. ✓
+
+Cross-filter bleed is also defended by the `extraRecords` reset: `logs.tsx:524-527` resets the
+accumulated older pages when `historyKey` changes (filter change), so stale records from a prior
+filter view do not bleed into the new view. ✓
+
+**(c) `projects.tsx` — scope-enumeration reads use the correct distinct keys — clean.**
+
+`projects.tsx:571` (page): `ENDPOINTS.scopeProjects` (plain) for the workspace's project list.
+`projects.tsx:312` (import modal): `${ENDPOINTS.scopeProjects}?unbound=1` for the registry-only
+variant. These are TWO distinct keys (the `?unbound=1` variant is a separate string), so the bound
+list and the unbound-import list never collide. ✓
+
+**(d) `settings.tsx` / `sync.tsx` / `lifecycle-panel.tsx` — keys are correct — clean.**
+
+- `settings.tsx`: `ENDPOINTS.authStatus` (global), `ENDPOINTS.status` (global, shared by the
+  Embeddings and MemoryFormation sections — correctly the SAME key so they share one cache entry
+  for the same `/api/status` read), `ENDPOINTS.vaultSettings`, `ENDPOINTS.secrets`. All
+  project-agnostic globals → plain keys. ✓
+- `sync.tsx:391`: `project !== undefined ? swrKey(ENDPOINTS.assets, project) : undefined` —
+  project-scoped (the assets view is per-selected-project), keyed correctly. ✓
+- `lifecycle-panel.tsx:215-230`: three plain endpoint keys (`ENDPOINTS.lifecycleConflicts`,
+  `lifecycleStaleRefs`, `calibration`) — all global lifecycle reads, correctly not project-scoped. ✓
+
+**Verdict: CLEAN.** No code change.
+
+---
+
+#### T2 (page) — `undefined`-key guard correctness → **CLEAN**
+
+Where a page guards on "no project selected," it passes `undefined` as the key (disabling the hook),
+never firing an unscoped fetch. Verified in the two pages that gate on project selection:
+
+- `hive-graph.tsx:493/503`: `project !== undefined ? swrKey(...) : undefined`. When no project is
+  selected, both keys are `undefined`. The `useSwr` hook (`use-swr.ts:162-166`) early-returns when
+  `key === undefined` — NO fetch fires. The page renders `<NeedsProjectSelection>` instead
+  (`hive-graph.tsx` renders the needs-selection state when `project === undefined`), so another
+  scope's hive-graph data is never fetched or shown.
+- `sync.tsx:391`: `project !== undefined ? swrKey(ENDPOINTS.assets, project) : undefined`. Same
+  pattern — `undefined` key disables the hook; the page renders `<NeedsProjectSelection>`.
+
+Neither page falls through to an unscoped `wire.hiveGraphFileGraph()` / `wire.assetsView()` call when
+`project === undefined`, because the `undefined` key short-circuits the fetcher entirely. ✓
+
+**Verdict: CLEAN.** No code change.
+
+---
+
+#### T3 (page) — No new data surfaces introduced → **CLEAN**
+
+Diff-checked all 6 files for new `console.*`, `localStorage`, `sessionStorage`, `document.write`, or
+`debugger` statements added by this migration:
+
+```
+$ git diff main -- <6 files> | grep '^+' | grep -iE 'console\.|localStorage|sessionStorage|debugger|document\.write'
+(none — no new logging surfaces)
+```
+
+The migration replaces `useEffect`+poll plumbing with `useSwr` plumbing; it introduces no new
+observability surface. The `useSwr` hook itself was already audited CLEAN in T10 above (its module-level
+cache holds only the validated typed value `T`, no new surface). No page now logs a response body, an
+SWR key, a credential, or debug output that it previously didn't. ✓
+
+**Verdict: CLEAN.** No code change.
+
+---
+
+#### T4 (page) — Live tails / SSE streams preserved → **CLEAN**
+
+The three non-read-model feeds were correctly LEFT on their current mechanisms (not converted to
+`useSwr`, which would break real-time behavior):
+
+- **`sync.tsx` SSE activity feed — PRESERVED.** `sync.tsx:404-421` keeps the `useEffect` + `wire.logsStream`
+  subscription (the `/api/logs/stream` SSE backfill-then-tail). The diff only removed the
+  `useEffect`-based assets-view POLL (`setView`/`isTabHidden`), NOT the SSE block. The comment at
+  `sync.tsx:387-389` explicitly states the SSE feed "STAYS on its current mechanism (useEffect +
+  EventSource) per PRD-012b." ✓
+- **`logs.tsx` `/api/logs/stream` live tail — PRESERVED.** `logs.tsx:597-615` keeps the
+  `wire.logsStream` subscription (separate from the SWR-driven history). The migration only replaced
+  the `loadHistoryFirstPage` imperative fetch with an SWR read; the live SSE tail is untouched. ✓
+- **`hive-graph.tsx` search (POST) — PRESERVED.** `hive-graph.tsx:519-525` keeps
+  `wire.hiveGraphSearch(searchQuery, project)` as an imperative POST handler (it is a per-query
+  compute, not a read model — converting it to SWR would cache stale search results). ✓
+
+**Verdict: CLEAN.** No code change.
+
+---
+
+#### T5 (page) — Write paths unchanged → **CLEAN**
+
+The pages' action handlers still call the wire write methods that already invoke `invalidateSwr`
+internally (audited CLEAN in T7 above). No page bypassed the wire client or duplicated invalidation:
+
+- **`settings.tsx`** — `onLogout` (`settings.tsx:185`) calls `wire.logout()` (which calls
+  `invalidateSwr` per T7) then `mutateAuth()` for the client-side revalidation. Embeddings toggle
+  (`settings.tsx:591`) calls `wire.setEmbeddings()` (invalidates server-side) + `mutateStatus()`.
+  Memory toggle (`settings.tsx:705`) calls `wire.setMemory()` + `mutateStatus()`. Vault/secret saves
+  (`settings.tsx:948/966`) call `wire.setSetting()` / `wire.setSecret()` + `mutate`. The page-side
+  `mutate*` calls REVALIDATE the client cache (read-back); they do NOT duplicate invalidation logic.
+- **`projects.tsx`** — `onBoundNew`/`onImported`/`onUnbound` (`projects.tsx:589/596/624`) call
+  `reList()` → `mutateProjects()`. The actual binds go through `wire` (the FolderPicker / import modal),
+  which invalidates server-side; the page only revalidates its client cache.
+- **`hive-graph.tsx`** — brooding write (`hive-graph.tsx:123-132`) calls `wire.setNectarBrooding(body)`
+  (which calls `invalidateSwr(ENDPOINTS.hiveGraphProjects, ENDPOINTS.hiveGraphStatus)` at `wire.ts:2742`)
+  then `mutateProjects()` + `mutateTenancy()` for client revalidation. `onBound` (`hive-graph.tsx:135`)
+  calls `mutateProjects()`.
+- **`sync.tsx`** — `onAction` (`sync.tsx:440-462`) calls `wire.syncAction(...)` (which invalidates
+  server-side) then `mutateView()`.
+
+In every case the WRITE goes through the wire client (which owns `invalidateSwr`); the page's `mutate`
+call is a client-cache revalidation, not a bypass. ✓
+
+**Verdict: CLEAN.** No code change.
+
+---
+
+### Remediations applied
+
+**None.** All 5 page-migration threats are CLEAN. No Critical, High, Medium, or Low finding was
+raised. Per the "never silent pass" directive, each threat was checked and is documented above with
+code citations.
+
+### Verification output
+
+Post-audit gate (no code was changed, so this is identical to the baseline):
+
+```
+$ npm run typecheck   # tsc --noEmit
+> @legioncodeinc/hive@0.6.8 typecheck
+> tsc --noEmit
+(clean — no output)
+
+$ npm test
+ Test Files  1 failed | 73 passed (74)
+      Tests  2 failed | 616 passed (618)
+```
+
+The 2 failures are the pre-existing `tests/daemon/installer/funnel-telemetry.test.ts` cases — they
+fail identically on clean `main` and are explicitly out of scope. `git diff main` confirms the audit
+modified NO files (no remediations were needed).
+
+### Addendum sign-off
+
+| Item | Status |
+|---|---|
+| All 5 page-migration threats have an explicit finding with code citations | ✅ |
+| Critical/High findings remediated in place with passing tests | N/A (none found) |
+| `npm run typecheck` clean | ✅ |
+| `npm test` green modulo the 2 pre-existing out-of-scope `funnel-telemetry` failures | ✅ |
+| Addendum appended to existing PR #18 security report | ✅ |
+| `quality-worker-bee` may now run (no stale-QA ordering inversion) | ✅ |

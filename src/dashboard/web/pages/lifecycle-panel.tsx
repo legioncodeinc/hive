@@ -25,6 +25,7 @@
 
 import React from "react";
 
+import { useSwr } from "../use-swr.js";
 import { Badge, Button } from "../primitives.js";
 import type {
 	CalibrationWire,
@@ -32,7 +33,7 @@ import type {
 	LifecycleStaleRefWire,
 	WireClient,
 } from "../wire.js";
-import { EMPTY_CALIBRATION } from "../wire.js";
+import { EMPTY_CALIBRATION, ENDPOINTS } from "../wire.js";
 
 /** The poll-to-convergence budget for a resolve read-back (mirrors the page's re-read recipe). */
 const RESOLVE_POLL_ATTEMPTS = 6;
@@ -196,46 +197,37 @@ function ConflictRow({
 
 /**
  * The Lifecycle HEALTH panel (058d). Hydrates the conflict queue, the stale-ref list, and the
- * calibration introspection on mount; resolves a conflict through the 058b endpoint and POLLS the
- * queue to convergence (the resolved conflict drops out of the `open` list). Every read degrades to
- * an honest empty/inert state on failure (PRD-029), never a throw.
+ * calibration introspection via three SWR reads (PRD-012b — stale-while-revalidate, so warm
+ * navigation renders instantly); resolves a conflict through the 058b endpoint and POLLS the queue
+ * to convergence (the resolved conflict drops out of the `open` list), then syncs the SWR cache via
+ * `mutateConflicts`. Every read degrades to an honest empty/inert state on failure (PRD-029), never
+ * a throw.
  */
 export function LifecycleHealthPanel({ wire }: LifecycleHealthPanelProps): React.JSX.Element {
-	const [conflicts, setConflicts] = React.useState<readonly LifecycleConflictWire[]>([]);
-	const [staleRefs, setStaleRefs] = React.useState<readonly LifecycleStaleRefWire[]>([]);
-	const [calibration, setCalibration] = React.useState<CalibrationWire>(EMPTY_CALIBRATION);
-	const [hydrated, setHydrated] = React.useState(false);
-
-	const reloadConflicts = React.useCallback(async (): Promise<LifecycleConflictWire[]> => {
-		const rows = await readLifecycle(wire, "lifecycleConflicts", [] as LifecycleConflictWire[], "open");
-		setConflicts(rows);
-		return rows;
-	}, [wire]);
-
-	// US-55d.2.1: hydrate the three lifecycle reads on mount (the same `wire` the page already uses).
-	// Each call is GUARDED against a thin/older wire that does not implement the method (degrade to the
-	// empty value, never an unhandled rejection — the wire layer's "degrade, never throw" posture).
-	React.useEffect(() => {
-		let alive = true;
-		void (async (): Promise<void> => {
-			const [c, s, cal] = await Promise.all([
-				readLifecycle(wire, "lifecycleConflicts", [] as LifecycleConflictWire[], "open"),
-				readLifecycle(wire, "lifecycleStaleRefs", [] as LifecycleStaleRefWire[]),
-				readLifecycle(wire, "calibration", EMPTY_CALIBRATION),
-			]);
-			if (!alive) return;
-			setConflicts(c);
-			setStaleRefs(s);
-			setCalibration(cal);
-			setHydrated(true);
-		})();
-		return () => {
-			alive = false;
-		};
-	}, [wire]);
+	// PRD-012b: three SWR reads, one per lifecycle surface. Each fetcher is GUARDED against a thin/older
+	// wire that does not implement the method (the `readLifecycle` helper degrades to the empty value,
+	// never an unhandled rejection — the wire layer's "degrade, never throw" posture). These are read
+	// models (current state of each surface), so they are SWR; the resolve poll-to-convergence loop is
+	// an imperative action that needs return values for convergence detection, so it reads directly then
+	// syncs the cache via `mutateConflicts`.
+	const { data: conflicts = [], loading: conflictsLoading, mutate: mutateConflicts } = useSwr<readonly LifecycleConflictWire[]>(
+		ENDPOINTS.lifecycleConflicts,
+		async () => readLifecycle(wire, "lifecycleConflicts", [] as LifecycleConflictWire[], "open"),
+	);
+	const { data: staleRefs = [], loading: staleRefsLoading } = useSwr<readonly LifecycleStaleRefWire[]>(
+		ENDPOINTS.lifecycleStaleRefs,
+		async () => readLifecycle(wire, "lifecycleStaleRefs", [] as LifecycleStaleRefWire[]),
+	);
+	const { data: calibration = EMPTY_CALIBRATION } = useSwr<CalibrationWire>(
+		ENDPOINTS.calibration,
+		async () => readLifecycle(wire, "calibration", EMPTY_CALIBRATION),
+	);
 
 	// US-55d.2.2: resolve through the 058b endpoint, then POLL the open queue to convergence (the
 	// resolved conflict drops out). Never a single immediate read-back — the DeepLake consistency rule.
+	// The poll reads DIRECTLY (not via SWR) because convergence detection needs the returned rows; after
+	// convergence (or budget exhaustion), the SWR cache is synced via `mutateConflicts` so the UI
+	// reflects the final queue state.
 	const onResolve = React.useCallback(
 		async (id: string, verdict: string, winnerId: string): Promise<void> => {
 			const ok = typeof wire.resolveConflict === "function"
@@ -243,16 +235,22 @@ export function LifecycleHealthPanel({ wire }: LifecycleHealthPanelProps): React
 				: false;
 			if (!ok) {
 				// Honest failure: re-read so the row reflects the persisted (unchanged) state, no optimistic drop.
-				await reloadConflicts();
+				mutateConflicts();
 				return;
 			}
 			for (let attempt = 0; attempt < RESOLVE_POLL_ATTEMPTS; attempt += 1) {
-				const rows = await reloadConflicts();
-				if (!rows.some((c) => c.id === id)) return; // converged: the resolved conflict left the open queue.
+				const rows = await readLifecycle(wire, "lifecycleConflicts", [] as LifecycleConflictWire[], "open");
+				if (!rows.some((c) => c.id === id)) {
+					// converged: the resolved conflict left the open queue — sync the SWR cache + bail.
+					mutateConflicts();
+					return;
+				}
 				await sleep(RESOLVE_POLL_DELAY_MS);
 			}
+			// budget exhausted — sync whatever the last state is.
+			mutateConflicts();
 		},
-		[wire, reloadConflicts],
+		[wire, mutateConflicts],
 	);
 
 	// The store-level health badge `H = A · C · (1 − σ) · κ` (058d read-side projection). Each dormant
@@ -290,7 +288,7 @@ export function LifecycleHealthPanel({ wire }: LifecycleHealthPanelProps): React
 				<div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
 					Conflicts ({conflicts.length})
 				</div>
-				{!hydrated ? (
+				{conflictsLoading ? (
 					<span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-tertiary)" }}>loading…</span>
 				) : conflicts.length === 0 ? (
 					<span data-testid="conflicts-empty" style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-tertiary)" }}>no open conflicts.</span>
@@ -304,7 +302,7 @@ export function LifecycleHealthPanel({ wire }: LifecycleHealthPanelProps): React
 				<div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
 					Stale references ({staleRefs.length})
 				</div>
-				{!hydrated ? (
+				{staleRefsLoading ? (
 					<span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-tertiary)" }}>loading…</span>
 				) : staleRefs.length === 0 ? (
 					<span data-testid="stale-refs-empty" style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-tertiary)" }}>no stale references.</span>

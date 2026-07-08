@@ -30,16 +30,19 @@ import React from "react";
 import { Badge, Button, type BadgeTone } from "../primitives.js";
 import { LiveLog, Panel, SYNC_TONE } from "../panels.js";
 import type { PageProps } from "../page-frame.js";
-import { isTabHidden, PageFrame } from "../page-frame.js";
+import { PageFrame } from "../page-frame.js";
 import { useScope } from "../scope-context.js";
 import { NeedsProjectSelection } from "../needs-project.js";
+import { useSwr } from "../use-swr.js";
 import {
 	type AssetSyncRowWire,
 	type AssetSyncViewWire,
 	EMPTY_ASSET_SYNC_VIEW,
+	ENDPOINTS,
 	formatLogLine,
 	isSyncActivityRecord,
 	syncActivityVerb,
+	swrKey,
 	type LogRecordWire,
 } from "../wire.js";
 
@@ -375,38 +378,26 @@ export function appendActivityRecord(
 export function SyncPage({ wire }: PageProps): React.JSX.Element {
 	// PRD-049e (49e-AC-2 / 49e-AC-5): the dashboard-selected project gates this page. With no project
 	// selected the page renders the needs-selection state (never another scope's assets); a project
-	// change re-hydrates the view (the poll effect is keyed on `project`).
+	// change re-hydrates the view (the key encodes the project, so SWR re-scopes on switch).
 	const { scope } = useScope();
 	const project = scope.project;
-	const [view, setView] = React.useState<AssetSyncViewWire>(EMPTY_ASSET_SYNC_VIEW);
+	// PRD-012b: the union view-model is now an SWR read with interval refresh. The key encodes the
+	// project (re-scopes on switch); `undefined` disables the hook (no fetch — the page renders the
+	// needs-selection state). The former `alive`/`isTabHidden` guard is now the hook's built-in
+	// background-tab pause. This is the READ model; the SSE activity feed below is a LIVE TAIL and
+	// STAYS on its current mechanism (useEffect + EventSource) per PRD-012b.
+	const viewKey = project !== undefined ? swrKey(ENDPOINTS.assets, project) : undefined;
+	const { data: view = EMPTY_ASSET_SYNC_VIEW, mutate: mutateView } = useSwr<AssetSyncViewWire>(
+		viewKey,
+		async () => wire.assetsView(),
+		{ refreshInterval: VIEW_POLL_MS },
+	);
 	// The chronological (oldest-last) sync-activity buffer: BACKFILLED from the /api/logs snapshot, then
 	// EXTENDED by the /api/logs/stream SSE tail (042c c-AC-2). The LiveLog lines derive from it.
 	const [activityRecords, setActivityRecords] = React.useState<readonly LogRecordWire[]>([]);
 	const [tab, setTab] = React.useState<AssetKind>("skill");
 	const [openKey, setOpenKey] = React.useState<string | null>(null);
 	const [inFlight, setInFlight] = React.useState<InFlightMap>({});
-
-	// Hydrate the union view-model (the read backbone). A light poll keeps it fresh; stops on unmount.
-	// 49e-AC-2/AC-5: re-hydrate when the selected project changes; with no project selected, do not
-	// fetch (the page renders the needs-selection state below) so another scope's assets never show.
-	React.useEffect(() => {
-		if (project === undefined) {
-			setView(EMPTY_ASSET_SYNC_VIEW);
-			return;
-		}
-		let alive = true;
-		const tick = async (): Promise<void> => {
-			if (!alive || isTabHidden()) return; // background-tab pause: no assets-view poll while hidden
-			const v = await wire.assetsView();
-			if (alive) setView(v);
-		};
-		void tick();
-		const id = setInterval(() => void tick(), VIEW_POLL_MS);
-		return () => {
-			alive = false;
-			clearInterval(id);
-		};
-	}, [wire, project]);
 
 	// The activity feed FOLLOWS the SSE tail (042c c-AC-2): BACKFILL the recent records from the
 	// /api/logs snapshot ONCE, THEN subscribe to /api/logs/stream and append each NEW sync record as it
@@ -442,7 +433,8 @@ export function SyncPage({ wire }: PageProps): React.JSX.Element {
 
 	// The in-flight→converged action dispatch (a-AC-7): mark the row in-flight, run the REAL action
 	// (the daemon does the poll-convergent read-back), then RE-READ the union and reflect the
-	// persisted state — never an optimistic flip. The in-flight flag clears on completion.
+	// persisted state — never an optimistic flip. The in-flight flag clears on completion. After the
+	// action, `mutateView()` revalidates the SWR cache so the row reflects the converged state.
 	const onAction = React.useCallback(
 		(action: "promote" | "pull" | "demote" | "enable" | "disable", row: AssetSyncRowWire): void => {
 			const key = flightKey(row.assetType, row.name);
@@ -458,7 +450,7 @@ export function SyncPage({ wire }: PageProps): React.JSX.Element {
 						honeycombId: row.honeycombId !== "" ? row.honeycombId : undefined,
 					});
 					// Re-read the union so the row reflects the CONVERGED persisted state (a-AC-7).
-					setView(await wire.assetsView());
+					mutateView();
 				} finally {
 					setInFlight((m) => {
 						const next = { ...m };
@@ -468,7 +460,7 @@ export function SyncPage({ wire }: PageProps): React.JSX.Element {
 				}
 			})();
 		},
-		[wire],
+		[wire, mutateView],
 	);
 
 	const rows = tab === "skill" ? view.skills : view.agents;
