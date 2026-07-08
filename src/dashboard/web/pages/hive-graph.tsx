@@ -13,11 +13,12 @@ import { layout } from "../graph-layout.js";
 import { Panel } from "../panels.js";
 import { Badge, Button } from "../primitives.js";
 import type { PageProps } from "../page-frame.js";
-import { isTabHidden, PageFrame } from "../page-frame.js";
+import { PageFrame } from "../page-frame.js";
 import type { ProjectionDerivedEntry, ProjectionFileEntry } from "../hive-graph-projection.js";
 import { NeedsProjectSelection } from "../needs-project.js";
 import { FolderPicker } from "../folder-picker.js";
 import { useScope } from "../scope-context.js";
+import { useSwr } from "../use-swr.js";
 import {
 	GraphCanvasFull,
 	KindToggle,
@@ -35,9 +36,11 @@ import {
 	capGraphForRender,
 	EMPTY_GRAPH,
 	EMPTY_HIVE_GRAPH_STATUS,
+	ENDPOINTS,
 	MAX_RENDER_NODES,
 	type GraphWire,
 	type HiveGraphBuildAck,
+	type HiveGraphFileGraphWire,
 	type HiveGraphHitWire,
 	type HiveGraphSearchResultWire,
 	type HiveGraphStatusResultWire,
@@ -46,7 +49,9 @@ import {
 	type SetNectarBroodingBody,
 	type WireClient,
 	EMPTY_NECTAR_PROJECTS,
+	swrKey,
 	UNREACHABLE_SETUP_TENANCY,
+	type SetupTenancyResultWire,
 } from "../wire.js";
 import type { ViewTransform } from "./graph.js";
 
@@ -90,34 +95,24 @@ function broodingBadgeTone(state: NectarProjectRowWire["brooding"]): "verified" 
 	}
 }
 
-/** PRD-019c — nectar active projects + brooding controls (polls `GET /api/hive-graph/projects`). */
+/** PRD-019c — nectar active projects + brooding controls (reads `GET /api/hive-graph/projects`). */
 function NectarProjectsPanel({ wire }: { wire: WireClient }): React.JSX.Element {
-	const [projectsWire, setProjectsWire] = React.useState<NectarProjectsWire>(EMPTY_NECTAR_PROJECTS);
-	const [fleetTenancy, setFleetTenancy] = React.useState(() => deriveActiveTenancyLabel(UNREACHABLE_SETUP_TENANCY));
-	const [hydrated, setHydrated] = React.useState(false);
+	// PRD-012b: the nectar projects list + the fleet tenancy are now two SWR reads (poll-refreshed). The
+	// former combined poll fetched BOTH in one `tick`; now each is its own cache entry. The brooding write
+	// invalidates the wire-side cache and returns the ack shape, so after a write we `mutate` to revalidate.
+	const { data: projectsWire = EMPTY_NECTAR_PROJECTS, loading: projectsLoading, mutate: mutateProjects } = useSwr<NectarProjectsWire>(
+		ENDPOINTS.hiveGraphProjects,
+		async () => wire.nectarProjects(),
+		{ refreshInterval: HIVE_GRAPH_POLL_MS },
+	);
+	const { data: tenancy = UNREACHABLE_SETUP_TENANCY, mutate: mutateTenancy } = useSwr<SetupTenancyResultWire>(
+		ENDPOINTS.setupTenancy,
+		async () => wire.setupTenancy(),
+		{ refreshInterval: HIVE_GRAPH_POLL_MS },
+	);
+	const fleetTenancy = deriveActiveTenancyLabel(tenancy);
 	const [busyKey, setBusyKey] = React.useState<string | null>(null);
 	const inFlightRef = React.useRef(false);
-
-	const reList = React.useCallback(async (): Promise<void> => {
-		const [next, tenancy] = await Promise.all([wire.nectarProjects(), wire.setupTenancy()]);
-		setProjectsWire(next);
-		setFleetTenancy(deriveActiveTenancyLabel(tenancy));
-		setHydrated(true);
-	}, [wire]);
-
-	React.useEffect(() => {
-		let alive = true;
-		const tick = async (): Promise<void> => {
-			if (!alive || isTabHidden()) return;
-			await reList();
-		};
-		void tick();
-		const id = setInterval(() => void tick(), HIVE_GRAPH_POLL_MS);
-		return () => {
-			alive = false;
-			clearInterval(id);
-		};
-	}, [reList]);
 
 	const runBroodingWrite = React.useCallback(
 		async (body: SetNectarBroodingBody, busy: string): Promise<void> => {
@@ -126,22 +121,24 @@ function NectarProjectsPanel({ wire }: { wire: WireClient }): React.JSX.Element 
 			setBusyKey(busy);
 			try {
 				const ack = await wire.setNectarBrooding(body);
-				if (!ack.unreachable) {
-					setProjectsWire(ack);
-				}
-				await reList();
+				// After the write, revalidate the SWR cache so the list reflects the persisted brooding state.
+				// The wire method already invalidates the server-side proxy cache; this syncs the client side.
+				mutateProjects();
+				mutateTenancy();
+				if (ack.unreachable) return;
 			} finally {
 				inFlightRef.current = false;
 				setBusyKey(null);
 			}
 		},
-		[wire, reList, projectsWire.unreachable],
+		[projectsWire.unreachable, mutateProjects, mutateTenancy, wire],
 	);
 
 	const onBound = React.useCallback((): void => {
-		void reList();
-	}, [reList]);
+		mutateProjects();
+	}, [mutateProjects]);
 
+	const hydrated = !projectsLoading;
 	const controlsDisabled = !hydrated || projectsWire.unreachable || busyKey !== null;
 
 	const panelTenancyLine =
@@ -489,11 +486,27 @@ export function HiveGraphPage({ wire }: PageProps): React.JSX.Element {
 	const { scope } = useScope();
 	const project = scope.project;
 
-	const [graph, setGraph] = React.useState<GraphWire>(EMPTY_GRAPH);
-	const [files, setFiles] = React.useState<Readonly<Record<string, ProjectionFileEntry>>>({});
-	const [derived, setDerived] = React.useState<Readonly<Record<string, ProjectionDerivedEntry>>>({});
-	const [graphUnreachable, setGraphUnreachable] = React.useState(false);
-	const [status, setStatus] = React.useState<HiveGraphStatusResultWire>({ ...EMPTY_HIVE_GRAPH_STATUS, unreachable: false });
+	// PRD-012b: the file-graph projection + the status widgets are now SWR reads with interval refresh.
+	// The key encodes the project (re-scopes on switch via the `?project=` query); `undefined` disables
+	// both hooks (no fetch — the page renders the needs-selection state). The former `alive`/`isTabHidden`
+	// guard is now the hook's built-in background-tab pause. Nectar reads are project-scoped via the query
+	// param (NOT the header), so the key suffix prevents cross-project cache collisions.
+	const fileGraphKey = project !== undefined ? swrKey(ENDPOINTS.hiveGraphProjection, project) : undefined;
+	const { data: graphRes = { graph: EMPTY_GRAPH, files: {}, derived: {}, unreachable: false } } = useSwr<HiveGraphFileGraphWire>(
+		fileGraphKey,
+		async () => wire.hiveGraphFileGraph(project),
+		{ refreshInterval: HIVE_GRAPH_POLL_MS },
+	);
+	const statusKey = project !== undefined ? swrKey(ENDPOINTS.hiveGraphStatus, project) : undefined;
+	const { data: status = { ...EMPTY_HIVE_GRAPH_STATUS, unreachable: false } } = useSwr<HiveGraphStatusResultWire>(
+		statusKey,
+		async () => wire.hiveGraphStatus(project),
+		{ refreshInterval: HIVE_GRAPH_POLL_MS },
+	);
+	const graph = graphRes.graph;
+	const files = graphRes.files;
+	const derived = graphRes.derived;
+	const graphUnreachable = graphRes.unreachable;
 
 	const [selected, setSelected] = React.useState<string | null>(null);
 	const [hiddenKinds, setHiddenKinds] = React.useState<ReadonlySet<string>>(new Set());
@@ -502,34 +515,6 @@ export function HiveGraphPage({ wire }: PageProps): React.JSX.Element {
 	const [searchQuery, setSearchQuery] = React.useState("");
 	const [searchResults, setSearchResults] = React.useState<HiveGraphSearchResultWire | null>(null);
 	const [searching, setSearching] = React.useState(false);
-
-	React.useEffect(() => {
-		if (project === undefined) {
-			setGraph(EMPTY_GRAPH);
-			setFiles({});
-			setDerived({});
-			setGraphUnreachable(false);
-			setStatus({ ...EMPTY_HIVE_GRAPH_STATUS, unreachable: false });
-			return;
-		}
-		let alive = true;
-		const tick = async (): Promise<void> => {
-			if (!alive || isTabHidden()) return;
-			const [graphRes, statusRes] = await Promise.all([wire.hiveGraphFileGraph(project), wire.hiveGraphStatus(project)]);
-			if (!alive) return;
-			setGraph(graphRes.graph);
-			setFiles(graphRes.files);
-			setDerived(graphRes.derived);
-			setGraphUnreachable(graphRes.unreachable);
-			setStatus(statusRes);
-		};
-		void tick();
-		const id = setInterval(() => void tick(), HIVE_GRAPH_POLL_MS);
-		return () => {
-			alive = false;
-			clearInterval(id);
-		};
-	}, [wire, project]);
 
 	const onSearchSubmit = React.useCallback(async (): Promise<void> => {
 		if (project === undefined || searchQuery.trim() === "") return;

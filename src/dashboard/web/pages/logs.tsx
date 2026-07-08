@@ -31,8 +31,11 @@ import { Badge, Button, Input, type BadgeTone } from "../primitives.js";
 import { Panel } from "../panels.js";
 import type { PageProps } from "../page-frame.js";
 import { PageFrame } from "../page-frame.js";
+import { useSwr } from "../use-swr.js";
 import {
+	buildHistoryQueryString,
 	EMPTY_LOGS_HISTORY,
+	ENDPOINTS,
 	type LogRecordWire,
 	type LogsHistoryFilters,
 	type LogsHistoryWire,
@@ -494,11 +497,56 @@ export function LogsPage({ wire, daemonUp }: PageProps): React.JSX.Element {
 	const [tab, setTab] = React.useState<LogsTab>("requests");
 
 	// ── 043b: the request-log history (durable) + filters + pagination. ──
-	const [history, setHistory] = React.useState<LogsHistoryWire>(EMPTY_LOGS_HISTORY);
+	// PRD-012b: the first-page history read is now an SWR read, keyed on the FULL filter set (via
+	// `buildHistoryQueryString` so different filters produce distinct cache entries). `keepPreviousData`
+	// prevents an empty flash when the filters change (the old page stays visible until the new one lands).
+	// The "load more" pagination is still imperative (it appends OLDER pages via the cursor).
 	const [appliedFilters, setAppliedFilters] = React.useState<FilterState>(EMPTY_FILTERS);
 	const [draftFilters, setDraftFilters] = React.useState<FilterState>(EMPTY_FILTERS);
-	const [historyLoading, setHistoryLoading] = React.useState(false);
+	// The accumulated OLDER pages appended via "load more" (the SWR hook owns page one; this owns the rest).
+	const [extraRecords, setExtraRecords] = React.useState<readonly LogRecordWire[]>([]);
+	const [moreCursor, setMoreCursor] = React.useState<string | null>(null);
+	const [historyLoadingMore, setHistoryLoadingMore] = React.useState(false);
 	const [historyError, setHistoryError] = React.useState(false);
+
+	const historyKey = `${ENDPOINTS.logs}/history${buildHistoryQueryString(toWireFilters(appliedFilters))}`;
+	const { data: firstPage = EMPTY_LOGS_HISTORY, loading: historyLoading } = useSwr<LogsHistoryWire>(
+		historyKey,
+		async () => wire.logsHistory(toWireFilters(appliedFilters)),
+		{ keepPreviousData: true },
+	);
+	// The effective page = first-page (SWR) + accumulated older records. When the first-page changes
+	// (filter change or revalidation), the extra records RESET so there's no cross-filter bleed.
+	const history: LogsHistoryWire = React.useMemo(() => {
+		if (extraRecords.length === 0) return firstPage;
+		return {
+			records: [...firstPage.records, ...extraRecords],
+			count: firstPage.count + extraRecords.length,
+			nextCursor: moreCursor,
+			persistent: firstPage.persistent,
+		};
+	}, [firstPage, extraRecords, moreCursor]);
+
+	// Reset the accumulated pages when the first-page key changes (filter change).
+	React.useEffect(() => {
+		setExtraRecords([]);
+		setMoreCursor(firstPage.nextCursor);
+	}, [historyKey, firstPage.nextCursor]);
+
+	// Append the next OLDER history page via the cursor (no dup/gap — the daemon pages on id).
+	const loadHistoryMore = React.useCallback(async (): Promise<void> => {
+		if (moreCursor === null) return;
+		setHistoryLoadingMore(true);
+		try {
+			const next = await wire.logsHistory({ ...toWireFilters(appliedFilters), cursor: moreCursor });
+			setExtraRecords((cur) => [...cur, ...next.records]);
+			setMoreCursor(next.nextCursor);
+		} catch {
+			setHistoryError(true);
+		} finally {
+			setHistoryLoadingMore(false);
+		}
+	}, [wire, appliedFilters, moreCursor]);
 
 	// ── 043b: the live tail (SSE follow — no poll). ──
 	const [liveRecords, setLiveRecords] = React.useState<readonly LogRecordWire[]>([]);
@@ -510,42 +558,6 @@ export function LogsPage({ wire, daemonUp }: PageProps): React.JSX.Element {
 	const [turnsLoading, setTurnsLoading] = React.useState(false);
 	const [turnsError, setTurnsError] = React.useState(false);
 	const [selectedTurn, setSelectedTurn] = React.useState<SessionRowWire | null>(null);
-
-	// Fetch page ONE of the history for a given filter set (replaces the current page).
-	const loadHistoryFirstPage = React.useCallback(
-		async (filters: FilterState): Promise<void> => {
-			setHistoryLoading(true);
-			setHistoryError(false);
-			try {
-				const page = await wire.logsHistory(toWireFilters(filters));
-				setHistory(page);
-			} catch {
-				setHistoryError(true);
-			} finally {
-				setHistoryLoading(false);
-			}
-		},
-		[wire],
-	);
-
-	// Append the next OLDER history page via the cursor (no dup/gap — the daemon pages on id).
-	const loadHistoryMore = React.useCallback(async (): Promise<void> => {
-		if (history.nextCursor === null) return;
-		setHistoryLoading(true);
-		try {
-			const next = await wire.logsHistory({ ...toWireFilters(appliedFilters), cursor: history.nextCursor });
-			setHistory((cur) => ({
-				records: [...cur.records, ...next.records],
-				count: cur.count + next.count,
-				nextCursor: next.nextCursor,
-				persistent: next.persistent,
-			}));
-		} catch {
-			setHistoryError(true);
-		} finally {
-			setHistoryLoading(false);
-		}
-	}, [wire, appliedFilters, history.nextCursor]);
 
 	// Fetch page ONE of the turns history (replaces the list).
 	const loadTurnsFirstPage = React.useCallback(async (): Promise<void> => {
@@ -577,11 +589,10 @@ export function LogsPage({ wire, daemonUp }: PageProps): React.JSX.Element {
 		}
 	}, [wire, turnsCursor]);
 
-	// On mount: load the first history page + the first turns page (both surfaces are browsable).
+	// On mount: load the first turns page (the first history page is now SWR-driven).
 	React.useEffect(() => {
-		void loadHistoryFirstPage(EMPTY_FILTERS);
 		void loadTurnsFirstPage();
-	}, [loadHistoryFirstPage, loadTurnsFirstPage]);
+	}, [loadTurnsFirstPage]);
 
 	// The live tail FOLLOWS the SSE stream (D-2 — reuse `wire.logsStream`, no poll). In a non-browser
 	// env (jsdom test) `logsStream` is an inert no-op, so the tail degrades to empty and the test
@@ -600,14 +611,12 @@ export function LogsPage({ wire, daemonUp }: PageProps): React.JSX.Element {
 
 	const onApplyFilters = React.useCallback((): void => {
 		setAppliedFilters(draftFilters);
-		void loadHistoryFirstPage(draftFilters);
-	}, [draftFilters, loadHistoryFirstPage]);
+	}, [draftFilters]);
 
 	const onClearFilters = React.useCallback((): void => {
 		setDraftFilters(EMPTY_FILTERS);
 		setAppliedFilters(EMPTY_FILTERS);
-		void loadHistoryFirstPage(EMPTY_FILTERS);
-	}, [loadHistoryFirstPage]);
+	}, []);
 
 	const onChangeField = React.useCallback((key: keyof FilterState, value: string): void => {
 		setDraftFilters((cur) => ({ ...cur, [key]: value }));
@@ -631,7 +640,7 @@ export function LogsPage({ wire, daemonUp }: PageProps): React.JSX.Element {
 					{/* Stacked (OQ-2): live tail (collapsible) on TOP, history below — kept separate (D-1). */}
 					<LiveTail records={liveRecords} open={liveOpen} onToggle={() => setLiveOpen((o) => !o)} />
 					<FilterBar draft={draftFilters} onChangeField={onChangeField} onApply={onApplyFilters} onClear={onClearFilters} />
-					<HistoryTable page={history} loading={historyLoading} error={historyError} onLoadMore={() => void loadHistoryMore()} />
+					<HistoryTable page={history} loading={historyLoading || historyLoadingMore} error={historyError} onLoadMore={() => void loadHistoryMore()} />
 				</div>
 			) : selectedTurn !== null ? (
 				<TurnDetail turn={selectedTurn} onBack={() => setSelectedTurn(null)} />

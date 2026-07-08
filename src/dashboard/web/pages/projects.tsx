@@ -32,7 +32,8 @@ import { Badge, Button } from "../primitives.js";
 import { PageFrame, type PageProps } from "../page-frame.js";
 import { useScope } from "../scope-context.js";
 import { FolderPicker } from "../folder-picker.js";
-import { type BindAckWire, type ScopeProjectWire, type WireClient } from "../wire.js";
+import { useSwr } from "../use-swr.js";
+import { type BindAckWire, ENDPOINTS, type ScopeProjectWire, type WireClient } from "../wire.js";
 
 /** The reserved inbox project id (mirrored from the resolver; a literal so this stays a thin-client view). */
 export const UNSORTED_PROJECT_ID = "__unsorted__" as const;
@@ -300,27 +301,19 @@ interface ImportModalProps {
  * `projects/bind-existing` (d-AC-2 path). Privilege-scoped: the list is exactly what the token can see.
  */
 function ImportModal({ wire, onClose, onImported }: ImportModalProps): React.JSX.Element {
-	const [importable, setImportable] = React.useState<readonly ScopeProjectWire[]>([]);
-	const [hydrated, setHydrated] = React.useState(false);
+	// PRD-012b: the unbound-projects list is a read model (the registry-only set). The key encodes the
+	// `?unbound=1` variant so the cache entry is DISTINCT from the main `scopeProjects` list. SWR handles
+	// mount + revalidation; `keepPreviousData` is irrelevant here (the modal is short-lived).
+	const { data: importableRaw = [], loading: importLoading } = useSwr<readonly ScopeProjectWire[]>(
+		`${ENDPOINTS.scopeProjects}?unbound=1`,
+		async () => wire.scopeProjects({ unbound: true }),
+	);
+	const importable = importableRaw.filter((p) => p.projectId !== UNSORTED_PROJECT_ID);
 	const [selectedProject, setSelectedProject] = React.useState<string | null>(null);
 	const [browsePath, setBrowsePath] = React.useState<string | null>(null);
 	const [busy, setBusy] = React.useState(false);
 	const [error, setError] = React.useState("");
 	const inFlightRef = React.useRef(false);
-
-	// Hydrate the importable (registry-only) projects on mount (d-AC-1).
-	React.useEffect(() => {
-		let alive = true;
-		void (async () => {
-			const rows = await wire.scopeProjects({ unbound: true });
-			if (!alive) return;
-			setImportable(rows.filter((p) => p.projectId !== UNSORTED_PROJECT_ID));
-			setHydrated(true);
-		})();
-		return () => {
-			alive = false;
-		};
-	}, [wire]);
 
 	// Bind the chosen folder to the selected EXISTING project (d-AC-2). The FolderPicker drives the
 	// browse, but its bind is the NEW-project path — so here we intercept its selection: we render the
@@ -349,9 +342,9 @@ function ImportModal({ wire, onClose, onImported }: ImportModalProps): React.JSX
 					<span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
 						projects in this workspace not yet on this device
 					</span>
-					{!hydrated ? (
-						<span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-tertiary)" }}>loading…</span>
-					) : importable.length === 0 ? (
+				{importLoading ? (
+							<span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-tertiary)" }}>loading…</span>
+						) : importable.length === 0 ? (
 						<span data-testid="import-empty" style={{ fontSize: 13, color: "var(--text-tertiary)" }}>
 							Every registry project is already bound on this device. Nothing to import.
 						</span>
@@ -566,20 +559,19 @@ function ModalShell({ title, onClose, testId, children }: { title: string; onClo
  */
 export function ProjectsPage({ wire }: PageProps): React.JSX.Element {
 	const { scope, setScope } = useScope();
-	const [projects, setProjects] = React.useState<readonly ScopeProjectWire[]>([]);
-	const [hydrated, setHydrated] = React.useState(false);
+	// PRD-012b: the workspace's projects list is now an SWR read. The key is the plain endpoint (the
+	// `?unbound=1` variant is a SEPARATE cache entry, used by the import modal). After a successful add/
+	// unbind, `mutateProjects()` revalidates so the list reflects the daemon's persisted truth.
+	const { data: projects = [], loading: projectsLoading, mutate: mutateProjects } = useSwr<readonly ScopeProjectWire[]>(
+		ENDPOINTS.scopeProjects,
+		async () => wire.scopeProjects(),
+	);
 	const [flow, setFlow] = React.useState<AddFlow>("none");
 
 	/** Re-list the workspace's projects (the persisted truth). */
-	const reList = React.useCallback(async (): Promise<void> => {
-		const rows = await wire.scopeProjects();
-		setProjects(rows);
-		setHydrated(true);
-	}, [wire]);
-
-	React.useEffect(() => {
-		void reList();
-	}, [reList]);
+	const reList = React.useCallback((): void => {
+		mutateProjects();
+	}, [mutateProjects]);
 
 	// ACTIVE = locally-bound, non-inbox projects (c-AC-1). The inbox is shown distinctly (c-AC-2) with its
 	// daemon-aggregated size (its `sessionCount`) — resolved here so the row can render the real count.
@@ -597,7 +589,7 @@ export function ProjectsPage({ wire }: PageProps): React.JSX.Element {
 	const onBoundNew = React.useCallback(
 		(_ack: BindAckWire): void => {
 			setFlow("none");
-			void reList();
+			reList();
 		},
 		[reList],
 	);
@@ -605,7 +597,7 @@ export function ProjectsPage({ wire }: PageProps): React.JSX.Element {
 	const onImported = React.useCallback(
 		(_ack: BindAckWire): void => {
 			setFlow("none");
-			void reList();
+			reList();
 		},
 		[reList],
 	);
@@ -629,14 +621,14 @@ export function ProjectsPage({ wire }: PageProps): React.JSX.Element {
 
 			{/* The active-project list (c-AC-1). */}
 			<div data-testid="projects-list" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-				{!hydrated ? (
-					<div style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-tertiary)" }}>loading…</div>
-				) : active.length === 0 ? (
-					<div data-testid="projects-empty" style={{ padding: "10px 4px", fontSize: 13, color: "var(--text-tertiary)" }}>
-						No active projects on this device yet. Use <strong>+ Add</strong> to bind a folder or import an existing project.
-					</div>
-				) : (
-					active.map((p) => <ProjectRow key={p.projectId} project={p} wire={wire} onOpen={onOpen} onUnbound={() => void reList()} />)
+			{projectsLoading ? (
+						<div style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-tertiary)" }}>loading…</div>
+					) : active.length === 0 ? (
+						<div data-testid="projects-empty" style={{ padding: "10px 4px", fontSize: 13, color: "var(--text-tertiary)" }}>
+							No active projects on this device yet. Use <strong>+ Add</strong> to bind a folder or import an existing project.
+						</div>
+					) : (
+						active.map((p) => <ProjectRow key={p.projectId} project={p} wire={wire} onOpen={onOpen} onUnbound={reList} />)
 				)}
 
 				{/* c-AC-2: the reserved inbox, shown distinctly with its daemon-aggregated size, when present. */}
