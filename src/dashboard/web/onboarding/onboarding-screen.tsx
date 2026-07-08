@@ -36,6 +36,7 @@ import {
 	type InstallableProduct,
 } from "./contracts.js";
 import { clearSelection, persistSelection, readSelection } from "./onboarding-selection-store.js";
+import { HarnessConnectStep } from "./harness-connect-step.js";
 import { HealthView } from "./health-view.js";
 import { InstallCard } from "./install-card.js";
 import { LoginStep } from "./login-step.js";
@@ -55,7 +56,8 @@ type Phase =
 	| { readonly kind: "installing"; readonly queue: readonly InstallableProduct[]; readonly index: number }
 	| { readonly kind: "health" }
 	| { readonly kind: "login" }
-	| { readonly kind: "tenancy" };
+	| { readonly kind: "tenancy" }
+	| { readonly kind: "harness-connect" };
 
 /** An empty install queue means nothing more to do, skip straight to the health gate. */
 function installingOrHealth(queue: readonly InstallableProduct[]): Phase {
@@ -281,8 +283,10 @@ export function OnboardingScreen({
 		if (typeof window !== "undefined") window.location.assign("/");
 	}, [onShortCircuitNavigate]);
 
-	// ts-AC-9: terminal handoff after tenancy selection persists; drop the persisted install subset.
-	const handleTenancyComplete = React.useCallback((): void => {
+	// ts-AC-9: the terminal handoff, drop the persisted install subset and navigate to the dashboard.
+	// This is the true end of onboarding; both the tokenless resume paths and the PRD-006c
+	// harness-connect step's completion hand off through here.
+	const navigateToDashboard = React.useCallback((): void => {
 		clearSelection();
 		if (onAuthenticated !== undefined) {
 			onAuthenticated();
@@ -290,6 +294,12 @@ export function OnboardingScreen({
 		}
 		if (typeof window !== "undefined") window.location.assign("/");
 	}, [onAuthenticated]);
+
+	// PRD-006c: the MAIN-flow tenancy completion now advances to the harness-connect step (positioned
+	// after tenancy, before the terminal navigate). The tokenless resume paths below stay terminal.
+	const handleTenancyComplete = React.useCallback((): void => {
+		setPhase({ kind: "harness-connect" });
+	}, []);
 
 	// ts-AC-1: login authenticates into the tenancy phase, not the dashboard.
 	const handleLoginAuthenticated = React.useCallback((): void => {
@@ -325,7 +335,7 @@ export function OnboardingScreen({
 				// falls through to the tenancy step, whose terminal split-brain state stops the
 				// loop with manual affordances.
 				if (consumeTenancyAutoComplete()) {
-					handleTenancyComplete();
+					navigateToDashboard();
 					return;
 				}
 			}
@@ -339,12 +349,15 @@ export function OnboardingScreen({
 		return () => {
 			alive = false;
 		};
-	}, [tokenMissing, wireClient, handleTenancyComplete]);
+	}, [tokenMissing, wireClient, navigateToDashboard]);
 
 	if (tokenMissing) {
 		if (tokenlessResume === "probing") return <LoadingPlaceholder />;
 		if (tokenlessResume === "tenancy") {
-			return <TenancyStep onboardingClient={client} tenancyClient={tenancyClient} onComplete={handleTenancyComplete} />;
+			// The tokenless gate-redirect resume path stays terminal (navigates straight to the
+			// dashboard on selection), preserving PRD-011c behavior; the harness-connect step is the
+			// first-run onboarding flow's step, reached via the phase switch below.
+			return <TenancyStep onboardingClient={client} tenancyClient={tenancyClient} onComplete={navigateToDashboard} />;
 		}
 		return <MissingTokenNotice />;
 	}
@@ -379,6 +392,10 @@ export function OnboardingScreen({
 			return <LoginStep onboardingClient={client} wire={wire} onAuthenticated={handleLoginAuthenticated} pollMs={loginPollMs} />;
 		case "tenancy":
 			return <TenancyStep onboardingClient={client} tenancyClient={tenancyClient} onComplete={handleTenancyComplete} />;
+		case "harness-connect":
+			// PRD-006c: the standalone "Connect your coding assistant" step (PRD-013a's `setup` wizard
+			// is not built yet, so this is a standalone phase). Continue + Skip both navigate to `/`.
+			return <HarnessConnectStep onboardingClient={client} onDone={navigateToDashboard} />;
 		default: {
 			const exhaustive: never = phase;
 			return exhaustive;

@@ -91,6 +91,11 @@ export const ENDPOINTS = Object.freeze({
 	// PRD-039a — the harness registry + last-seen telemetry endpoint (the data backbone the
 	// Harnesses page 039b/039c reads). Served under the diagnostics group (`/api/diagnostics/harnesses`).
 	harnesses: "/api/diagnostics/harnesses",
+	// PRD-006d — the hive-owned, honeycomb-CLI-backed harness connect surface. `harnessConnectStatus`
+	// is the AUTHORITATIVE plugin-enabled read (NOT the passive `harnesses` proxy); `harnessRepair`
+	// re-runs the connector setup for one harness. Both shell the honeycomb CLI server-side.
+	harnessConnectStatus: "/api/diagnostics/harness-connect-status",
+	harnessRepair: "/api/diagnostics/harness-repair",
 	// PRD-042 — the Sync page `installed ∪ synced` union view-model (skills + agents, each with state
 	// + detail). Served under the diagnostics group (`/api/diagnostics/assets`). The five write actions
 	// POST to `/api/diagnostics/sync/{promote,pull,demote,enable,disable}` (built off this base).
@@ -796,6 +801,43 @@ export const HarnessStatusResponseSchema = z.object({
 	harnesses: z.array(HarnessStatusSchema).catch([]),
 });
 export type HarnessStatusWire = z.infer<typeof HarnessStatusSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRD-006d — the honeycomb harness-connect card view-model. These are the shapes the hive-owned
+// `/api/diagnostics/harness-connect-status` + `/api/diagnostics/harness-repair` routes return (each
+// SHELLS the honeycomb CLI, the AUTHORITATIVE plugin-enabled surface, not the passive
+// `/api/diagnostics/harnesses` proxy). LOCAL types matching honeycomb's field names exactly; every
+// field `.catch()`es so a partial/malformed body degrades to a safe row rather than throwing.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The renderable connect statuses the repair trigger resolves to (mirrors honeycomb's `ConnectStatus`). */
+export const HARNESS_CONNECT_STATUSES = ["connected", "agent-absent", "cli-absent", "error"] as const;
+export type HarnessConnectStatusWire = (typeof HARNESS_CONNECT_STATUSES)[number];
+
+/** One harness's read-only connection state (d-AC-2): agent present? plugin enabled? last outcome? */
+export const HarnessConnectionStateSchema = z.object({
+	harness: z.string().catch(""),
+	agentPresent: z.boolean().catch(false),
+	pluginEnabled: z.boolean().catch(false),
+	connected: z.boolean().catch(false),
+	lastOutcome: z.string().optional(),
+	lastOutcomeAt: z.string().optional(),
+});
+export type HarnessConnectionStateWire = z.infer<typeof HarnessConnectionStateSchema>;
+
+/** `GET /api/diagnostics/harness-connect-status` envelope: one row per configured harness. */
+export const HarnessConnectStatusResponseSchema = z.object({
+	harnesses: z.array(HarnessConnectionStateSchema).catch([]),
+});
+
+/** `POST /api/diagnostics/harness-repair` result (d-AC-3/5): the updated status after the repair pass. */
+export const HarnessRepairResultSchema = z.object({
+	harness: z.string().catch(""),
+	status: z.enum(HARNESS_CONNECT_STATUSES).catch("error"),
+	connected: z.boolean().catch(false),
+	detail: z.string().optional(),
+});
+export type HarnessRepairResultWire = z.infer<typeof HarnessRepairResultSchema>;
 
 /** The Wave-1 Pollinate ack (`POST /api/diagnostics/pollinate` → 202 + this body). */
 export const PollinateAckSchema = z.object({
@@ -1966,6 +2008,21 @@ export interface WireClient {
 	 */
 	harnesses(): Promise<HarnessStatusWire[]>;
 	/**
+	 * PRD-006d — read the AUTHORITATIVE per-harness connection report (`GET
+	 * /api/diagnostics/harness-connect-status`): agent present? plugin enabled? last reconcile
+	 * outcome? A malformed/absent body degrades to an empty list (the card renders its honest empty
+	 * state, never a throw). Distinct from `harnesses()` — this one shells the honeycomb CLI, which
+	 * is accurate for the plugin-enabled bit; the passive `harnesses` proxy is not (d-AC-2).
+	 */
+	harnessConnectionStatus(): Promise<HarnessConnectionStateWire[]>;
+	/**
+	 * PRD-006d — re-run the connector setup for one harness (`POST /api/diagnostics/harness-repair`),
+	 * returning the updated status (d-AC-3). A non-2xx / network / parse failure degrades to `null`
+	 * (the card shows a clear "could not repair" message and re-reads — never a throw, never a block,
+	 * d-AC-5). `harness` defaults to the honeycomb default (claude-code) when omitted.
+	 */
+	repairHarness(harness?: string): Promise<HarnessRepairResultWire | null>;
+	/**
 	 * PRD-042 — read the Sync page `installed ∪ synced` union view-model (`GET /api/diagnostics/assets`):
 	 * skills + agents, each with its honest state + presentation-safe detail. A malformed/absent body
 	 * degrades to {@link EMPTY_ASSET_SYNC_VIEW} (the page renders its honest empty state, never a throw).
@@ -2530,6 +2587,20 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 			// list so the page renders its honest empty/zero state (never a throw). Single backbone (D-3).
 			const v = await getJson(fetchImpl, url(ENDPOINTS.harnesses), HarnessStatusResponseSchema);
 			return v?.harnesses ?? [];
+		},
+		async harnessConnectionStatus(): Promise<HarnessConnectionStateWire[]> {
+			// GET the authoritative per-harness connection report; a malformed/absent body degrades to
+			// the empty list so the card renders its honest empty state (never a throw). Fail-soft: a
+			// down/absent honeycomb CLI answers `{ harnesses: [] }` server-side (d-AC-5).
+			const v = await getJson(fetchImpl, url(ENDPOINTS.harnessConnectStatus), HarnessConnectStatusResponseSchema);
+			return v?.harnesses ?? [];
+		},
+		async repairHarness(harness?: string): Promise<HarnessRepairResultWire | null> {
+			// POST the repair trigger; the daemon shells `honeycomb harness repair` and returns the
+			// updated status. A non-2xx / network / parse failure → null (the card surfaces "could not
+			// repair" and re-reads the status — never an optimistic flip, never a block, d-AC-3/5).
+			const body: Record<string, string> = harness !== undefined && harness !== "" ? { harness } : {};
+			return postJson(fetchImpl, url(ENDPOINTS.harnessRepair), body, HarnessRepairResultSchema);
 		},
 		async assetsView(): Promise<AssetSyncViewWire> {
 			// GET the union view-model; a malformed/absent body degrades to the empty view so the page

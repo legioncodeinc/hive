@@ -27,6 +27,7 @@ import React from "react";
 import { Badge, Button, Input, Kpi, MemoryCard } from "../primitives.js";
 import { LiveLog, RulesPanel, SessionsPanel, SkillSyncPanel } from "../panels.js";
 import { HarnessStrip } from "../harness-strip.js";
+import { HarnessConnectCard } from "../harness-connect-card.js";
 import { useScope } from "../scope-context.js";
 import { usePoll, type PageProps } from "../page-frame.js";
 import { useSwr } from "../use-swr.js";
@@ -334,6 +335,13 @@ export function DashboardPage({ wire, pollinating = false, healthReasons = null 
 						<LiveLog lines={feed} />
 					</>
 				)}
+			</section>
+
+			{/* ── AREA 4: the harness-connect card (PRD-006d) — the honeycomb-CLI-backed connect status +
+			    Reconnect/Repair. Self-hides when there is nothing to report (the card returns null on an
+			    empty read). Deferred with the rest of the below-the-fold content. */}
+			<section data-area="harness-connect" aria-label="Coding assistant connections" style={{ marginTop: 16 }}>
+				{showSecondary && <HarnessConnectCard wire={wire} />}
 			</section>
 		</>
 	);

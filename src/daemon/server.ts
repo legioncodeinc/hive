@@ -20,6 +20,7 @@ import { createApiProxy, type ProxyFetch } from "./proxy.js";
 import { resolveRegisteredServiceNames } from "./registry.js";
 import { createTelemetryStreamHandler, type TelemetryFetch } from "./telemetry-proxy.js";
 import { createInstallerService, type InstallerServiceOptions } from "./installer/index.js";
+import { createHarnessConnectService, type HarnessConnectServiceOptions } from "./harness/index.js";
 import type { SetupAuthFetchImpl } from "./setup-auth.js";
 import type { SetupTenancyFetchImpl } from "./setup-tenancy.js";
 
@@ -45,6 +46,11 @@ export interface CreateHiveOptions {
    * A test injects fakes here so the onboarding endpoints never touch the network or real npm.
    */
   readonly installer?: InstallerServiceOptions;
+  /**
+   * PRD-006c/006d: harness-connect-service seams (the honeycomb-CLI spawn + bin resolution). A test
+   * injects a fake `cli` (or spawn) so the harness routes never shell a real honeycomb binary.
+   */
+  readonly harnessConnect?: HarnessConnectServiceOptions;
 }
 
 export interface StartHiveOptions extends CreateHiveOptions {
@@ -169,6 +175,12 @@ export function createHive(options: CreateHiveOptions = {}): HiveInstance {
   // health check reuses the SAME fleet-status fetch + doctor URL the gate uses; a test can override
   // any installer seam (manifest fetch, spawn, token/npm-prefix, fs) via `options.installer`.
   createInstallerService({ fleetStatusFetch, doctorStatusUrl, ...options.installer }).register(app);
+
+  // PRD-006c/006d: the honeycomb harness-connect surface (the onboarding connect trigger + the
+  // dashboard status/repair reads). Registered BEFORE the generic `/api/*` proxy so these specific
+  // routes win; each SHELLS the honeycomb CLI (the authoritative wiring surface), fail-soft. A test
+  // overrides the CLI (or its spawn seam) via `options.harnessConnect`.
+  createHarnessConnectService(options.harnessConnect).register(app);
 
   // Server-side federation (BFF): every other `/api/*` and `/setup/*` request is proxied over
   // loopback to the workload daemon that owns it (honeycomb or nectar), resolved from
