@@ -96,6 +96,23 @@ describe("harness-connect routes", () => {
 		expect(repair).toHaveBeenCalledWith(undefined);
 	});
 
+	it("POST /api/diagnostics/harness-repair rejects a flag-shaped harness with 400 and never shells", async () => {
+		const { app, repair } = makeApp();
+		for (const harness of ["--config=/etc/passwd", "-h", "--json", "codex --evil", "a/b", "UP"]) {
+			const res = await request(app, "/api/diagnostics/harness-repair", { method: "POST", body: { harness } });
+			expect(res.status).toBe(400);
+			expect(await res.json()).toEqual({ error: "invalid harness" });
+		}
+		expect(repair).not.toHaveBeenCalled();
+	});
+
+	it("POST /api/diagnostics/harness-repair rejects a non-string harness with 400", async () => {
+		const { app, repair } = makeApp();
+		const res = await request(app, "/api/diagnostics/harness-repair", { method: "POST", body: { harness: 42 } });
+		expect(res.status).toBe(400);
+		expect(repair).not.toHaveBeenCalled();
+	});
+
 	it("rejects a foreign Host (DNS-rebinding defense) with 403 and never shells", async () => {
 		const { app, connect } = makeApp();
 		const res = await request(app, "/api/onboarding/harness/connect", { method: "POST", host: "evil.example.com" });

@@ -9,8 +9,10 @@ export { createHarnessConnectService } from "./routes.js";
 export type { HarnessConnectService, HarnessConnectServiceOptions } from "./routes.js";
 export {
 	createHoneycombCli,
+	isValidHarnessId,
 	CONNECT_STATUSES,
 	DEFAULT_HARNESS,
+	HARNESS_ID_PATTERN,
 	HONEYCOMB_BIN,
 	HONEYCOMB_CLI_TIMEOUT_MS,
 	HONEYCOMB_PACKAGE,

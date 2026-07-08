@@ -102,6 +102,16 @@ describe("honeycomb-cli client", () => {
 		expect(spawn.calls[0]?.args).toEqual([CLI_JS, "harness", "repair", "--json"]);
 	});
 
+	it("repair: a flag-shaped harness is rejected fail-soft and NEVER reaches the spawn argv", async () => {
+		const spawn = recordingSpawn(ok(JSON.stringify({ harness: "x", status: "connected", connected: true })));
+		const cli = makeCli(spawn.fn);
+		for (const evil of ["--config=/etc/passwd", "-h", "--json", "a b", "a/b", "a;b", "--"]) {
+			const result = await cli.repair(evil);
+			expect(result).toEqual({ harness: "claude-code", status: "error", connected: false });
+		}
+		expect(spawn.calls).toHaveLength(0);
+	});
+
 	it("tolerates a leading log line before the JSON blob", async () => {
 		const spawn = recordingSpawn(ok(`booting honeycomb...\n${JSON.stringify({ harness: "claude-code", status: "connected" })}`));
 		const result = await makeCli(spawn.fn).connect();

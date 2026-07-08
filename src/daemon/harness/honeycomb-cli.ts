@@ -28,6 +28,21 @@ export const HONEYCOMB_PACKAGE = "@legioncodeinc/honeycomb" as const;
 export const HONEYCOMB_BIN = "honeycomb" as const;
 /** The default harness the connect/repair triggers target when none is named. */
 export const DEFAULT_HARNESS = "claude-code" as const;
+
+/**
+ * Canonical harness-id shape: a lowercase slug (letters/digits, hyphen-separated) that can never
+ * begin with a hyphen. The repair target MUST match this before it reaches the spawn argv. The
+ * spawn is already `shell:false` (no shell-metacharacter injection is possible), but an un-shaped
+ * value like `--config` or `-h` would otherwise be smuggled to honeycomb's arg parser AS A FLAG
+ * (classic argument injection). Anchoring on `[a-z0-9]` at the head rejects every leading-dash
+ * value, and the body class rejects `=`, whitespace, path separators, and quotes.
+ */
+export const HARNESS_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+
+/** True iff `value` is a canonical harness id (safe to place in the honeycomb spawn argv). */
+export function isValidHarnessId(value: string): boolean {
+	return HARNESS_ID_PATTERN.test(value);
+}
 /** The bounded per-call timeout: a hung honeycomb process must never wedge onboarding/the dashboard. */
 export const HONEYCOMB_CLI_TIMEOUT_MS = 15_000 as const;
 
@@ -192,6 +207,12 @@ export function createHoneycombCli(options: HoneycombCliOptions = {}): Honeycomb
 		},
 
 		async repair(harness?: string): Promise<HarnessRepairResult> {
+			// Argv-sink guard (defense in depth for every caller): a provided target that is not a
+			// canonical harness id must NEVER reach honeycomb's arg parser as a flag. Degrade fail-soft
+			// without ever spawning, and do not echo the rejected input back.
+			if (harness !== undefined && !isValidHarnessId(harness)) {
+				return { harness: DEFAULT_HARNESS, status: "error", connected: false };
+			}
 			const target = harness ?? DEFAULT_HARNESS;
 			const args = harness !== undefined ? ["repair", harness] : ["repair"];
 			const raw = await runHarnessJson(config, timeoutMs, args);

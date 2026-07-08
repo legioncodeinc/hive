@@ -25,7 +25,7 @@
 import type { Context, Hono } from "hono";
 
 import { hostAllowed, originAllowed } from "../installer/security.js";
-import { createHoneycombCli, type HoneycombCli, type HoneycombCliOptions } from "./honeycomb-cli.js";
+import { createHoneycombCli, isValidHarnessId, type HoneycombCli, type HoneycombCliOptions } from "./honeycomb-cli.js";
 
 /** Service options: the honeycomb-CLI seams plus a test-only injected client. */
 export interface HarnessConnectServiceOptions extends HoneycombCliOptions {
@@ -43,6 +43,9 @@ function forbidden(c: Context): Response {
 	return c.json({ error: "forbidden" }, 403);
 }
 
+/** The parsed `/harness-repair` body: a valid (possibly absent) target, or a rejected-shape flag. */
+type RepairHarness = { readonly ok: true; readonly harness: string | undefined } | { readonly ok: false };
+
 /** Host + Origin cross-origin guard (mirrors the installer's is-AC-7/is-AC-8 checks). */
 function guardCrossOrigin(c: Context): Response | null {
 	if (!hostAllowed(c.req.header("host"))) return forbidden(c);
@@ -59,11 +62,18 @@ async function readJsonBody(c: Context): Promise<unknown | undefined> {
 	}
 }
 
-/** Pull an optional `harness` string off a `/harness-repair` body, ignoring any other field. */
-function readRepairHarness(body: unknown): string | undefined {
-	if (typeof body !== "object" || body === null) return undefined;
+/**
+ * Validate the optional `harness` off a `/harness-repair` body, ignoring any other field. An absent
+ * (or empty) harness targets the default. A PRESENT harness must be a canonical harness id: anything
+ * else (a `--flag`, a non-string, a slug with metacharacters) is rejected as an invalid shape so it
+ * can never reach the honeycomb spawn argv (argument-injection defense at the HTTP boundary).
+ */
+function readRepairHarness(body: unknown): RepairHarness {
+	if (typeof body !== "object" || body === null) return { ok: true, harness: undefined };
 	const harness = (body as { harness?: unknown }).harness;
-	return typeof harness === "string" && harness.length > 0 ? harness : undefined;
+	if (harness === undefined || harness === "") return { ok: true, harness: undefined };
+	if (typeof harness !== "string" || !isValidHarnessId(harness)) return { ok: false };
+	return { ok: true, harness };
 }
 
 /**
@@ -93,8 +103,9 @@ export function createHarnessConnectService(options: HarnessConnectServiceOption
 		app.post("/api/diagnostics/harness-repair", async (c) => {
 			const rejection = guardCrossOrigin(c);
 			if (rejection !== null) return rejection;
-			const harness = readRepairHarness(await readJsonBody(c));
-			return c.json(await cli.repair(harness));
+			const parsed = readRepairHarness(await readJsonBody(c));
+			if (!parsed.ok) return c.json({ error: "invalid harness" }, 400);
+			return c.json(await cli.repair(parsed.harness));
 		});
 	};
 
