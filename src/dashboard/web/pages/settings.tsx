@@ -527,8 +527,8 @@ function LifecycleConfigSection(): React.JSX.Element {
 // Embeddings on/off (dashboard action) — turn semantic recall on/off LIVE + persisted.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** The honest embeddings state (mirrors the daemon `reasons.embeddingsState`): off | warming | on | failed. */
-type EmbeddingsState = "off" | "warming" | "on" | "failed";
+/** The honest embeddings state (mirrors the daemon `reasons.embeddingsState`): off | warming | on | suspect | failed. */
+type EmbeddingsState = "off" | "warming" | "on" | "suspect" | "failed";
 
 /** How often {@link EmbeddingsSection} re-polls `/api/status` WHILE warming, so the badge auto-advances to on/failed. */
 const EMBED_WARMING_POLL_MS = 2500;
@@ -540,6 +540,10 @@ function embeddingsView(state: EmbeddingsState): { tone: "verified" | "neutral" 
 			return { tone: "verified", label: "on", enabled: true };
 		case "warming":
 			return { tone: "warning", label: "warming…", enabled: true };
+		case "suspect":
+			// honeycomb #301: a missed liveness probe — the embed daemon may be wedged; the supervisor is
+			// watching and will respawn it if it stays unresponsive. A WARNING, not yet a failure.
+			return { tone: "warning", label: "suspect", enabled: true };
 		case "failed":
 			return { tone: "critical", label: "failed", enabled: true };
 		default:
@@ -601,7 +605,9 @@ export function EmbeddingsSection({ wire }: { wire: PageProps["wire"] }): React.
 	const hint =
 		state === "warming"
 			? "Downloading + loading the local embedding model (~600 MB, one time). Recall is lexical until it is ready."
-			: state === "failed"
+			: state === "suspect"
+				? "The embedding daemon missed a liveness probe and may be wedged. It will be respawned automatically if it stays unresponsive; recall falls back to lexical meanwhile."
+				: state === "failed"
 				? "The embedding model could not load. Recall is lexical (BM25) only. Try toggling off then on, or check the daemon logs."
 				: "On runs the local embedding model for semantic search. Off falls back to lexical (BM25) recall only.";
 
@@ -641,9 +647,11 @@ export function EmbeddingsSection({ wire }: { wire: PageProps["wire"] }): React.
 // provider }`) and flips it through `wire.setMemory(...)` (`POST /api/actions/memory`).
 // `/api/status` is the reliably-populated `reasons` source — hive's own `/health` is liveness
 // only and carries NO `reasons` (reading it there fail-closed to "provider needed" regardless
-// of the real daemon state). UNLIKE embeddings it is NOT
-// live — the daemon persists the choice and it takes effect on the NEXT restart, so the
-// section says so honestly and (when the portal has a restart action) offers it inline.
+// of the real daemon state). The toggle's honesty narrative BRANCHES ON THE ACK (Wave-3 QA W-3):
+// a live-reload daemon (honeycomb #304) actuates the change live (`appliedLive: true` → "applied
+// live", no restart nag), an older daemon only persists it (`appliedLive` absent → the honest
+// "applies on next restart" note + an inline restart affordance), and a failed persist renders
+// an honest failure — never a success state.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** The two provider states the daemon reports for memory formation (mirrors `reasons.memory.provider`). */
@@ -671,14 +679,18 @@ const MEMORY_DEFAULT: MemoryView = { provider: "unconfigured", enabled: false };
  *   · provider `unconfigured` → a prominent explanatory prompt ("configure a model provider…"), the enable
  *     action HIDDEN (not merely disabled — there is nothing to enable yet), pointing at the Provider keys /
  *     Portkey sections on this same page.
- *   · provider `configured` → the enable control reflecting `enabled`, PLUS the honest "applies on next
- *     daemon restart" note (the toggle is `appliesOnRestart: true`, NOT live) and — when the portal has a
- *     restart action — an inline "Restart now" affordance (mirrors {@link SystemActionsSection}'s restart).
+ *   · provider `configured` → the enable control reflecting `enabled`, PLUS a post-toggle note derived
+ *     from the ACK (Wave-3 QA W-3 — never a hardcoded narrative): `appliedLive` → "applied live" (no
+ *     restart nag); `persisted && !appliedLive` (an older, persist-only daemon) → the honest "applies on
+ *     next daemon restart" note with an inline "Restart now" affordance (mirrors
+ *     {@link SystemActionsSection}'s restart); `!persisted` / a failed call → an honest failure note
+ *     ("not saved"), never a success state.
  */
 export function MemoryFormationSection({ wire }: { wire: PageProps["wire"] }): React.JSX.Element {
-	// PRD-012b: the status read is now an SWR read (mount + focus only — the daemon persists the choice
-	// and it takes effect on the NEXT restart, so there is no warming-poll here). Fail-soft: a failed/
-	// absent status read degrades to the safe unconfigured/off default rather than throwing into React.
+	// PRD-012b: the status read is an SWR read (mount + focus only — unlike embeddings there is no
+	// warming phase to poll through; the ack after a toggle tells us whether the change applied live).
+	// Fail-soft: a failed/absent status read degrades to the safe unconfigured/off default rather than
+	// throwing into React.
 	const deriveView = React.useCallback((status: StatusProbe | undefined): MemoryView => {
 		const mem = status?.reasons?.memory;
 		return mem ? { provider: mem.provider, enabled: mem.enabled } : MEMORY_DEFAULT;
@@ -689,22 +701,28 @@ export function MemoryFormationSection({ wire }: { wire: PageProps["wire"] }): R
 	);
 	const view = status === undefined ? null : deriveView(status);
 	const [busy, setBusy] = React.useState(false);
-	// True after a successful toggle — surfaces the "restart to apply" affordance (the choice is persisted
-	// but not live). Cleared once the daemon restart is kicked off.
-	const [pendingRestart, setPendingRestart] = React.useState(false);
+	// The outcome of the LAST toggle, derived from the daemon's ack (W-3 honesty — never assumed):
+	//   · "applied-live"     → the daemon actuated the change live (#304); no restart needed.
+	//   · "restart-required" → an older daemon persisted it only; restart to apply (inline affordance).
+	//   · "failed"           → the call failed or the daemon did not persist; honest failure, no success.
+	//   · null               → no toggle this session; no note (this page cannot know whether the daemon
+	//                          is live-reload capable until an ack says so — no hardcoded narrative).
+	const [lastToggle, setLastToggle] = React.useState<"applied-live" | "restart-required" | "failed" | null>(null);
 	const [restarting, setRestarting] = React.useState(false);
 
 	const toggle = React.useCallback(async (): Promise<void> => {
 		if (view === null || view.provider !== "configured") return;
 		setBusy(true);
 		const want = !view.enabled;
-		const ok = await wire.setMemory(want);
+		const ack = await wire.setMemory(want);
 		setBusy(false);
-		if (ok) {
-			// The write is persisted but NOT live — surface the restart-to-apply affordance, then re-read
-			// the persisted truth (the badge reflects the newly-persisted `enabled`).
-			setPendingRestart(true);
-		}
+		// Branch the honesty narrative on the ACK, not an assumption (Wave-3 QA W-3):
+		// a null ack (rejected/network/malformed) and an unpersisted ack are BOTH failures — never a
+		// success state. `appliedLive` back-compats to false on an old daemon (`.catch(false)`), which
+		// lands in the honest "restart required" narrative that daemon actually has.
+		if (ack === null || !ack.persisted) setLastToggle("failed");
+		else if (ack.appliedLive) setLastToggle("applied-live");
+		else setLastToggle("restart-required");
 		mutateStatus();
 	}, [view, wire, mutateStatus]);
 
@@ -714,7 +732,7 @@ export function MemoryFormationSection({ wire }: { wire: PageProps["wire"] }): R
 		// Leave `restarting` true on success — the daemon is going down + coming back; the shell re-hydrates
 		// from live endpoints once it answers again. On failure, clear it so the button is usable again.
 		if (!ok) setRestarting(false);
-		else setPendingRestart(false);
+		else setLastToggle(null);
 	}, [wire]);
 
 	const configured = view?.provider === "configured";
@@ -788,28 +806,50 @@ export function MemoryFormationSection({ wire }: { wire: PageProps["wire"] }): R
 							</Button>
 						</div>
 
-						{/* Applies-on-restart honesty — always shown when configured; the toggle is NOT live. */}
-						<div
-							data-testid="memory-restart-note"
-							style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)", flexWrap: "wrap" }}
-						>
-							<span style={{ fontSize: 12, color: "var(--text-secondary)", flex: 1, minWidth: 200 }}>
-								This preference is saved immediately, but takes effect on the <strong>next daemon restart</strong>.
-								{pendingRestart ? " Restart now to apply your change." : ""}
-							</span>
-							{restarting ? (
-								<span data-testid="memory-restarting" style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-secondary)" }}>restarting…</span>
-							) : (
-								<Button
-									variant={pendingRestart ? "primary" : "secondary"}
-									size="sm"
-									onClick={() => void doRestart()}
-									data-testid="memory-restart-button"
-								>
-									Restart now
-								</Button>
-							)}
-						</div>
+						{/* Post-toggle honesty note — derived from the daemon's ACK (W-3), never hardcoded.
+						    Before any toggle there is NO note: this page cannot know whether the daemon
+						    applies the change live until an ack says so. */}
+						{lastToggle === "applied-live" ? (
+							<div
+								data-testid="memory-applied-live"
+								style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", background: "var(--severity-success-bg)", border: "1px solid var(--verified)", borderRadius: "var(--radius-md)", flexWrap: "wrap" }}
+							>
+								<span style={{ fontSize: 12, color: "var(--text-secondary)", flex: 1, minWidth: 200 }}>
+									Change <strong>applied live</strong> — no daemon restart needed.
+								</span>
+							</div>
+						) : lastToggle === "failed" ? (
+							<div
+								data-testid="memory-save-failed"
+								style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", background: "var(--severity-critical-bg)", border: "1px solid var(--severity-critical)", borderRadius: "var(--radius-md)", flexWrap: "wrap" }}
+							>
+								<span style={{ fontSize: 12, color: "var(--text-secondary)", flex: 1, minWidth: 200 }}>
+									<strong>Not saved</strong> — the daemon rejected the change or the vault is unavailable. The previous setting is still in force; try again or check the daemon logs.
+								</span>
+							</div>
+						) : lastToggle === "restart-required" ? (
+							/* An older, persist-only daemon: saved, but takes effect on the next restart. */
+							<div
+								data-testid="memory-restart-note"
+								style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)", flexWrap: "wrap" }}
+							>
+								<span style={{ fontSize: 12, color: "var(--text-secondary)", flex: 1, minWidth: 200 }}>
+									Saved. This preference takes effect on the <strong>next daemon restart</strong>. Restart now to apply your change.
+								</span>
+								{restarting ? (
+									<span data-testid="memory-restarting" style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-secondary)" }}>restarting…</span>
+								) : (
+									<Button
+										variant="primary"
+										size="sm"
+										onClick={() => void doRestart()}
+										data-testid="memory-restart-button"
+									>
+										Restart now
+									</Button>
+								)}
+							</div>
+						) : null}
 					</div>
 				)}
 			</div>

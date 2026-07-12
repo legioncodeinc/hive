@@ -169,8 +169,9 @@ export const ENDPOINTS = Object.freeze({
 	actionsLogout: "/api/actions/logout",
 	actionsEmbeddings: "/api/actions/embeddings",
 	// Memory formation on/off (`POST /api/actions/memory` with `{ enabled }`) — the SIBLING of the
-	// embeddings action. Persists the `memory.enabled` preference; the ack echoes `appliesOnRestart:
-	// true` because (unlike embeddings) the choice takes effect on the NEXT daemon restart, not live.
+	// embeddings action. Persists the `memory.enabled` preference; a live-reload daemon (honeycomb
+	// #304) ALSO actuates it live and says so in the ack (`appliedLive: true`), while an older daemon
+	// only persists (`appliedLive` absent → false) and the change takes effect on the NEXT restart.
 	actionsMemory: "/api/actions/memory",
 	actionsRestart: "/api/actions/restart",
 	actionsUninstall: "/api/actions/uninstall",
@@ -1110,19 +1111,27 @@ export const ActionOkSchema = z.object({ ok: z.boolean().catch(false) });
 export const EmbeddingsActionSchema = z.object({ ok: z.boolean(), enabled: z.boolean() });
 
 /**
- * The `POST /api/actions/memory` ack: `{ ok, enabled, persisted, appliesOnRestart }` — the SIBLING of
- * {@link EmbeddingsActionSchema}. `ok` + `enabled` are STRICT (no `.catch`) for the same reason: a
- * malformed/partial body must FAIL the parse → `postJson` returns null → `setMemory` reports failure,
- * so a call can never falsely "succeed" against a response that never echoed the real state. `persisted`
- * and `appliesOnRestart` are honesty-render fields (the daemon always returns `appliesOnRestart: true`
- * because the memory toggle takes effect on the next restart, not live); they `.catch()` a safe default.
+ * The `POST /api/actions/memory` ack: `{ ok, enabled, persisted, appliedLive, appliesOnRestart }` —
+ * the SIBLING of {@link EmbeddingsActionSchema}. `ok` + `enabled` are STRICT (no `.catch`) for the same
+ * reason: a malformed/partial body must FAIL the parse → `postJson` returns null → `setMemory` reports
+ * failure, so a call can never falsely "succeed" against a response that never echoed the real state.
+ * The rest are honesty-render fields with back-compatible `.catch()` defaults:
+ *   · `persisted` — the daemon actually stored the preference. `.catch(false)`: an ack that does not
+ *     claim persistence must never render as saved.
+ *   · `appliedLive` (honeycomb #304, live config reload) — the toggle ACTUATED in the running daemon;
+ *     no restart is needed. `.catch(false)`: an OLD daemon omits it → the UI keeps the honest
+ *     "applies on next restart" narrative instead of falsely claiming a live change.
+ *   · `appliesOnRestart` — the pre-#304 narrative bit; a live-reload daemon sends `false`.
  */
 export const MemoryActionSchema = z.object({
 	ok: z.boolean(),
 	enabled: z.boolean(),
 	persisted: z.boolean().catch(false),
+	appliedLive: z.boolean().catch(false),
 	appliesOnRestart: z.boolean().catch(true),
 });
+/** The validated memory-toggle ack the settings page branches its honesty copy on. */
+export type MemoryToggleAckWire = z.infer<typeof MemoryActionSchema>;
 
 /** The `POST /api/actions/restart` ack: `{ ok, restarting }`. */
 export const RestartActionSchema = z.object({ ok: z.boolean().catch(false), restarting: z.boolean().catch(false) });
@@ -1146,19 +1155,27 @@ export type UninstallResultWire = z.infer<typeof UninstallResultSchema>;
  * `/health` body carries this block; on a non-local public body it is absent (the strip
  * renders nothing — handled at the call site by a `null` reasons).
  *
- * Each field `.catch()`es to its HEALTHY value so a malformed/partial `reasons` degrades
- * to "looks ok" rather than throwing into React — the body crosses the untyped IO boundary
- * exactly like every other endpoint here. An UNKNOWN enum value (a future daemon adds a
- * state) also `.catch()`es to the healthy default, never a throw.
+ * Fail-soft, never a throw: a malformed/partial `reasons` degrades field-by-field — the body
+ * crosses the untyped IO boundary exactly like every other endpoint here. HONESTY RULE for the
+ * `.catch()` values (Wave-3 QA W-1/W-2): an UNKNOWN enum value must NEVER fold to a
+ * healthy-looking reading. The subsystem enums catch to a DISTINCT `"unknown"` presentation the
+ * chips render as non-healthy; only a field a legacy daemon legitimately OMITS keeps its legacy
+ * default (portkey absent → `"off"`, optional blocks → `undefined`), so old-daemon payloads
+ * parse to exactly the pre-Wave-3 behaviour.
  */
 export const HealthReasonsSchema = z.object({
 	storage: z.enum(["reachable", "unreachable"]).catch("reachable"),
-	embeddings: z.enum(["on", "off"]).catch("on"),
+	// The COARSE embeddings state. Post honeycomb #301 it mirrors the fine-grained live state
+	// (`off|warming|on|suspect|failed`), so hive parses the full enum. W-2 honesty: an unknown/garbage
+	// value catches to `"unknown"` (rendered non-healthy), NEVER `"on"` — a daemon reporting a state
+	// this build does not know must not render as healthy during, e.g., the wedge-suspicion window.
+	embeddings: z.enum(["on", "off", "warming", "suspect", "failed", "unknown"]).catch("unknown"),
 	// PRD-025 honesty: the ADDITIVE fine-grained embeddings state the daemon now emits alongside the
-	// coarse `embeddings` field. `off`/`warming`/`on`/`failed` — so the UI shows real feedback (the
-	// model is downloading vs actually working vs could-not-load) instead of a coarse `on` that only
-	// means "enabled". Optional: a pre-honesty daemon omits it → the UI falls back to `embeddings`.
-	embeddingsState: z.enum(["off", "warming", "on", "failed"]).optional().catch(undefined),
+	// coarse `embeddings` field. `off`/`warming`/`on`/`suspect`/`failed` (`suspect` = a missed liveness
+	// probe, honeycomb #301 — the daemon may be wedged and is being watched/respawned) — so the UI shows
+	// real feedback instead of a coarse `on` that only means "enabled". Optional: a pre-honesty daemon
+	// omits it → the UI falls back to `embeddings`.
+	embeddingsState: z.enum(["off", "warming", "on", "suspect", "failed"]).optional().catch(undefined),
 	// Memory formation (the SIBLING of `embeddings`): the daemon reports whether memory formation is
 	// enabled AND whether a model provider is configured (memory formation needs a provider to run).
 	// `provider` gates the UI: `unconfigured` → render the "configure a provider" prompt with the enable
@@ -1174,10 +1191,39 @@ export const HealthReasonsSchema = z.object({
 		.optional()
 		.catch(undefined),
 	schema: z.enum(["ok", "missing_table"]).catch("ok"),
-	// PRD-063b (b-AC-7): the Portkey gateway reason. `.catch("off")` so a pre-063b daemon (no
-	// `portkey` field) or an unknown future state degrades to "off" (Portkey not in force) rather
-	// than throwing — the field is purely additive render data, like every other reason here.
-	portkey: z.enum(["off", "ok", "unconfigured", "unreachable"]).catch("off"),
+	// PRD-063b (b-AC-7) + honeycomb #300 (ISS-005): the Portkey gateway reason. `no_model` = the
+	// gateway is ENABLED but no model is set — a misconfigured gateway, rendered DEGRADED (the exact
+	// false-healthy reading ISS-005 set out to kill). W-1 honesty split of the old `.catch("off")`:
+	//   · field ABSENT (a pre-063b daemon) → `"off"` (Portkey not in force — the legacy behaviour);
+	//   · field PRESENT but unknown/garbage → `"unknown"` (a distinct NON-healthy presentation),
+	//     never `"off"`'s healthy "not in force" reading.
+	portkey: z.preprocess(
+		(v) => (v === undefined ? "off" : v),
+		z.enum(["off", "ok", "unconfigured", "no_model", "unreachable", "unknown"]).catch("unknown"),
+	),
+	// honeycomb #300: the HTTP status of the most recent failed Portkey call — present ONLY while
+	// `portkey === "unreachable"`, so the chip can read `unreachable(401)` vs `unreachable(503)`.
+	// Additive + optional; any absent/garbage value degrades to undefined (plain `unreachable`).
+	portkeyUnreachableStatus: z.number().int().nonnegative().optional().catch(undefined),
+	// honeycomb #300 (ISS-005 extraction-failure visibility): the memory-formation counters block.
+	// `committedSinceBoot` beside `extractionErrorsSinceBoot` — 373 swallowed gateway failures used
+	// to be invisible ("jobs done, zero memories, health green"); now they read as a loud non-zero
+	// error count beside a zero commit count. OPTIONAL so a pre-#300 daemon parses cleanly (block
+	// absent → the strip renders nothing new). `.catch(undefined)` keeps the whole `reasons` block
+	// alive if the sub-object is malformed; inner fields degrade individually to safe zeros/absence.
+	// `lastExtractionError` is daemon-shaped TEXT (capped + key-free server-side) — rendered only as
+	// an escaped text/attribute child, never as markup.
+	memoryFormation: z
+		.object({
+			committedSinceBoot: z.number().int().nonnegative().catch(0),
+			lastCommittedAt: z.string().optional().catch(undefined),
+			lastAction: z.string().optional().catch(undefined),
+			extractionErrorsSinceBoot: z.number().int().nonnegative().catch(0),
+			lastExtractionError: z.string().optional().catch(undefined),
+			lastExtractionErrorAt: z.string().optional().catch(undefined),
+		})
+		.optional()
+		.catch(undefined),
 });
 export type HealthReasonsWire = z.infer<typeof HealthReasonsSchema>;
 
@@ -2157,12 +2203,14 @@ export interface WireClient {
 	setEmbeddings(enabled: boolean): Promise<boolean>;
 	/**
 	 * Dashboard actions — turn memory formation on/off (`POST /api/actions/memory` with `{ enabled }`).
-	 * The SIBLING of {@link setEmbeddings}: the daemon persists the `memory.enabled` preference. UNLIKE
-	 * embeddings, the choice takes effect on the NEXT daemon restart (the ack carries `appliesOnRestart:
-	 * true`), so the UI surfaces that honesty and re-reads {@link health} for the persisted truth. Returns
-	 * `true` iff accepted (2xx + echoed `enabled` matches the request); a non-2xx / network failure → false.
+	 * The SIBLING of {@link setEmbeddings}: the daemon persists the `memory.enabled` preference and — on
+	 * a live-reload daemon (honeycomb #304) — ALSO actuates it live, saying so in the ack. Returns the
+	 * validated ack so the UI can render the honest narrative: `appliedLive` → "applied live" (no restart
+	 * nag); `persisted && !appliedLive` (old daemon) → "applies on next restart"; `!persisted` → an honest
+	 * failure ("not saved"). Returns `null` when the call failed outright (non-2xx / network / malformed
+	 * body / echoed `enabled` mismatch) — the caller renders failure, never a success state.
 	 */
-	setMemory(enabled: boolean): Promise<boolean>;
+	setMemory(enabled: boolean): Promise<MemoryToggleAckWire | null>;
 	/**
 	 * Dashboard actions — restart the daemon (`POST /api/actions/restart`). The daemon spawns a
 	 * detached respawn helper, then gracefully shuts down; a fresh daemon comes back on the same port.
@@ -2917,15 +2965,17 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 			if (ok) invalidateSwr(ENDPOINTS.status, ENDPOINTS.settings);
 			return ok;
 		},
-		async setMemory(enabled: boolean): Promise<boolean> {
-			// POST the toggle (the SIBLING of setEmbeddings); the daemon PERSISTS the choice — it takes
-			// effect on the next restart (appliesOnRestart: true), not live. Success is a 2xx whose echoed
-			// `enabled` matches the request; a non-2xx / network failure → false (never a throw into React).
+		async setMemory(enabled: boolean): Promise<MemoryToggleAckWire | null> {
+			// POST the toggle (the SIBLING of setEmbeddings); the daemon persists the choice and — on a
+			// live-reload daemon (#304) — actuates it live (`appliedLive: true`). Return the validated ack
+			// so the UI branches its honesty copy on `appliedLive`/`persisted`; a non-2xx / network failure /
+			// malformed body / mismatched echo → null (failure, never a throw into React).
 			const ack = await postJson(fetchImpl, url(ENDPOINTS.actionsMemory), { enabled }, MemoryActionSchema);
-			const ok = ack?.ok === true && ack.enabled === enabled;
-			// PRD-012b: same invalidation set as setEmbeddings (mirrors proxy-cache).
-			if (ok) invalidateSwr(ENDPOINTS.status, ENDPOINTS.settings);
-			return ok;
+			if (ack === null || ack.ok !== true || ack.enabled !== enabled) return null;
+			// PRD-012b: same invalidation set as setEmbeddings (mirrors proxy-cache). Only a PERSISTED
+			// change can have moved the daemon-side truth the cached reads reflect.
+			if (ack.persisted) invalidateSwr(ENDPOINTS.status, ENDPOINTS.settings);
+			return ack;
 		},
 		async restartDaemon(): Promise<boolean> {
 			// POST the restart; the daemon respawns + shuts down. Success is a 2xx `{ restarting: true }`.

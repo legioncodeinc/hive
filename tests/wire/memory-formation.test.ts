@@ -12,10 +12,11 @@ import {
 //   1. `GET /api/status` → `reasons.memory = { enabled, provider: "configured" | "unconfigured" }`
 //      (honeycomb's status, BFF-proxied — the reliably-populated `reasons` source; hive's own `/health`
 //      is liveness only and carries NO reasons, which is why the settings controls read `/api/status`).
-//   2. `POST /api/actions/memory { enabled }` → `{ ok, enabled, persisted, appliesOnRestart: true }`
+//   2. `POST /api/actions/memory { enabled }` → `{ ok, enabled, persisted, appliedLive, appliesOnRestart }`
+//      (`appliedLive: true` on a live-reload daemon, honeycomb #304; absent on an older daemon).
 // These assert the wire schema parses both (fail-soft + back-compat), that `wire.status()` reads the
 // `reasons` off `/api/status` fail-soft, and that `setMemory` POSTs the right payload to the right
-// endpoint and only reports success when the ack echoes the requested state.
+// endpoint and only returns an ack when it echoes the requested state (null otherwise — failure).
 
 function requestUrl(input: Parameters<FetchLike>[0]): string {
 	if (typeof input === "string") return input;
@@ -55,9 +56,20 @@ describe("HealthReasonsSchema — reasons.memory (memory formation)", () => {
 });
 
 describe("MemoryActionSchema — POST /api/actions/memory ack", () => {
-	it("parses the full ack, defaulting appliesOnRestart to true when absent", () => {
+	it("parses the full live-reload ack (honeycomb #304) verbatim", () => {
+		const parsed = MemoryActionSchema.parse({ ok: true, enabled: true, persisted: true, appliedLive: true, appliesOnRestart: false });
+		expect(parsed).toEqual({ ok: true, enabled: true, persisted: true, appliedLive: true, appliesOnRestart: false });
+	});
+
+	it("back-compat: an OLD daemon ack (no appliedLive) parses with appliedLive=false — never a false live claim", () => {
 		const parsed = MemoryActionSchema.parse({ ok: true, enabled: true, persisted: true, appliesOnRestart: true });
-		expect(parsed).toEqual({ ok: true, enabled: true, persisted: true, appliesOnRestart: true });
+		expect(parsed).toEqual({ ok: true, enabled: true, persisted: true, appliedLive: false, appliesOnRestart: true });
+	});
+
+	it("garbage appliedLive degrades to false (never a false live claim), persisted to false (never a false save claim)", () => {
+		const parsed = MemoryActionSchema.parse({ ok: true, enabled: true, persisted: "yep", appliedLive: "sure", appliesOnRestart: true });
+		expect(parsed.appliedLive).toBe(false);
+		expect(parsed.persisted).toBe(false);
 	});
 
 	it("FAILS the parse when ok/enabled are missing (strict, so a bad body reads as failure)", () => {
@@ -98,16 +110,16 @@ describe("wire.status — GET /api/status reasons", () => {
 });
 
 describe("wire.setMemory — POST /api/actions/memory", () => {
-	it("POSTs { enabled } to the memory action endpoint and reports success on a matching echo", async () => {
+	it("POSTs { enabled } to the memory action endpoint and returns the ack on a matching echo", async () => {
 		const fetchImpl = vi.fn(async (input: Parameters<FetchLike>[0]) => {
 			if (requestUrl(input) === ENDPOINTS.actionsMemory) {
-				return jsonResponse({ ok: true, enabled: true, persisted: true, appliesOnRestart: true });
+				return jsonResponse({ ok: true, enabled: true, persisted: true, appliedLive: true, appliesOnRestart: false });
 			}
 			return jsonResponse({}, 404);
 		}) as unknown as FetchLike;
 
 		const wire = createWireClient({ fetchImpl });
-		await expect(wire.setMemory(true)).resolves.toBe(true);
+		await expect(wire.setMemory(true)).resolves.toEqual({ ok: true, enabled: true, persisted: true, appliedLive: true, appliesOnRestart: false });
 
 		const call = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
 		expect(requestUrl(call[0])).toBe(ENDPOINTS.actionsMemory);
@@ -115,15 +127,21 @@ describe("wire.setMemory — POST /api/actions/memory", () => {
 		expect(JSON.parse(String(call[1].body))).toEqual({ enabled: true });
 	});
 
-	it("reports failure when the echoed enabled does not match the request", async () => {
-		const fetchImpl = vi.fn(async () => jsonResponse({ ok: true, enabled: false, persisted: true, appliesOnRestart: true })) as unknown as FetchLike;
+	it("an OLD daemon ack (no appliedLive) comes back with appliedLive=false (restart narrative preserved)", async () => {
+		const fetchImpl = vi.fn(async () => jsonResponse({ ok: true, enabled: true, persisted: true, appliesOnRestart: true })) as unknown as FetchLike;
 		const wire = createWireClient({ fetchImpl });
-		await expect(wire.setMemory(true)).resolves.toBe(false);
+		await expect(wire.setMemory(true)).resolves.toEqual({ ok: true, enabled: true, persisted: true, appliedLive: false, appliesOnRestart: true });
 	});
 
-	it("reports failure on a non-2xx response (never a throw)", async () => {
+	it("returns null when the echoed enabled does not match the request", async () => {
+		const fetchImpl = vi.fn(async () => jsonResponse({ ok: true, enabled: false, persisted: true, appliedLive: true, appliesOnRestart: false })) as unknown as FetchLike;
+		const wire = createWireClient({ fetchImpl });
+		await expect(wire.setMemory(true)).resolves.toBeNull();
+	});
+
+	it("returns null on a non-2xx response (never a throw)", async () => {
 		const fetchImpl = vi.fn(async () => jsonResponse({}, 500)) as unknown as FetchLike;
 		const wire = createWireClient({ fetchImpl });
-		await expect(wire.setMemory(false)).resolves.toBe(false);
+		await expect(wire.setMemory(false)).resolves.toBeNull();
 	});
 });
