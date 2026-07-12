@@ -85,6 +85,29 @@ function isMemoryRoute(path: string): boolean {
 	return MEMORY_ROUTE_PREFIXES.some((p) => path.startsWith(p));
 }
 
+/**
+ * Derive the honest pollinate note from an ack (ISS-013 UI slice). The daemon used to fold the
+ * below-threshold decline into a `running` ack, which this page rendered as "already running" —
+ * a lie. Newer honeycomb daemons return a distinct `below-threshold` status (in `status` or
+ * `reason`), optionally with `tokens`/`threshold` progress: render "not enough new activity yet"
+ * (plus the progress when both fields are present). A genuine `running` ack keeps "already
+ * running"; a genuine skip keeps "skipped · reason". Pure + exported so the ack→copy rule is
+ * unit-testable without mounting the page (the `reconcileScope` precedent).
+ */
+export function pollinateNoteFromAck(ack: PollinateAck): string {
+	// Checked FIRST and independently of `triggered` — defensive against however the parallel
+	// honeycomb PR flags the decline (a status, a reason, triggered true or false).
+	if (ack.status === "below-threshold" || ack.reason === "below-threshold") {
+		const progress =
+			typeof ack.tokens === "number" && typeof ack.threshold === "number"
+				? ` · ${ack.tokens.toLocaleString()}/${ack.threshold.toLocaleString()} tokens`
+				: "";
+		return `not enough new activity yet${progress}`;
+	}
+	if (ack.triggered) return ack.status === "running" ? "already running" : "consolidating…";
+	return `skipped · ${ack.reason ?? "unavailable"}`;
+}
+
 /** A muted mono metadata key→value row for the detail view. Renders nothing when value is empty. */
 function MetaRow({ label, value }: { label: string; value: string }): React.JSX.Element | null {
 	if (value === "") return null;
@@ -452,18 +475,15 @@ function LifecyclePanel({ pollinating, onCompact, onPollinate, watchLines, watch
 	};
 
 	// 040c-AC-2: the EXACT honest-ack logic (no fake spinner). enqueued/running → triggered note;
-	// skipped → "skipped · reason". Never a permanent pollinating state on a !triggered ack.
+	// below-threshold → "not enough new activity yet" (+ progress — ISS-013); skipped →
+	// "skipped · reason". Never a permanent pollinating state on a !triggered ack.
 	const runPollinate = async (): Promise<void> => {
 		if (pollinateBusy) return;
 		setPollinateBusy(true);
 		setPollinateNote("");
 		const ack = await onPollinate();
 		setPollinateBusy(false);
-		if (ack.triggered) {
-			setPollinateNote(ack.status === "running" ? "already running" : "consolidating…");
-		} else {
-			setPollinateNote(`skipped · ${ack.reason ?? "unavailable"}`);
-		}
+		setPollinateNote(pollinateNoteFromAck(ack));
 	};
 
 	return (
