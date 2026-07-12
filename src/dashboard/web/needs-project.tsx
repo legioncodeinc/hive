@@ -19,6 +19,7 @@ import React from "react";
 import { Button } from "./primitives.js";
 import { FolderPicker } from "./folder-picker.js";
 import { PROJECTS_ROUTE } from "./registry.js";
+import { useScopeSwitcher } from "./scope-context.js";
 import type { BindAckWire, WireClient } from "./wire.js";
 
 /**
@@ -80,14 +81,19 @@ export interface FirstRunBindCTAProps {
  */
 export function FirstRunBindCTA({ wire, navigate, assetBase }: FirstRunBindCTAProps): React.JSX.Element {
 	const [picking, setPicking] = React.useState(false);
+	// ISS-019: the sidebar switcher's project list is ScopeProvider state — refresh it on bind.
+	const { refreshProjects } = useScopeSwitcher();
 
 	const onBound = React.useCallback(
 		(_ack: BindAckWire): void => {
+			// ISS-019: the bind wrote a new registry project; refresh the provider's list so the
+			// sidebar switcher shows it immediately (its state is not the pages' SWR cache).
+			void refreshProjects();
 			// b-AC-4: the bind is written + the 059a gate opened daemon-side; advance to the Projects page
 			// where the freshly-bound project now appears (the page hydrates from the synced registry).
 			navigate(PROJECTS_ROUTE);
 		},
-		[navigate],
+		[navigate, refreshProjects],
 	);
 
 	return (

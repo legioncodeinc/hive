@@ -17,7 +17,7 @@ import { PageFrame } from "../page-frame.js";
 import type { ProjectionDerivedEntry, ProjectionFileEntry } from "../hive-graph-projection.js";
 import { NeedsProjectSelection } from "../needs-project.js";
 import { FolderPicker } from "../folder-picker.js";
-import { useScope } from "../scope-context.js";
+import { useScope, useScopeSwitcher } from "../scope-context.js";
 import { useSwr } from "../use-swr.js";
 import {
 	GraphCanvasFull,
@@ -111,6 +111,8 @@ function NectarProjectsPanel({ wire }: { wire: WireClient }): React.JSX.Element 
 		{ refreshInterval: HIVE_GRAPH_POLL_MS },
 	);
 	const fleetTenancy = deriveActiveTenancyLabel(tenancy);
+	// ISS-019: the sidebar switcher's project list is ScopeProvider state — refresh it on bind.
+	const { refreshProjects } = useScopeSwitcher();
 	const [busyKey, setBusyKey] = React.useState<string | null>(null);
 	const inFlightRef = React.useRef(false);
 
@@ -136,7 +138,9 @@ function NectarProjectsPanel({ wire }: { wire: WireClient }): React.JSX.Element 
 
 	const onBound = React.useCallback((): void => {
 		mutateProjects();
-	}, [mutateProjects]);
+		// ISS-019: also refresh the ScopeProvider's list so the sidebar switcher shows the new binding.
+		void refreshProjects();
+	}, [mutateProjects, refreshProjects]);
 
 	const hydrated = !projectsLoading;
 	const controlsDisabled = !hydrated || projectsWire.unreachable || busyKey !== null;

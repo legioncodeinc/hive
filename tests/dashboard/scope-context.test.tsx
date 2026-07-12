@@ -18,6 +18,7 @@ import {
 	SCOPE_STORAGE_KEY,
 	ScopeProvider,
 	ScopeSwitcherSlot,
+	useScopeSwitcher,
 	type DashboardScope,
 } from "../../src/dashboard/web/scope-context.js";
 import type { ScopeOrgWire, ScopeProjectWire, ScopeWorkspaceWire, SetupTenancyResultWire, WireClient } from "../../src/dashboard/web/wire.js";
@@ -183,6 +184,65 @@ describe("ScopeProvider reconciliation on mount (the 'reverts to OSPRY' fix)", (
 		expect(select.value).toBe("stale-id");
 		expect(select.value).not.toBe("OSPRY");
 		expect(select.querySelector('option[value="stale-id"]')).not.toBeNull();
+	});
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ISS-019 — refreshProjects: a bind-completion callback re-enumerates the provider's
+// project list (the sidebar switcher's source) without a full reload.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A probe consumer standing in for a bind flow: reads the list + fires `refreshProjects` on demand. */
+function RefreshProjectsProbe(): React.JSX.Element {
+	const { projects, refreshProjects } = useScopeSwitcher();
+	return (
+		<div>
+			<span data-testid="probe-project-count">{projects.length}</span>
+			<button type="button" data-testid="probe-refresh" onClick={() => void refreshProjects()}>
+				refresh
+			</button>
+		</div>
+	);
+}
+
+describe("ScopeProvider refreshProjects (ISS-019: stale sidebar after project bind)", () => {
+	it("a bind callback's refreshProjects() re-fetches the provider's project list and re-renders the new binding", async () => {
+		// The FIRST enumeration (mount) returns no projects; the post-bind refresh returns the new one —
+		// exactly the ISS-019 shape: the registry gained a binding AFTER the provider's mount-time load.
+		let calls = 0;
+		const bound: ScopeProjectWire = {
+			projectId: "hive",
+			name: "hive",
+			boundLocally: true,
+			boundPaths: ["C:/repos/hive"],
+			remote: "",
+			memoryCount: 0,
+			sessionCount: 0,
+			lastCapture: null,
+		} as ScopeProjectWire;
+		const wire = baseWire({
+			scopeProjects: vi.fn(async (): Promise<ScopeProjectWire[]> => {
+				calls += 1;
+				return calls === 1 ? [] : [bound];
+			}),
+		});
+
+		render(
+			<ScopeProvider wire={wire}>
+				<RefreshProjectsProbe />
+			</ScopeProvider>,
+		);
+
+		// Mount hydration ran once and honestly shows zero projects.
+		await waitFor(() => expect(calls).toBe(1));
+		await waitFor(() => expect(screen.getByTestId("probe-project-count").textContent).toBe("0"));
+
+		// The bind flow completes → refreshProjects() re-enumerates and the provider re-renders the list.
+		act(() => {
+			fireEvent.click(screen.getByTestId("probe-refresh"));
+		});
+		await waitFor(() => expect(screen.getByTestId("probe-project-count").textContent).toBe("1"));
+		expect(calls).toBe(2);
 	});
 });
 

@@ -102,6 +102,14 @@ export interface ScopeSwitcherValue {
 	 * resolves with zero locally-bound projects does the CTA show (b-AC-1).
 	 */
 	readonly projectsHydrated: boolean;
+	/**
+	 * Re-enumerate the workspace's projects on demand (ISS-019). The sidebar's project list is
+	 * PROVIDER state (hydrated on mount + workspace switch only), while the bind flows revalidate
+	 * their own SWR caches — so a freshly-bound project never appeared in the switcher until a full
+	 * reload. Every bind-completion site calls this so the provider's list reflects the registry's
+	 * persisted truth immediately. Bound to the provider's own `loadProjects`.
+	 */
+	readonly refreshProjects: () => Promise<void>;
 	/** True while an org change is re-minting + re-enumerating (the workspace dropdown shows a loading hint). */
 	readonly loadingWorkspaces: boolean;
 	/**
@@ -157,6 +165,7 @@ const DEFAULT_SWITCHER: ScopeSwitcherValue = Object.freeze({
 	workspaces: [],
 	projects: [],
 	projectsHydrated: false,
+	refreshProjects: async () => {},
 	loadingWorkspaces: false,
 	switching: false,
 	switchFeedback: null,
@@ -460,6 +469,8 @@ export function ScopeProvider({ wire, children }: { wire: WireClient; children: 
 			workspaces,
 			projects,
 			projectsHydrated,
+			// ISS-019: the bind flows call this so the sidebar list reflects a new binding immediately.
+			refreshProjects: loadProjects,
 			loadingWorkspaces,
 			switching,
 			switchFeedback,
@@ -468,7 +479,7 @@ export function ScopeProvider({ wire, children }: { wire: WireClient; children: 
 			selectWorkspace,
 			selectProject,
 		}),
-		[orgs, workspaces, projects, projectsHydrated, loadingWorkspaces, switching, switchFeedback, retrySwitch, selectOrg, selectWorkspace, selectProject],
+		[orgs, workspaces, projects, projectsHydrated, loadProjects, loadingWorkspaces, switching, switchFeedback, retrySwitch, selectOrg, selectWorkspace, selectProject],
 	);
 
 	return (
