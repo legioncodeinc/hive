@@ -139,6 +139,7 @@ All five design questions were confirmed by the product owner on 2026-07-08. The
 - **Reuses** the Settings provider-keys surface (`ProviderKeysSection`), the Projects folder-bind surface (`FolderPicker` / `FirstRunBindCTA`), and the Settings memory-formation surface (`MemoryFormationSection`) as the day-2 analogues the wizard steps and checklist route to; PRD-013 adds no competing controls.
 - **Coordinates with** honeycomb (the owner of `/api/secrets`, `/api/actions/memory`, and `/api/status.reasons.memory`) and nectar (the owner of project binding via the proxied `/api/diagnostics/*` surface): hive stores nothing new and renders whatever these report, extending the existing fail-soft posture.
 - **Leaves intact** the dashboard KPI band, recall area, and harness area (`src/dashboard/web/pages/dashboard.tsx`); the checklist is a new landmark inserted between the first two, not a rework of any existing zone.
+- **Reshaped by** apiary fleet [`PRD-008 unified fleet inference credential`](../../../../../library/requirements/backlog/prd-008-unified-fleet-inference-credential/prd-008-unified-fleet-inference-credential-index.md): the API-key step's multi-provider framing becomes a single "fleet inference provider" pick + one key (adding Gemini), and the whole fleet shares one inference credential instead of the current two-store split (honeycomb vault + Nectar `NECTAR_PORTKEY_*` env). PRD-008c owns that rework of this step; the what/why explainer, skip model, and single `provider === "configured"` completion signal are unchanged.
 
 ---
 
