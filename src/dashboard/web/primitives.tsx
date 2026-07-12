@@ -262,10 +262,16 @@ export interface KpiProps {
 	delta?: number;
 	accent?: KpiAccent;
 	style?: React.CSSProperties;
+	/**
+	 * ISS-010 (additive): an optional small tertiary subline under the figure — used to keep a
+	 * secondary/contextual reading honest but subordinate (e.g. the corpus estimate under the
+	 * measured "Tokens injected" figure). Absent ⇒ no subline renders (unchanged tile).
+	 */
+	caption?: string;
 }
 
 /** The dashboard metric tile (ported from `assets/components/honeycomb/Kpi.jsx`). */
-export function Kpi({ label, value, unit, delta, accent = "honey", style }: KpiProps): React.JSX.Element {
+export function Kpi({ label, value, unit, delta, accent = "honey", style, caption }: KpiProps): React.JSX.Element {
 	const accents: Record<KpiAccent, string> = {
 		honey: "var(--honey)",
 		pollinate: "var(--pollinate)",
@@ -308,6 +314,11 @@ export function Kpi({ label, value, unit, delta, accent = "honey", style }: KpiP
 			{delta !== undefined && delta !== null && (
 				<span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: deltaUp ? "var(--verified)" : "var(--severity-critical)" }}>
 					{deltaUp ? "▲" : "▼"} {Math.abs(delta)} this week
+				</span>
+			)}
+			{caption !== undefined && caption !== "" && (
+				<span data-testid="kpi-caption" style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-tertiary)" }}>
+					{caption}
 				</span>
 			)}
 		</div>

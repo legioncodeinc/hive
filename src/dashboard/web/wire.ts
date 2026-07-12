@@ -214,6 +214,10 @@ export const KpisSchema = z.object({
 	// PRD-036c: the team-shared skill count the "Team skills" KPI binds to. `.catch(0)` so an older
 	// payload without it reads 0 rather than throwing into React.
 	teamSkillCount: z.number().catch(0),
+	// ISS-010: the LIVE cumulative count of tokens actually injected into harness sessions via
+	// recall/prime — the measured value-proof figure the "Tokens injected" KPI binds to. `.catch(0)`
+	// so an OLD daemon payload (which does not send it) — or a malformed value — reads 0, never a throw.
+	injectedTokens: z.number().catch(0),
 });
 export type KpisWire = z.infer<typeof KpisSchema>;
 
@@ -361,6 +365,14 @@ export const RoiNetSectionSchema = z.object({
 	// The net folds a modeled term → ALWAYS `est.` (e-AC-3). Defaults TRUE (safe: treat as estimate).
 	modeled: z.boolean().catch(true),
 	costBasis: RoiCostBasisSchema,
+	// ISS-011: `partial:true` ⇒ the net was computed with SOME cost inputs missing (status may be
+	// `"partial"` with `computed:true`). `.catch(false)` so an OLD daemon payload (no field) reads
+	// "not partial" — the pre-ISS-011 behavior, back-compat by construction.
+	partial: z.boolean().catch(false),
+	// ISS-011: the human-readable names of the cost inputs that were missing when `partial:true`
+	// (the page captions "excludes: …" from these). `.catch([])` so an old/malformed payload degrades
+	// to an empty list, never a throw into React.
+	missingInputs: z.array(z.string()).catch([]),
 });
 
 /** One rollup row → {@link import("../contracts.js").RoiRollupRow}. */
@@ -392,7 +404,7 @@ export const RoiViewSchema = z.object({
 	}),
 	infra: RoiInfraSectionSchema.catch({ status: "unreachable", cents: 0, costBasis: "none" }),
 	pollination: RoiPollinationSectionSchema.catch({ status: "unreachable", cents: 0, lines: [] }),
-	net: RoiNetSectionSchema.catch({ status: "absent", computed: false, netCents: 0, modeled: true, costBasis: "none" }),
+	net: RoiNetSectionSchema.catch({ status: "absent", computed: false, netCents: 0, modeled: true, costBasis: "none", partial: false, missingInputs: [] }),
 	rollups: z.array(RoiRollupSchema).catch([]),
 	// Per-user is gated off until verified backend claims land (e-AC-14) — defaults FALSE (safe: empty state).
 	perUserAvailable: z.boolean().catch(false),
@@ -2283,7 +2295,7 @@ export interface WireClient {
 }
 
 /** The empty/zero KPIs the UI shows before the first load resolves (or on failure). */
-export const EMPTY_KPIS: KpisWire = { memoryCount: 0, sessionCount: 0, turnCount: 0, estimatedSavings: 0, teamSkillCount: 0 };
+export const EMPTY_KPIS: KpisWire = { memoryCount: 0, sessionCount: 0, turnCount: 0, estimatedSavings: 0, teamSkillCount: 0, injectedTokens: 0 };
 
 /** The empty settings the header shows before the first load resolves. */
 export const EMPTY_SETTINGS: SettingsWire = { orgId: "", orgName: "", workspace: "", settings: {} };

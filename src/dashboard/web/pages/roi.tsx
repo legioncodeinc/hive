@@ -310,9 +310,17 @@ export function isDashStatus(status: RoiSectionStatus): boolean {
  * glyph + a scoped Retry, never a number fabricated from incomplete inputs. When computed it inherits
  * `est.` (the net folds a modeled term, e-AC-3) and its color obeys the honey-never-encodes-sign rule
  * (e-AC-4): positive `var(--verified)`, negative `var(--severity-critical)`.
+ *
+ * ISS-011: `computed:true` with status `"partial"` is ALSO renderable — newer daemons compute the net
+ * while some cost inputs are missing. The figure renders WITH an amber "partial" badge and an
+ * "excludes: …" caption listing `net.missingInputs`, so the degraded basis is disclosed, never hidden.
+ * `computed:false` keeps the DASH (unchanged). Exported for the NetHero matrix test.
  */
-function NetHero({ net, onRetry, retrying }: { net: RoiNetSection; onRetry: () => void; retrying: boolean }): React.JSX.Element {
-	const computed = net.computed && net.status === "ok";
+export function NetHero({ net, onRetry, retrying }: { net: RoiNetSection; onRetry: () => void; retrying: boolean }): React.JSX.Element {
+	// ISS-011: `"ok"` AND `"partial"` are the renderable statuses when the daemon says the net WAS
+	// computed. `computed:false` always dashes (e-AC-6 net-not-fabricated is unchanged).
+	const computed = net.computed && (net.status === "ok" || net.status === "partial");
+	const partial = computed && net.partial;
 	const allocated = basisIsModeled(net.costBasis);
 	return (
 		<Panel title="Net ROI" eyebrow={net.modeled ? "saved − (infra + pollination) · est." : "saved − (infra + pollination)"}>
@@ -334,9 +342,24 @@ function NetHero({ net, onRetry, retrying }: { net: RoiNetSection; onRetry: () =
 					{computed ? formatCents(net.netCents, true) : DASH}
 				</span>
 				{computed ? (
-					<Badge tone="warning" mono>
-						est.
-					</Badge>
+					<>
+						<Badge tone="warning" mono>
+							est.
+						</Badge>
+						{/* ISS-011: the amber partial disclosure — the figure stands, the degraded basis is visible. */}
+						{partial && (
+							<span data-testid="net-partial-badge" style={{ display: "inline-flex" }}>
+								<Badge tone="warning" mono>
+									partial
+								</Badge>
+							</span>
+						)}
+						{partial && net.missingInputs.length > 0 && (
+							<span data-testid="net-partial-excludes" style={{ display: "inline-flex" }}>
+								<Caption color="var(--severity-warning)">excludes: {net.missingInputs.join(", ")}</Caption>
+							</span>
+						)}
+					</>
 				) : net.status === "unreachable" ? (
 					// Finding (retry-cta): a scoped Retry is shown ONLY when the net is UNREACHABLE (a
 					// transient billing failure worth retrying). An `absent`/initial-empty/legitimate-absent
