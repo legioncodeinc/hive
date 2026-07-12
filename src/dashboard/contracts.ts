@@ -139,6 +139,15 @@ export interface RoiNetSection {
 	readonly modeled: boolean;
 	/** The cost basis on the net (e-AC-15): `allocated` when a per-team/user infra share fed it. */
 	readonly costBasis: RoiCostBasisTag;
+	/**
+	 * ISS-011 (additive): `true` when the net WAS computed but with SOME cost inputs missing —
+	 * `status` may be `"partial"` with `computed: true`. The page renders the figure WITH an amber
+	 * "partial" badge + an "excludes: …" caption rather than a dash. Old daemons never send this;
+	 * the wire `.catch(false)` keeps the pre-ISS-011 rendering for them.
+	 */
+	readonly partial: boolean;
+	/** ISS-011 (additive): the missing cost-input names the "excludes: …" caption lists (empty when none). */
+	readonly missingInputs: readonly string[];
 }
 
 /** One ROLLUP dimension the page's dimension switch offers (e-AC-13). */
@@ -267,7 +276,7 @@ export const EMPTY_ROI_VIEW: RoiView = Object.freeze({
 	},
 	infra: { status: "absent" as const, cents: 0, costBasis: "none" as const },
 	pollination: { status: "absent" as const, cents: 0, lines: [] },
-	net: { status: "absent" as const, computed: false, netCents: 0, modeled: true, costBasis: "none" as const },
+	net: { status: "absent" as const, computed: false, netCents: 0, modeled: true, costBasis: "none" as const, partial: false, missingInputs: [] },
 	rollups: [],
 	perUserAvailable: false,
 	scopedAcrossDevices: false,
