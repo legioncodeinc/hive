@@ -1,7 +1,8 @@
 /**
- * The `/health` PAGE — hive PRD-005b (per-service metrics + Deep Lake stats) and PRD-005c
- * (live log tail with selectable verbosity). Registered at `/health` in `registry.tsx`; reachable
- * via the health rail's "health details" link (PRD-005a) or direct navigation.
+ * The `/health` PAGE — hive PRD-005b (per-service metrics + Deep Lake stats). Registered at
+ * `/health` in `registry.tsx`; reachable via the health rail's "health details" link (PRD-005a)
+ * or direct navigation. ISS-009: the PRD-005c live log tail is gone — LiveLog belongs only on the
+ * Logs page (`#/logs`); a "View logs →" link points there instead.
  *
  * `/health` shares the SAME literal path as hive's own machine-liveness probe (`GET /health`
  * JSON, `server.ts`) — content negotiation on the SERVER (`accept: text/html` → this SPA page,
@@ -11,27 +12,16 @@
  * server-side negotiation resolves.
  *
  * Fed entirely by the SHARED `useFleetTelemetry` hook (SSE-first, REST fail-soft) — no second
- * fetch/poll loop is introduced here (hm-AC-8, lg-AC-1).
+ * fetch/poll loop is introduced here (hm-AC-8).
  */
 
 import React from "react";
 
-import { Panel } from "../panels.js";
+import { Panel, ViewLogsLink } from "../panels.js";
 import { PageFrame } from "../page-frame.js";
 import type { PageProps } from "../page-frame.js";
 import { SERVICE_STATE_COLOR, SERVICE_STATE_LABEL, ServiceStateIcon } from "../service-icons.js";
-import {
-	filterLogsByVerbosity,
-	LOG_LEVELS,
-	useFleetTelemetry,
-	type FleetTelemetryView,
-	type LogLevel,
-	type ServiceView,
-} from "../use-fleet-telemetry.js";
-import type { FleetLogEntry } from "../../../shared/fleet-telemetry.js";
-
-/** How many of the (already-bounded) filtered log lines the tail renders, newest first (a display cap, not a second buffer). */
-const VISIBLE_LOG_LINES = 200;
+import { useFleetTelemetry, type FleetTelemetryView, type ServiceView } from "../use-fleet-telemetry.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // hm-AC-1..3: per-service metrics, rendered GENERICALLY (never one service's key names hardcoded).
@@ -179,75 +169,6 @@ function ServiceHealthCard({ service, asOf, reconnecting }: { readonly service: 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PRD-005c: the live log tail + verbosity selector, over the SAME bounded buffer.
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** One rendered log line (newest first). */
-function LogLine({ entry }: { readonly entry: FleetLogEntry }): React.JSX.Element {
-	return (
-		<div style={{ display: "grid", gridTemplateColumns: "auto auto 1fr", gap: 10, padding: "4px 0", fontFamily: "var(--font-mono)", fontSize: 12 }}>
-			<span style={{ color: "var(--text-tertiary)" }}>{(entry.ts || "").slice(11, 19) || entry.ts}</span>
-			<span style={{ color: "var(--text-secondary)", textTransform: "uppercase" }}>{entry.level}</span>
-			<span style={{ color: "var(--text-primary)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-				<span style={{ color: "var(--text-tertiary)" }}>[{entry.service}]</span> {entry.message}
-			</span>
-		</div>
-	);
-}
-
-/** The verbosity selector (lg-AC-4): a native `<select>` matching the DS token style. */
-function VerbositySelect({ value, onChange }: { readonly value: LogLevel; readonly onChange: (level: LogLevel) => void }): React.JSX.Element {
-	return (
-		<select
-			aria-label="log verbosity"
-			data-testid="log-verbosity-select"
-			value={value}
-			onChange={(e) => onChange(e.target.value as LogLevel)}
-			style={{
-				height: 30,
-				padding: "0 8px",
-				background: "var(--bg-surface)",
-				border: "1px solid var(--border-default)",
-				borderRadius: "var(--radius-md)",
-				color: "var(--text-primary)",
-				fontFamily: "var(--font-mono)",
-				fontSize: 12,
-			}}
-		>
-			{LOG_LEVELS.map((level) => (
-				<option key={level} value={level}>
-					{level}+
-				</option>
-			))}
-		</select>
-	);
-}
-
-/** The live log tail panel (lg-AC-1..8): filtered by the selected verbosity, newest lines first, bounded display. */
-function LiveLogTail({ logs }: { readonly logs: readonly FleetLogEntry[] }): React.JSX.Element {
-	const [level, setLevel] = React.useState<LogLevel>("info");
-	const filtered = filterLogsByVerbosity(logs, level);
-	// Newest-first display over the already-bounded (ring-buffer) `logs` — never a second fetch.
-	const visible = filtered.slice(Math.max(0, filtered.length - VISIBLE_LOG_LINES)).reverse();
-
-	return (
-		<Panel title="Live logs" eyebrow={`${filtered.length} of ${logs.length} lines`} right={<VerbositySelect value={level} onChange={setLevel} />}>
-			{visible.length === 0 ? (
-				<div data-testid="health-logs-empty" style={{ padding: "12px 4px", fontSize: 13, color: "var(--text-tertiary)" }}>
-					No log lines at this verbosity yet.
-				</div>
-			) : (
-				<div data-testid="health-logs-list" style={{ maxHeight: 360, overflowY: "auto" }}>
-					{visible.map((entry, i) => (
-						<LogLine key={`${entry.ts}-${entry.service}-${i}`} entry={entry} />
-					))}
-				</div>
-			)}
-		</Panel>
-	);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // The routed page.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -257,8 +178,9 @@ function isTelemetryUnavailable(view: FleetTelemetryView): boolean {
 }
 
 /**
- * The `/health` page (PRD-005b + PRD-005c). Renders per-service metrics + Deep Lake stats
- * generically, plus a live, verbosity-filtered log tail — all from the ONE shared telemetry hook.
+ * The `/health` page (PRD-005b). Renders per-service metrics + Deep Lake stats generically from
+ * the ONE shared telemetry hook. ISS-009: the verbosity-filtered log tail is gone — the Logs page
+ * owns the log experience.
  */
 export function HealthPage(_props: PageProps): React.JSX.Element {
 	const telemetry = useFleetTelemetry();
@@ -280,7 +202,8 @@ export function HealthPage(_props: PageProps): React.JSX.Element {
 					</div>
 				)}
 
-				<LiveLogTail logs={telemetry.logs} />
+				{/* ISS-009: the live log tail is gone — the Logs page owns the log experience. */}
+				<ViewLogsLink />
 			</div>
 		</PageFrame>
 	);

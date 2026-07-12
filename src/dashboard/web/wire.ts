@@ -839,11 +839,23 @@ export const HarnessRepairResultSchema = z.object({
 });
 export type HarnessRepairResultWire = z.infer<typeof HarnessRepairResultSchema>;
 
-/** The Wave-1 Pollinate ack (`POST /api/diagnostics/pollinate` → 202 + this body). */
+/**
+ * The Wave-1 Pollinate ack (`POST /api/diagnostics/pollinate` → 202 + this body).
+ *
+ * ISS-013: newer honeycomb daemons return a distinct `below-threshold` status (in `status` or
+ * `reason`) when the trigger was declined because not enough new activity accumulated, optionally
+ * with `tokens`/`threshold` progress fields. Both fields are `.optional().catch(undefined)` so an
+ * OLDER daemon's body (no such fields) — or a malformed value — still parses cleanly and simply
+ * omits the progress readout.
+ */
 export const PollinateAckSchema = z.object({
 	triggered: z.boolean().catch(false),
 	status: z.string().catch("skipped"),
 	reason: z.string().optional(),
+	/** Tokens of new activity accumulated since the last pollination (below-threshold acks only). */
+	tokens: z.number().optional().catch(undefined),
+	/** The token threshold pollination waits for (below-threshold acks only). */
+	threshold: z.number().optional().catch(undefined),
 });
 export type PollinateAck = z.infer<typeof PollinateAckSchema>;
 

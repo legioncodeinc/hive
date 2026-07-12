@@ -9,11 +9,11 @@
  *                             shared wire — no hardcoded list, uninstalled rendered honestly as greyed
  *                             "not installed". Each card / matrix row drills into `#/harnesses/<name>`.
  *   - `#/harnesses/<name>`  → the DETAIL (039c): the harness's summary header (from the SAME 039a
- *                             status), its live activity filtered from the existing `/api/logs` stream
- *                             (client-side per c-OQ-1 — no second log pipe), and capability panels
- *                             DRIVEN BY the server-folded descriptor (c-OQ-2). A harness lacking a
- *                             capability OMITS that panel (c-AC-3) — Cursor shows Agents, Claude Code
- *                             does not.
+ *                             status) and capability panels DRIVEN BY the server-folded descriptor
+ *                             (c-OQ-2). A harness lacking a capability OMITS that panel (c-AC-3) —
+ *                             Cursor shows Agents, Claude Code does not. ISS-009: the detail's
+ *                             filtered `/api/logs` live stream is gone — LiveLog belongs only on the
+ *                             Logs page (`#/logs`); a "View logs →" link points there instead.
  *
  * Every value is hydrated from the daemon's live endpoint through the shared wire (one source, D-3);
  * every visual value is an existing `var(--…)` DS token + an existing primitive (`Kpi`/`Badge`/`Panel`).
@@ -23,19 +23,15 @@
 import React from "react";
 
 import { Badge, Kpi } from "../primitives.js";
-import { AGENT_DOT, AGENT_DOT_FALLBACK, LiveLog, Panel } from "../panels.js";
+import { AGENT_DOT, AGENT_DOT_FALLBACK, Panel, ViewLogsLink } from "../panels.js";
 import type { PageProps } from "../page-frame.js";
 import { PageFrame } from "../page-frame.js";
 import { usePathRoute } from "../router.js";
 import { useSwr } from "../use-swr.js";
-import { ENDPOINTS, formatLogLine, swrKey, type HarnessCapabilitiesWire, type HarnessStatusWire, type LogRecordWire } from "../wire.js";
+import { ENDPOINTS, swrKey, type HarnessCapabilitiesWire, type HarnessStatusWire } from "../wire.js";
 
 /** How often the overview/detail re-hydrate the 039a status (ms) — light refresh, stopped on unmount. */
 const STATUS_POLL_MS = 5000;
-/** How often the detail page re-reads `/api/logs` for the filtered live stream (ms). */
-const STREAM_POLL_MS = 2500;
-/** How many recent log lines the detail live stream keeps. */
-const MAX_STREAM_LINES = 12;
 
 /** The harness-detail route prefix the page parses the `<name>` param out of. */
 const DETAIL_PREFIX = "/harnesses/";
@@ -292,30 +288,14 @@ function CapabilityPanels({ cap }: { cap: HarnessCapabilitiesWire }): React.JSX.
 	);
 }
 
-/**
- * Filter the `/api/logs` records to a harness's activity (c-OQ-1, client-side). The request-log
- * record carries `method`/`path`/`status` (NO `agent` tag — logs/api.ts), so the only honest signal
- * is the harness name appearing in the request PATH (e.g. a per-harness install/sync route). A record
- * is kept iff its path mentions the harness; when none match, the live panel shows its waiting state —
- * NEVER a fabricated line. The records carry no secret by construction, so the filtered lines inherit
- * that guarantee (c-AC-2).
- */
-export function filterRecordsForHarness(records: readonly LogRecordWire[], name: string): LogRecordWire[] {
-	if (name === "") return [];
-	const needle = name.toLowerCase();
-	return records.filter((r) => (r.path ?? "").toLowerCase().includes(needle));
-}
-
-/** The detail body (039c): the summary header, the capability panels, and the filtered live stream. */
+/** The detail body (039c): the summary header and the capability panels (ISS-009: no live stream). */
 function HarnessDetail({
 	name,
 	status,
-	lines,
 	onBack,
 }: {
 	name: string;
 	status: HarnessStatusWire | null;
-	lines: readonly string[];
 	onBack: () => void;
 }): React.JSX.Element {
 	const back = (
@@ -365,8 +345,8 @@ function HarnessDetail({
 			{/* Capability panels — driven by the descriptor; a missing capability omits its panel (c-AC-3). */}
 			<CapabilityPanels cap={status.capabilities} />
 
-			{/* Live activity — the existing /api/logs stream, filtered to this harness (c-AC-2). */}
-			<LiveLog lines={lines} />
+			{/* ISS-009: the filtered live stream is gone — the Logs page owns the log experience. */}
+			<ViewLogsLink />
 		</PageFrame>
 	);
 }
@@ -376,41 +356,27 @@ function HarnessDetail({
 /**
  * The Harnesses page (039b/039c). Hydrates the six `HarnessStatus`es from the shared wire (039a — the
  * single backbone) and renders the OVERVIEW for `/harnesses` or the DETAIL for `/harnesses/<name>`,
- * deciding off the active path route (PRD-003c). The detail page additionally polls the existing
- * `/api/logs` records and filters them to the harness for its live stream (no second log pipe — D-4 / c-OQ-1).
+ * deciding off the active path route (PRD-003c). ISS-009: the detail page no longer polls
+ * `/api/logs` — the Logs page owns the log experience.
  */
 export function HarnessesPage({ wire }: PageProps): React.JSX.Element {
 	const { route, navigate } = usePathRoute();
 	const detailName = harnessNameFromRoute(route);
 
-	// PRD-012b: the six statuses + the detail logs read are now SWR hooks with interval refresh (the
-	// page's former usePoll calls become SWR `refreshInterval`). The status hook is always active; the
-	// detail-logs hook is disabled (undefined key) on the overview route so it fetches nothing.
+	// PRD-012b: the six statuses are an SWR hook with interval refresh (the page's former usePoll
+	// call became SWR `refreshInterval`).
 	const { data: harnesses = [] } = useSwr<readonly HarnessStatusWire[]>(
 		swrKey(ENDPOINTS.harnesses),
 		async () => wire.harnesses(),
 		{ refreshInterval: STATUS_POLL_MS },
 	);
 
-	// On a detail route, read /api/logs and filter the records to this harness (client-side — c-OQ-1).
-	// On the overview route `detailName` is null, so the key is undefined → the hook is disabled (no fetch).
-	const logsKey = detailName !== null ? swrKey(`${ENDPOINTS.logs}?h=${detailName}`) : undefined;
-	const { data: records = [] } = useSwr<readonly LogRecordWire[]>(
-		logsKey,
-		async () => wire.logs(MAX_STREAM_LINES * 4),
-		{ refreshInterval: STREAM_POLL_MS },
-	);
-	const lines = React.useMemo<readonly string[]>(() => {
-		if (detailName === null) return [];
-		return filterRecordsForHarness(records, detailName).slice(-MAX_STREAM_LINES).reverse().map(formatLogLine);
-	}, [records, detailName]);
-
 	const onOpen = React.useCallback((name: string): void => navigate(`/harnesses/${name}`), [navigate]);
 	const onBack = React.useCallback((): void => navigate("/harnesses"), [navigate]);
 
 	if (detailName !== null) {
 		const status = harnesses.find((h) => h.name === detailName) ?? null;
-		return <HarnessDetail name={detailName} status={status} lines={lines} onBack={onBack} />;
+		return <HarnessDetail name={detailName} status={status} onBack={onBack} />;
 	}
 	return <HarnessesOverview harnesses={harnesses} onOpen={onOpen} />;
 }

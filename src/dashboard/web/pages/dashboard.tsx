@@ -10,12 +10,14 @@
  *                                             lexical-fallback badge, the centerpiece (038b, moved
  *                                             VERBATIM — same `wire.recall` POST, same render).
  *   3. `<section data-area="harness-area">` — the {@link HarnessStrip} (wired-in chips + per-harness
- *                                             KPI tiles + a short-tail `/api/logs` stream — 038c),
- *                                             then the existing 2-col grid + the full live log,
+ *                                             KPI tiles — 038c), then the existing 2-col grid,
  *                                             reorganized into the zone (kept, not dropped).
  *
- * Behavior is UNCHANGED — recall, polling, and the KPI/grid panels are MOVED into the areas, not
- * rebuilt (parent D-2/D-3/D-4). The page hydrates from the SHARED `wire` the shell passes via
+ * ISS-009: the home's LiveLog mounts (the full live log + the strip's short-tail stream) are GONE —
+ * LiveLog belongs only on the Logs page (`#/logs`). A compact "View logs →" link closes the zone
+ * instead, and the `/api/logs` poll that fed those tails is removed with them.
+ *
+ * The page hydrates from the SHARED `wire` the shell passes via
  * {@link PageProps} (it never calls `createWireClient` — the shell builds ONE) and reads the
  * shell-owned `pollinating` flag (D-6: the "Pollinate now" action, the identity, the coarse daemon pill, and
  * the daemon-down swap live in the shell, so this page renders NO header of its own). Every visual
@@ -25,7 +27,7 @@
 import React from "react";
 
 import { Badge, Button, Input, Kpi, MemoryCard } from "../primitives.js";
-import { LiveLog, RulesPanel, SessionsPanel, SkillSyncPanel } from "../panels.js";
+import { RulesPanel, SessionsPanel, SkillSyncPanel, ViewLogsLink } from "../panels.js";
 import { HarnessStrip } from "../harness-strip.js";
 import { HarnessConnectCard } from "../harness-connect-card.js";
 import { useScope } from "../scope-context.js";
@@ -34,7 +36,6 @@ import { useSwr } from "../use-swr.js";
 import {
 	EMPTY_KPIS,
 	ENDPOINTS,
-	formatLogLine,
 	swrKey,
 	type HarnessStatusWire,
 	type HealthReasonsWire,
@@ -45,19 +46,8 @@ import {
 	type SkillRowWire,
 } from "../wire.js";
 
-/** How often the live-log poll re-reads `/api/logs` (ms). Reasonable cadence, stopped on unmount. */
-const LOG_POLL_MS = 2500;
 /** How often the harness-strip poll re-reads `/api/diagnostics/harnesses` for last-seen recency (ms). */
 const HARNESS_POLL_MS = 5000;
-/** How many recent log lines the panel keeps. */
-const MAX_LOG_LINES = 8;
-/** The short-tail cap for the harness-area live stream — tighter than the full log (038c-AC-2 / OQ-4). */
-const MAX_STREAM_LINES = 5;
-
-/** The local-clock prefix for a client-originated log line (recall notes). */
-function clockPrefix(): string {
-	return new Date().toTimeString().slice(0, 8);
-}
 
 /** The recall bar: a mono lg Input + a primary Recall button. Enter and click both fire. */
 function RecallBar({
@@ -163,9 +153,10 @@ function HealthStrip({ reasons }: { reasons: HealthReasonsWire | null }): React.
 
 /**
  * The Dashboard route content (the lift-and-shift, D-6). On mount it hydrates every view from the
- * shared `wire` (AC-2), polls `/api/logs` (AC-4) and `/health` for the strip reasons (PRD-029), and
- * runs recall (AC-3). The `pollinating` pulse is owned by the shell (D-5) and read from props. All
- * polling clears on unmount. NO header — the shell owns the chrome (D-5).
+ * shared `wire` (AC-2) and reads `/health` strip reasons from the shell (PRD-029), and runs recall
+ * (AC-3). The `pollinating` pulse is owned by the shell (D-5) and read from props. All polling
+ * clears on unmount. NO header — the shell owns the chrome (D-5). ISS-009: no `/api/logs` poll and
+ * no LiveLog here — logs live on the Logs page.
  */
 export function DashboardPage({ wire, pollinating = false, healthReasons = null }: PageProps): React.JSX.Element {
 	// PRD-049e: the active dashboard scope — the selected project re-scopes the KPI band's
@@ -206,15 +197,6 @@ export function DashboardPage({ wire, pollinating = false, healthReasons = null 
 	const [recallNonce, setRecallNonce] = React.useState(0);
 	const [recallDegraded, setRecallDegraded] = React.useState(false);
 
-	// ── log + recall-note state (AC-4) ──
-	const [logLines, setLogLines] = React.useState<readonly string[]>([]);
-	const [notes, setNotes] = React.useState<readonly string[]>([]);
-
-	/** Push a client-originated note (recall summary) onto the live-log feed. */
-	const pushNote = React.useCallback((text: string): void => {
-		setNotes((prev) => [`${clockPrefix()}  ${text}`, ...prev].slice(0, MAX_LOG_LINES));
-	}, []);
-
 	// Defer the below-the-fold harness area to a SECOND paint so the KPI band + recall (what the operator
 	// looks at) are interactive first. The flag flips in a passive effect (after the first commit paints),
 	// so the heavy strip/grid/log mount on the next render, not the first. The `harness-area` landmark
@@ -223,13 +205,6 @@ export function DashboardPage({ wire, pollinating = false, healthReasons = null 
 	React.useEffect(() => {
 		setShowSecondary(true);
 	}, []);
-
-	// AC-4: poll /api/logs and render real daemon log lines. Via `usePoll` → shared background-tab pause +
-	// stop-on-unmount (no hand-rolled interval/alive loop).
-	usePoll(async () => {
-		const records = await wire.logs(MAX_LOG_LINES);
-		setLogLines(records.slice(-MAX_LOG_LINES).reverse().map(formatLogLine));
-	}, LOG_POLL_MS);
 
 	// 038c: poll the PRD-039 harness registry/telemetry for the wired-in strip + per-harness tiles. A light
 	// poll keeps last-seen recency fresh; a failure degrades to [] (wire-safe). Via `usePoll` (gated + cleaned).
@@ -248,17 +223,8 @@ export function DashboardPage({ wire, pollinating = false, healthReasons = null 
 		setRecalled(true);
 		setRecallDegraded(degraded);
 		setRecallNonce((n) => n + 1);
-		const top = memories.length > 0 ? ` · ${memories[0]?.score.toFixed(2)} top` : "";
-		pushNote(`recall    "${q}" → ${memories.length} hits${top}`);
 		setRecallBusy(false);
-	}, [query, recallBusy, wire, pushNote, scope.project]);
-
-	// The live-log feed merges client notes (recall) ahead of the polled daemon lines.
-	const feed = React.useMemo(() => [...notes, ...logLines].slice(0, MAX_LOG_LINES), [notes, logLines]);
-
-	// 038c-AC-2: the harness-area short-tail stream — the SAME polled /api/logs lines, capped tighter
-	// than the full log. `/api/logs` carries no per-line harness field (c-OQ-3), so it is unlabeled.
-	const streamLines = React.useMemo(() => logLines.slice(0, MAX_STREAM_LINES), [logLines]);
+	}, [query, recallBusy, wire, scope.project]);
 
 	return (
 		<>
@@ -304,15 +270,15 @@ export function DashboardPage({ wire, pollinating = false, healthReasons = null 
 				</div>
 			</section>
 
-			{/* ── AREA 3: the harness area (038c) — the strip, then the retained 2-col grid + live log ── */}
+			{/* ── AREA 3: the harness area (038c) — the strip, then the retained 2-col grid ── */}
 			{/* The landmark always renders (stable layout); its CONTENTS wait for `showSecondary` so the
 			    KPI band + recall paint first (below-the-fold deferral). */}
 			<section data-area="harness-area" aria-label="Harnesses and activity">
 				{showSecondary && (
 					<>
-						{/* The wired-in chips + per-harness KPI tiles + short-tail stream (038c). */}
+						{/* The wired-in chips + per-harness KPI tiles (038c). */}
 						<div style={{ marginBottom: 16 }}>
-							<HarnessStrip harnesses={harnesses} streamLines={streamLines} />
+							<HarnessStrip harnesses={harnesses} />
 						</div>
 
 						{/* The existing 2-col grid — kept, reorganized into the zone (parent: retain the panels). */}
@@ -331,8 +297,8 @@ export function DashboardPage({ wire, pollinating = false, healthReasons = null 
 							</div>
 						</div>
 
-						{/* the full live log (AC-4) */}
-						<LiveLog lines={feed} />
+						{/* ISS-009: the full live log is gone — LiveLog belongs to the Logs page only. */}
+						<ViewLogsLink />
 					</>
 				)}
 			</section>

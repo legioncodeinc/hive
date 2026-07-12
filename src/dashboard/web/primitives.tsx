@@ -316,6 +316,17 @@ export function Kpi({ label, value, unit, delta, accent = "honey", style }: KpiP
 
 // ── MemoryCard ─────────────────────────────────────────────────────────────────
 
+/**
+ * Format a recall score for display (ISS-007). Scores are RRF-fused values typically in the
+ * 0.0008–0.05 range, so the former fixed 2-decimal render (`toFixed(2)`) always showed "0.00".
+ * Render 3 significant digits instead, with trailing zeros dropped: 0.016279 → "0.0163",
+ * 0.5 → "0.5", 1 → "1". Compact by construction (≤6 chars for the real score range).
+ */
+export function formatScore(score: number): string {
+	if (!Number.isFinite(score)) return "0";
+	return String(Number(score.toPrecision(3)));
+}
+
 /** Props for {@link MemoryCard} — one recalled or stored memory. */
 export interface MemoryCardProps {
 	memoryKey: string;
@@ -422,7 +433,7 @@ export function MemoryCard({
 					<span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-tertiary)" }}>{scope}</span>
 					{typeof score === "number" && (
 						<span style={{ fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 600, color: "var(--text-secondary)" }}>
-							{score.toFixed(2)}
+							{formatScore(score)}
 						</span>
 					)}
 				</div>

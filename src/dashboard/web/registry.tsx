@@ -211,6 +211,9 @@ const SettingsIcon = (
 /** The Projects page route (PRD-059c) — exported so the first-run CTA can navigate to it (b-AC-4). */
 export const PROJECTS_ROUTE = "/projects" as const;
 
+/** The Logs page route (PRD-043) — exported so the ISS-009 "View logs →" affordance can navigate to it. */
+export const LOGS_ROUTE = "/logs" as const;
+
 export const ROUTES: readonly RouteEntry[] = [
 	{ route: "/", label: "Dashboard", icon: DashboardIcon, component: DashboardPage },
 	// PRD-059c: the Projects management page (bound-folder list + Add/Import/Unbind/Open). Slotted right
@@ -230,7 +233,7 @@ export const ROUTES: readonly RouteEntry[] = [
 	// whole wiring (037c contract): a separate route from Memory Graph — not a third graph on `/graph`.
 	{ route: "/hive-graph", label: "Hive Graph", icon: HiveGraphIcon, component: HiveGraphPage },
 	{ route: "/sync", label: "Sync", icon: SyncIcon, component: SyncPage },
-	{ route: "/logs", label: "Logs", icon: LogsIcon, component: LogsPage },
+	{ route: LOGS_ROUTE, label: "Logs", icon: LogsIcon, component: LogsPage },
 	// PRD-005b/PRD-005c: the persistent fleet health page (per-service metrics + Deep Lake stats +
 	// a live, verbosity-filtered log tail). Note: `/health` is ALSO hive's own machine-liveness
 	// path (`server.ts`); content negotiation on the server (`accept: text/html`) keeps both

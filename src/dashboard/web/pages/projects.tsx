@@ -30,7 +30,7 @@ import React from "react";
 
 import { Badge, Button } from "../primitives.js";
 import { PageFrame, type PageProps } from "../page-frame.js";
-import { useScope } from "../scope-context.js";
+import { useScope, useScopeSwitcher } from "../scope-context.js";
 import { FolderPicker } from "../folder-picker.js";
 import { useSwr } from "../use-swr.js";
 import { type BindAckWire, ENDPOINTS, type ScopeProjectWire, type WireClient } from "../wire.js";
@@ -559,6 +559,8 @@ function ModalShell({ title, onClose, testId, children }: { title: string; onClo
  */
 export function ProjectsPage({ wire }: PageProps): React.JSX.Element {
 	const { scope, setScope } = useScope();
+	// ISS-019: the sidebar switcher's project list is ScopeProvider state, not this page's SWR cache.
+	const { refreshProjects } = useScopeSwitcher();
 	// PRD-012b: the workspace's projects list is now an SWR read. The key is the plain endpoint (the
 	// `?unbound=1` variant is a SEPARATE cache entry, used by the import modal). After a successful add/
 	// unbind, `mutateProjects()` revalidates so the list reflects the daemon's persisted truth.
@@ -571,7 +573,10 @@ export function ProjectsPage({ wire }: PageProps): React.JSX.Element {
 	/** Re-list the workspace's projects (the persisted truth). */
 	const reList = React.useCallback((): void => {
 		mutateProjects();
-	}, [mutateProjects]);
+		// ISS-019: also refresh the ScopeProvider's list so the sidebar switcher reflects the
+		// bind/unbind immediately — its state is separate from this page's SWR cache.
+		void refreshProjects();
+	}, [mutateProjects, refreshProjects]);
 
 	// ACTIVE = locally-bound, non-inbox projects (c-AC-1). The inbox is shown distinctly (c-AC-2) with its
 	// daemon-aggregated size (its `sessionCount`) — resolved here so the row can render the real count.
