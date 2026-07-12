@@ -28,7 +28,7 @@
 
 import React from "react";
 
-import { Badge, Button, Input, MemoryCard } from "../primitives.js";
+import { Badge, Button, formatScore, Input, MemoryCard } from "../primitives.js";
 import { LifecycleHealthPanel } from "./lifecycle-panel.js";
 import { isTabHidden, PageFrame, type PageProps } from "../page-frame.js";
 import { useScope } from "../scope-context.js";
@@ -133,8 +133,13 @@ const SURFACE: React.CSSProperties = {
 // The browse list (040a)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** One clickable list row — id + a one-line content preview + a scope/version tag. Escaped text. */
-function MemoryRow({ record, onOpen }: { record: MemoryRecordWire; onOpen: (id: string) => void }): React.JSX.Element {
+/**
+ * One clickable list row — id + a one-line content preview + a scope/version tag. Escaped text.
+ * ISS-006: `score` is ADDITIVE — when present (a search-result render) the row keeps the engine's
+ * relevance badge (the #24 `formatScore` precision) while staying the SAME interactive card the
+ * browse list renders. Absent (the browse list) → no badge, byte-for-byte the prior row.
+ */
+function MemoryRow({ record, onOpen, score }: { record: MemoryRecordWire; onOpen: (id: string) => void; score?: number }): React.JSX.Element {
 	return (
 		<button
 			type="button"
@@ -161,11 +166,40 @@ function MemoryRow({ record, onOpen }: { record: MemoryRecordWire; onOpen: (id: 
 			<span style={{ flex: 1, fontSize: 13, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
 				{record.content}
 			</span>
+			{typeof score === "number" && (
+				<span data-testid="row-score" style={{ fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
+					{formatScore(score)}
+				</span>
+			)}
 			<Badge tone="neutral" mono>
 				{record.type || "fact"}
 			</Badge>
 		</button>
 	);
+}
+
+/**
+ * ISS-006 — project a search hit that RESOLVED a memory id into the {@link MemoryRecordWire} shape
+ * {@link MemoryRow} renders, so a found memory is THE SAME interactive card as the browse list
+ * (click → the same detail view → the same edit/forget flows). Only the fields the row displays
+ * are meaningful (`id`/`content`/`type`); the rest are the schema's safe defaults — the detail
+ * view re-reads the FULL persisted record from `GET /api/memories/:id` on open, never this shim.
+ */
+function searchHitRecord(hit: RecalledMemory): MemoryRecordWire {
+	return {
+		id: hit.memoryId ?? hit.memoryKey,
+		type: hit.type,
+		content: hit.snippet,
+		confidence: 0,
+		agentId: "",
+		createdAt: "",
+		updatedAt: "",
+		visibility: "",
+		sourceType: "",
+		sourceId: "",
+		version: 0,
+		hasEmbedding: false,
+	};
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -718,7 +752,13 @@ export function MemoriesPage({ wire, pollinating = false }: PageProps): React.JS
 			// RE-READ, never optimistic (AC-4): poll until the persisted content matches the save
 			// (or a version advances), then render that — NOT the form input.
 			const persisted = await rereadUntil(id, (rec) => rec.content === content || rec.version > 0);
-			if (persisted !== null) setDetail(persisted);
+			if (persisted !== null) {
+				setDetail(persisted);
+				// ISS-006: an edit reached from a SEARCH RESULT keeps the search view consistent too —
+				// the matching hit's snippet reflects the PERSISTED content (the same re-read truth the
+				// detail renders; the wire's invalidateSwr already revalidates the browse-list SWR).
+				setHits((prev) => prev.map((h) => (h.memoryId === id ? { ...h, snippet: persisted.content } : h)));
+			}
 			// Refresh the browse list so the row preview reflects the new persisted content.
 			void reList();
 			return "saved · new version";
@@ -733,6 +773,10 @@ export function MemoriesPage({ wire, pollinating = false }: PageProps): React.JS
 			if (ack === null) return null;
 			// Re-read: a forgotten memory reads as null (tombstone). Close the detail + re-list.
 			closeDetail();
+			// ISS-006: a forget reached from a SEARCH RESULT removes that hit from the rendered
+			// results (hits are local state; the wire's invalidateSwr already revalidates the
+			// browse-list SWR, so both views stay consistent). A no-op for list-originated forgets.
+			setHits((prev) => prev.filter((h) => h.memoryId !== id));
 			void reList();
 			return "forgotten";
 		},
@@ -833,15 +877,23 @@ export function MemoriesPage({ wire, pollinating = false }: PageProps): React.JS
 				)
 			) : (
 				<>
-					{/* SEARCH RESULTS swap the list (040a-AC-2): engine order + score + the MemoryCard render. */}
+					{/* SEARCH RESULTS swap the list (040a-AC-2, engine order + score). ISS-006: a hit that
+					    resolved a memory id renders as THE SAME interactive card as the browse list — the
+					    {@link MemoryRow} (click → the same detail view → the same edit/forget flows), with
+					    the engine score badge kept (additive `score` prop). A hit WITHOUT a memory id (a
+					    session digest / summary) keeps the legacy inert MemoryCard presentation. */}
 					{searchActive ? (
 						<div data-testid="search-results" style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 18 }}>
 							{hits.length === 0 ? (
 								<div style={{ padding: "10px 4px", fontSize: 13, color: "var(--text-tertiary)" }}>No memories matched that query.</div>
 							) : (
-								hits.map((m, i) => (
-									<MemoryCard key={m.memoryKey} {...m} pollinating={pollinating && i === 1} />
-								))
+								hits.map((m, i) =>
+									m.memoryId !== null ? (
+										<MemoryRow key={m.memoryKey} record={searchHitRecord(m)} onOpen={openDetail} score={m.score} />
+									) : (
+										<MemoryCard key={m.memoryKey} {...m} pollinating={pollinating && i === 1} />
+									),
+								)
 							)}
 						</div>
 					) : (

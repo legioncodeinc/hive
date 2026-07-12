@@ -521,7 +521,52 @@ export const RecallHitSchema = z.object({
 	score: z.number().catch(0),
 	kind: z.enum(["memory", "session"]).catch("memory"),
 	secondary: z.boolean().catch(false),
+	// ISS-006 (additive, defensive): the parallel honeycomb PR (fix/search-list-corpus-parity)
+	// stamps memories-source hits with an EXPLICIT `memoryId` plus minimal card fields (`type`);
+	// some daemon vintages instead encode identity in a `ref` string (`"memories:mem_…"`). Every
+	// new field is `.optional().catch(undefined)` so ANY daemon vintage — new contract, ref-style,
+	// or today's bare `{ source, id }` — parses cleanly and never throws into React.
+	memoryId: z.string().optional().catch(undefined),
+	ref: z.string().optional().catch(undefined),
+	type: z.string().optional().catch(undefined),
 });
+export type RecallHitWire = z.infer<typeof RecallHitSchema>;
+
+/** The ref/id prefix a memories-source hit carries when identity rides as `"memories:<id>"`. */
+const MEMORIES_REF_PREFIX = "memories:" as const;
+
+/**
+ * ISS-006 — resolve a recall hit's ACTIONABLE memory identity, defensively across daemon vintages:
+ *
+ *   1. the explicit additive `memoryId` field (the new honeycomb contract) wins when present;
+ *   2. else a `ref` string with the `"memories:"` prefix parses to its id (older daemons);
+ *   3. else today's live contract — `source === "memories"` with a bare `id` — resolves to that id
+ *      (tolerating an accidental `"memories:"` prefix on the id itself);
+ *   4. anything else (session digests, `memory` summaries, garbage) → `null`: the hit carries no
+ *      actionable memory identity and renders as the legacy inert presentation.
+ *
+ * Pure + exported so the vintage matrix is unit-testable without mounting a page.
+ */
+export function memoryIdFromHit(hit: {
+	readonly memoryId?: string;
+	readonly ref?: string;
+	readonly source?: string;
+	readonly id?: string;
+}): string | null {
+	if (typeof hit.memoryId === "string" && hit.memoryId !== "") return hit.memoryId;
+	if (typeof hit.ref === "string" && hit.ref.startsWith(MEMORIES_REF_PREFIX)) {
+		const id = hit.ref.slice(MEMORIES_REF_PREFIX.length);
+		return id !== "" ? id : null;
+	}
+	if (hit.source === "memories" && typeof hit.id === "string" && hit.id !== "") {
+		if (hit.id.startsWith(MEMORIES_REF_PREFIX)) {
+			const id = hit.id.slice(MEMORIES_REF_PREFIX.length);
+			return id !== "" ? id : null;
+		}
+		return hit.id;
+	}
+	return null;
+}
 export const RecallResponseSchema = z.object({
 	hits: z.array(RecallHitSchema).catch([]),
 	sources: z.array(z.string()).catch([]),
@@ -541,6 +586,14 @@ export interface RecalledMemory {
 	readonly kind: "memory" | "session";
 	/** `true` iff a drill-down raw session row (the card visually demotes these). */
 	readonly secondary: boolean;
+	/**
+	 * ISS-006: the ACTIONABLE memory id resolved via {@link memoryIdFromHit} (explicit `memoryId`
+	 * field ?? `"memories:<id>"` ref parse ?? bare `source`+`id`), or `null` when the hit carries no
+	 * memory identity (session digests) — those render the legacy inert presentation.
+	 */
+	readonly memoryId: string | null;
+	/** ISS-006: the memory `type` card field when the daemon sends it (`""` otherwise). */
+	readonly type: string;
 }
 
 /**
@@ -2521,6 +2574,11 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 					verified: h.source === "memories",
 					kind: h.kind,
 					secondary: h.secondary,
+					// ISS-006: carry the ACTIONABLE memory identity (explicit field ?? ref parse ??
+					// source+id) so a memories-source hit renders as the SAME interactive card as the
+					// browse list; `null` (sessions/summaries) keeps the legacy inert presentation.
+					memoryId: memoryIdFromHit(h),
+					type: h.type ?? "",
 				}));
 				return { memories, degraded: parsed.data.degraded };
 			} catch {
