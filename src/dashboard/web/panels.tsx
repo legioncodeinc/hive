@@ -478,6 +478,9 @@ export const SETTING_KEY = Object.freeze({
 	activeProvider: "activeProvider",
 	activeModel: "activeModel",
 	pollinatingEnabled: "pollinating.enabled",
+	// ISS-002: the vault-first memory-graph persistence gate (KNOWN key daemon-side; default follows
+	// the memory switch; applies live via the daemon reload seam). Boolean like pollinating.enabled.
+	graphEnabled: "graph.enabled",
 	// PRD-044c: the recall-mode selector key. The closed enum `keyword | semantic | hybrid` is
 	// validated daemon-side (`vault/api.ts` `isValidRecallMode`, fail-closed); an UNSET key
 	// preserves the PRD-025 runtime default (the page's "default" option leaves it unset).
@@ -548,8 +551,9 @@ function Select({
 /**
  * A small on/off toggle (the kit has no Toggle primitive). Renders a pill button whose label +
  * tone reflect the boolean; clicking flips it. Used for the pollinating on/off flag (FR-3).
+ * Exported (ISS-002) so the Settings page's Memory-graph row reuses THIS idiom, not a fork.
  */
-function Toggle({ on, onToggle, ariaLabel }: { on: boolean; onToggle: () => void; ariaLabel: string }): React.JSX.Element {
+export function Toggle({ on, onToggle, ariaLabel }: { on: boolean; onToggle: () => void; ariaLabel: string }): React.JSX.Element {
 	return (
 		<button
 			type="button"
@@ -579,8 +583,8 @@ function Toggle({ on, onToggle, ariaLabel }: { on: boolean; onToggle: () => void
 	);
 }
 
-/** One labeled row in the settings panel (a left label + a right control). */
-function SettingRow({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }): React.JSX.Element {
+/** One labeled row in the settings panel (a left label + a right control). Exported for ISS-002 reuse. */
+export function SettingRow({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }): React.JSX.Element {
 	return (
 		<div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 6px", flexWrap: "wrap" }}>
 			<div style={{ display: "flex", flexDirection: "column", minWidth: 120 }}>
