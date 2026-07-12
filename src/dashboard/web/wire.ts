@@ -263,12 +263,26 @@ export const GraphMetaSchema = z.object({
 	shownEdges: z.number().catch(0),
 	truncated: z.boolean().catch(false),
 });
+/**
+ * ISS-002 — the honest `built:false` reason the honeycomb daemon adds ADDITIVELY to the memory-graph
+ * response. Closed enum on the wire; an ABSENT field (old daemon) or an unknown value `.catch()`es to
+ * `undefined`, which the page renders as today's generic empty state — never a throw, never a guess.
+ */
+export const GraphEmptyReasonSchema = z.enum(["graph_off", "no_entities_yet", "query_error"]);
+export type GraphEmptyReason = z.infer<typeof GraphEmptyReasonSchema>;
+
 export const GraphSchema = z.object({
 	built: z.boolean().catch(false),
 	nodes: z.array(GraphNodeSchema).catch([]),
 	edges: z.array(GraphEdgeSchema).catch([]),
 	// Optional + fail-soft: a malformed/absent `meta` degrades to undefined, never nuking the graph.
 	meta: GraphMetaSchema.optional().catch(undefined),
+	// ISS-002 (all three optional + fail-soft — old daemons send none of them):
+	// WHY the graph is empty when `built:false` — `graph_off` | `no_entities_yet` | `query_error`.
+	reason: GraphEmptyReasonSchema.optional().catch(undefined),
+	// Honest progress counts alongside `no_entities_yet` ("N memories scanned, 0 entities found").
+	memoriesScanned: z.number().optional().catch(undefined),
+	entitiesFound: z.number().optional().catch(undefined),
 });
 export type GraphWire = z.infer<typeof GraphSchema>;
 
@@ -2909,6 +2923,10 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 					if (res.ok) {
 						// PRD-012b: a vault-settings write invalidates the settings read (conservative broad-prefix).
 						invalidateSwr(ENDPOINTS.vaultSettings);
+						// ISS-002: a `graph.enabled` write changes what the memory-graph endpoint answers (the
+						// vault-first gate applies live via the daemon reload seam) — drop that read too so the
+						// Graph page's next look refetches instead of serving the stale "graph off" empty state.
+						if (key === "graph.enabled") invalidateSwr(ENDPOINTS.memoryGraph);
 					}
 					return res.ok;
 			} catch {

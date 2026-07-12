@@ -36,7 +36,7 @@
 import React from "react";
 
 import { Badge, Button, Input } from "../primitives.js";
-import { Panel, PortkeyGatewaySection, PROVIDER_KEY_NAME, SETTING_KEY, SettingsPanel } from "../panels.js";
+import { Panel, PortkeyGatewaySection, PROVIDER_KEY_NAME, SETTING_KEY, SettingRow, SettingsPanel, Toggle } from "../panels.js";
 import type { PageProps } from "../page-frame.js";
 import { PageFrame } from "../page-frame.js";
 import { LIFECYCLE_FLAG_REFERENCE } from "../../../shared/lifecycle-flags.js";
@@ -469,6 +469,61 @@ export function SearchAndInferenceSection({
 				<div style={{ marginTop: 8, opacity: portkeyEnabled === true ? 0.45 : 1, transition: "opacity 0.15s" }}>
 					<SettingsPanel catalog={catalog} settings={settings} secretNames={secretNames} onSave={onSave} />
 				</div>
+			</div>
+		</Panel>
+	);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ISS-002 — the Memory graph persistence toggle (vault-first `graph.enabled`).
+// A boolean `setting`-class record like `pollinating.enabled`: persisted through the
+// SAME `setSetting`/re-read contract, rendered with the SAME Toggle/SettingRow idioms.
+// When the key is UNSET the daemon defaults it to FOLLOW the Memory switch, so the
+// toggle derives its unset display state from `reasons.memory.enabled` — never a
+// hardcoded guess.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Resolve the DISPLAY state of the memory-graph toggle (pure, unit-assertable):
+ * an EXPLICIT persisted `graph.enabled` wins (boolean or its string form — the vault
+ * stores JSON scalars); an unset/unknown value falls back to the memory switch, which
+ * is the daemon's documented default ("follows the Memory switch by default").
+ */
+export function graphToggleOn(value: SettingValueWire | undefined, memoryEnabled: boolean): boolean {
+	if (value === true || value === "true") return true;
+	if (value === false || value === "false") return false;
+	return memoryEnabled;
+}
+
+/**
+ * The Memory graph section (ISS-002): one Toggle/SettingRow row bound to the vault-first
+ * `graph.enabled` setting. A flip persists through the EXISTING `onSave` (`wire.setSetting`
+ * → re-read), so the rendered state is the PERSISTED vault value, never a local-only
+ * optimistic toggle. The unset default is derived honestly from the Memory switch state
+ * (`/api/status` `reasons.memory.enabled`, fail-soft to off — mirrors MemoryFormationSection's
+ * data path; the SWR key is shared so this adds no extra polling).
+ */
+export function MemoryGraphSection({
+	wire,
+	settings,
+	onSave,
+}: {
+	wire: PageProps["wire"];
+	settings: Readonly<Record<string, SettingValueWire>>;
+	onSave: (key: string, value: SettingValueWire) => Promise<boolean>;
+}): React.JSX.Element {
+	// The memory switch state — the UNSET default the daemon documents. Fail-soft: an absent/
+	// malformed status degrades to "memory off" → toggle reads off (never a throw, never a guess up).
+	const { data: status } = useSwr<StatusProbe>(ENDPOINTS.status, async () => wire.status());
+	const memoryEnabled = status?.reasons?.memory?.enabled === true;
+	const on = graphToggleOn(settings[SETTING_KEY.graphEnabled], memoryEnabled);
+
+	return (
+		<Panel title="Memory graph" eyebrow="graph persistence · vault-first">
+			<div data-testid="memory-graph-section">
+				<SettingRow label="Memory graph" hint="follows the Memory switch by default; applies live">
+					<Toggle ariaLabel="memory graph" on={on} onToggle={() => void onSave(SETTING_KEY.graphEnabled, !on)} />
+				</SettingRow>
 			</div>
 		</Panel>
 	);
@@ -1019,6 +1074,9 @@ export function SettingsPage({ wire }: PageProps): React.JSX.Element {
 				{/* Dashboard action: the PROMINENT, provider-gated Memory Formation control (persisted;
 				    applies on next daemon restart). Mirrors the embeddings toggle's wire/health seam. */}
 				<MemoryFormationSection wire={wire} />
+				{/* ISS-002: the vault-first Memory graph persistence toggle (graph.enabled; follows the
+				    Memory switch by default; applies live via the daemon reload seam). */}
+				<MemoryGraphSection wire={wire} settings={vault.settings} onSave={onSaveSetting} />
 				{/* PRD-063a: Portkey gateway section — toggle, config id, write-only key, fallback toggle. */}
 				<PortkeyGatewaySection
 					settings={vault.settings}

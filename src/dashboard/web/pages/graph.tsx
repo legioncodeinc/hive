@@ -31,14 +31,14 @@
 import React from "react";
 
 import { layout, neighborsOf, splitNeighbors, type Point } from "../graph-layout.js";
-import { KIND_COLOR, KIND_COLOR_FALLBACK } from "../panels.js";
+import { KIND_COLOR, KIND_COLOR_FALLBACK, SETTING_KEY } from "../panels.js";
 import { Badge } from "../primitives.js";
 import type { PageProps } from "../page-frame.js";
 import { PageFrame } from "../page-frame.js";
 import { useScope } from "../scope-context.js";
 import { useSwr } from "../use-swr.js";
 import { NeedsProjectSelection } from "../needs-project.js";
-import { capGraphForRender, EMPTY_GRAPH, ENDPOINTS, MAX_RENDER_NODES, swrKey, type GraphWire } from "../wire.js";
+import { capGraphForRender, EMPTY_GRAPH, ENDPOINTS, MAX_RENDER_NODES, swrKey, type GraphEmptyReason, type GraphWire } from "../wire.js";
 
 /** How often the page re-hydrates the memory graph (ms). Light refresh, stopped on unmount. */
 const GRAPH_POLL_MS = 8000;
@@ -375,17 +375,14 @@ function GraphCanvasFull({
 	);
 }
 
-// ── Empty state (D-7) ──────────────────────────────────────────────────────────
+// ── Empty state (D-7, reason-branched per ISS-002) ────────────────────────────
 
-/**
- * The full-page memory-graph empty state. The knowledge graph is populated automatically as memories and
- * entities accrue (PRD-008) — there is no build command to invent (OQ-6), so this is an honest neutral
- * note, never a faked graph or a dead command.
- */
-function GraphEmptyState(): React.JSX.Element {
+/** The shared empty-state shell — one card, four honest bodies (jscpd discipline: one wrapper). */
+function EmptyShell({ reason, children }: { reason: GraphEmptyReason | undefined; children: React.ReactNode }): React.JSX.Element {
 	return (
 		<div
 			data-testid="graph-empty-state"
+			data-reason={reason ?? "unknown"}
 			style={{
 				display: "flex",
 				flexDirection: "column",
@@ -400,11 +397,147 @@ function GraphEmptyState(): React.JSX.Element {
 				textAlign: "center",
 			}}
 		>
-			<div style={{ fontSize: 15, color: "var(--text-tertiary)" }}>No memory graph yet for this workspace.</div>
-			<span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-tertiary)", maxWidth: 460 }}>
-				The knowledge graph is populated automatically as memories and entities accrue.
-			</span>
+			{children}
 		</div>
+	);
+}
+
+/** The empty-state title + hint pair (escaped React text, DS tokens only). */
+function EmptyCopy({ title, hint }: { title: string; hint: string }): React.JSX.Element {
+	return (
+		<>
+			<div style={{ fontSize: 15, color: "var(--text-tertiary)" }}>{title}</div>
+			<span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-tertiary)", maxWidth: 460 }}>{hint}</span>
+		</>
+	);
+}
+
+/** The bordered-pill action button the empty states share (enable / retry). */
+function EmptyAction({ testid, label, disabled, onClick }: { testid: string; label: string; disabled?: boolean; onClick: () => void }): React.JSX.Element {
+	return (
+		<button
+			type="button"
+			data-testid={testid}
+			disabled={disabled}
+			onClick={onClick}
+			style={{
+				height: 32,
+				padding: "0 16px",
+				marginTop: 6,
+				background: "var(--bg-elevated)",
+				border: "1px solid var(--border-default)",
+				borderRadius: "var(--radius-md)",
+				color: "var(--text-primary)",
+				fontFamily: "var(--font-mono)",
+				fontSize: 12,
+				cursor: disabled === true ? "default" : "pointer",
+				opacity: disabled === true ? 0.6 : 1,
+			}}
+		>
+			{label}
+		</button>
+	);
+}
+
+/**
+ * The full-page memory-graph empty state, branched on the daemon's HONEST `reason` (ISS-002 / SP-3 / SP-4):
+ *
+ *   · `graph_off`       → "Graph persistence is off" + an inline enable affordance that writes
+ *                         `graph.enabled=true` through the EXISTING settings save path (`onEnable`),
+ *                         then refetches — plus a pointer to Settings. A failed write renders an honest
+ *                         failure note, never a fake success.
+ *   · `no_entities_yet` → "No entities extracted yet" + the daemon's honest progress counts when present
+ *                         ("N memories scanned").
+ *   · `query_error`     → an honest error state with a retry (`onRetry` → SWR revalidate).
+ *   · absent/unknown    → today's generic neutral note UNCHANGED (an old daemon sends no `reason`; the
+ *                         page never guesses). The knowledge graph is populated automatically as memories
+ *                         and entities accrue (PRD-008) — still no build command to invent (OQ-6).
+ */
+function GraphEmptyState({
+	reason,
+	memoriesScanned,
+	onEnable,
+	onRetry,
+}: {
+	reason: GraphEmptyReason | undefined;
+	memoriesScanned: number | undefined;
+	onEnable: () => Promise<boolean>;
+	onRetry: () => void;
+}): React.JSX.Element {
+	const [enableBusy, setEnableBusy] = React.useState(false);
+	const [enableFailed, setEnableFailed] = React.useState(false);
+	// A synchronous in-flight guard so a rapid double-click never fires two settings writes.
+	const inFlightRef = React.useRef(false);
+
+	const enable = React.useCallback(async (): Promise<void> => {
+		if (inFlightRef.current) return;
+		inFlightRef.current = true;
+		setEnableBusy(true);
+		setEnableFailed(false);
+		const ok = await onEnable();
+		// On success the parent refetch flips the page (or honestly re-renders whatever the daemon now
+		// reports); on failure show the honest "not saved" note — never an optimistic success.
+		if (!ok) setEnableFailed(true);
+		setEnableBusy(false);
+		inFlightRef.current = false;
+	}, [onEnable]);
+
+	if (reason === "graph_off") {
+		return (
+			<EmptyShell reason={reason}>
+				<EmptyCopy
+					title="Graph persistence is off"
+					hint="The daemon is not persisting the knowledge graph for this workspace. Turn it on here (applies live), or from Settings → Memory graph."
+				/>
+				<EmptyAction testid="graph-enable-button" label={enableBusy ? "enabling…" : "Enable graph persistence"} disabled={enableBusy} onClick={() => void enable()} />
+				{enableFailed && (
+					<span data-testid="graph-enable-failed" style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--severity-warning)" }}>
+						not saved — the daemon rejected the write; try again or use{" "}
+						<a href="#/settings" style={{ color: "inherit" }}>
+							Settings
+						</a>
+					</span>
+				)}
+			</EmptyShell>
+		);
+	}
+
+	if (reason === "no_entities_yet") {
+		return (
+			<EmptyShell reason={reason}>
+				<EmptyCopy
+					title="No entities extracted yet"
+					hint="Graph persistence is on — entities appear here as memory formation distills sessions. Nothing has been extracted yet."
+				/>
+				{typeof memoriesScanned === "number" && Number.isFinite(memoriesScanned) && (
+					<span data-testid="graph-empty-counts" style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-tertiary)" }}>
+						{memoriesScanned.toLocaleString()} {memoriesScanned === 1 ? "memory" : "memories"} scanned
+					</span>
+				)}
+			</EmptyShell>
+		);
+	}
+
+	if (reason === "query_error") {
+		return (
+			<EmptyShell reason={reason}>
+				<EmptyCopy
+					title="Could not read the memory graph"
+					hint="The daemon hit an error querying the graph store. This is usually transient — retry, and check the daemon logs if it persists."
+				/>
+				<EmptyAction testid="graph-retry-button" label="Retry" onClick={onRetry} />
+			</EmptyShell>
+		);
+	}
+
+	// No reason (old daemon) or an unknown value the schema `.catch()`ed away → the generic state, unchanged.
+	return (
+		<EmptyShell reason={undefined}>
+			<EmptyCopy
+				title="No memory graph yet for this workspace."
+				hint="The knowledge graph is populated automatically as memories and entities accrue."
+			/>
+		</EmptyShell>
 	);
 }
 
@@ -447,11 +580,26 @@ export function GraphPage({ wire }: PageProps): React.JSX.Element {
 	// (re-scopes on switch). `undefined` project disables the hook (no fetch, no conditional-hook
 	// violation). The former `alive`/`isTabHidden` guard is now the hook's built-in background-tab pause.
 	const graphKey = project !== undefined ? swrKey(ENDPOINTS.memoryGraph, project) : undefined;
-	const { data: graph = EMPTY_GRAPH } = useSwr<GraphWire>(
+	const { data: graph = EMPTY_GRAPH, mutate: mutateGraph } = useSwr<GraphWire>(
 		graphKey,
 		async () => wire.memoryGraph(project),
 		{ refreshInterval: GRAPH_POLL_MS },
 	);
+
+	// ISS-002: the `graph_off` inline enable affordance — write `graph.enabled=true` through the
+	// EXISTING settings save path (`wire.setSetting`, the same POST /api/settings/:key the Settings
+	// page uses; the write also drops the memory-graph SWR entry), then refetch so the page reflects
+	// the daemon's post-toggle truth (the vault-first gate applies live via the reload seam).
+	const onEnableGraph = React.useCallback(async (): Promise<boolean> => {
+		const ok = await wire.setSetting(SETTING_KEY.graphEnabled, true);
+		if (ok) mutateGraph();
+		return ok;
+	}, [wire, mutateGraph]);
+
+	// ISS-002 `query_error` retry: a plain SWR revalidate of the memory-graph read.
+	const onRetryGraph = React.useCallback((): void => {
+		mutateGraph();
+	}, [mutateGraph]);
 
 	const kinds = React.useMemo(() => distinctKinds(graph), [graph]);
 	// The visible sub-graph after the kind filter (D-5).
@@ -508,7 +656,7 @@ export function GraphPage({ wire }: PageProps): React.JSX.Element {
 				// 49e-AC-5: no project selected → the explicit needs-selection state, never another scope's graph.
 				<NeedsProjectSelection surface="memory graph" />
 			) : !graph.built ? (
-				<GraphEmptyState />
+				<GraphEmptyState reason={graph.reason} memoriesScanned={graph.memoriesScanned} onEnable={onEnableGraph} onRetry={onRetryGraph} />
 			) : (
 				<>
 					{/* graph memory cap: when the graph is bounded, say so honestly — and source the "N of M" from the
