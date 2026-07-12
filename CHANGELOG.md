@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.10.0 — 2026-07-12
+
+The Memory Graph dashboard page now explains why the graph is empty (persistence off, no entities extracted yet, or a query error) and lets you enable graph persistence directly from the page, plus a new Memory graph toggle in Settings.
+
 ## v0.9.0 — 2026-07-12
 
 Dashboard health chips now honestly surface new daemon states (Portkey no_model/unreachable status, embeddings suspect/unknown) and memory-formation counters, and the memory-formation toggle shows an accurate 'applied live', 'restart required', or 'failed' message based on the daemon's response.
