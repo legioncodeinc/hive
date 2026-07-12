@@ -671,8 +671,19 @@ export function SettingsPanel({ catalog, settings, secretNames, onSave }: Settin
 					{activeProvider.length > 0 && <ProviderKeyBadge provider={activeProvider} secretNames={secretNames} />}
 				</SettingRow>
 
-				{/* Model selector — a `<select>` for a closed list, a free-form input for OpenRouter */}
-				<SettingRow label="Model" hint={providerEntry?.openEnded ? "free-form id" : "from catalog"}>
+				{/* Model selector — a `<select>` for a closed list, a free-form input for OpenRouter.
+				    ISS-005: Portkey has an open-ended catalog and the daemon refuses to enable the
+				    gateway without a stored model, so the requirement is called out on the row. */}
+				<SettingRow
+					label="Model"
+					hint={
+						activeProvider === "portkey"
+							? "free-form id — required for Portkey"
+							: providerEntry?.openEnded
+								? "free-form id"
+								: "from catalog"
+					}
+				>
 					{providerEntry === undefined ? (
 						<span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-tertiary)" }}>pick a provider first</span>
 					) : providerEntry.openEnded ? (
@@ -765,6 +776,18 @@ export function PortkeyGatewaySection({ settings, secretNames, onSaveSetting, on
 	const configValue = String(settings[SETTING_KEY.portkeyConfig] ?? "");
 	const fallback = settings[SETTING_KEY.portkeyFallbackToProvider] === true || settings[SETTING_KEY.portkeyFallbackToProvider] === "true";
 
+	// ISS-005: the daemon rejects `portkey.enabled=true` without a stored model (an empty model
+	// once reached the gateway as `model:""` on every extraction call). Surface the requirement
+	// BEFORE the toggle is tried, and surface the daemon's rejection when it is anyway.
+	const activeModel = String(settings[SETTING_KEY.activeModel] ?? "").trim();
+	const modelMissing = activeModel.length === 0;
+	const [enableRejected, setEnableRejected] = React.useState(false);
+	const onToggleEnabled = React.useCallback(async (): Promise<void> => {
+		const turningOn = !enabled;
+		const ok = await onSaveSetting(SETTING_KEY.portkeyEnabled, turningOn);
+		setEnableRejected(turningOn && !ok);
+	}, [enabled, onSaveSetting]);
+
 	// Local draft for the config text input (committed on blur/Enter — no POST per keystroke).
 	const [configDraft, setConfigDraft] = React.useState(configValue);
 	React.useEffect(() => setConfigDraft(configValue), [configValue]);
@@ -804,13 +827,19 @@ export function PortkeyGatewaySection({ settings, secretNames, onSaveSetting, on
 	return (
 		<Panel title="Portkey gateway" eyebrow="portkey.enabled · config · API key · fallback">
 			<div data-testid="portkey-gateway-section" style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-				{/* portkey.enabled toggle */}
+				{/* portkey.enabled toggle — a model is REQUIRED before the daemon will accept ON (ISS-005) */}
 				<SettingRow label="Use Portkey gateway" hint="routes all inference through Portkey">
-					<Toggle
-						ariaLabel="portkey enabled"
-						on={enabled}
-						onToggle={() => void onSaveSetting(SETTING_KEY.portkeyEnabled, !enabled)}
-					/>
+					<Toggle ariaLabel="portkey enabled" on={enabled} onToggle={() => void onToggleEnabled()} />
+					{!enabled && modelMissing && (
+						<Badge tone="warning" mono>
+							model required — set one in Settings above
+						</Badge>
+					)}
+					{enableRejected && (
+						<Badge tone="warning" mono>
+							daemon rejected: set a model first
+						</Badge>
+					)}
 				</SettingRow>
 
 				{/* portkey.config free-form text input */}

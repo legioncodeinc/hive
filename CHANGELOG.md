@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.8.1 — 2026-07-12
+
+The Settings dashboard now proactively warns when no model is set before enabling the Portkey gateway and clearly surfaces the daemon's rejection if you try to enable it anyway.
+
 ## v0.8.0 — 2026-07-12
 
 Adds a live 'Tokens injected' KPI tile on the dashboard (with the corpus estimate kept as a subordinate caption) and a disclosed partial-net view on the ROI page for daemons that compute a net ROI with some cost inputs missing. Both additions are backward-compatible with older daemon payloads.
