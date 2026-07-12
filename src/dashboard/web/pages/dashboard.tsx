@@ -5,7 +5,7 @@
  * three named AREA landmarks so the home reads as zones, not one undifferentiated scroll (parent
  * D-1 / AC-1):
  *   1. `<section data-area="kpi-band">`     — the per-subsystem health strip + the four headline KPIs
- *                                             (Memories, Turns, Est. savings, Team skills — 038a).
+ *                                             (Memories, Turns, Tokens injected, Team skills — 038a/ISS-010).
  *   2. `<section data-area="recall-area">`  — the recall bar + recalled-memory cards + the PRD-029
  *                                             lexical-fallback badge, the centerpiece (038b, moved
  *                                             VERBATIM — same `wire.recall` POST, same render).
@@ -160,7 +160,7 @@ function HealthStrip({ reasons }: { reasons: HealthReasonsWire | null }): React.
  */
 export function DashboardPage({ wire, pollinating = false, healthReasons = null }: PageProps): React.JSX.Element {
 	// PRD-049e: the active dashboard scope — the selected project re-scopes the KPI band's
-	// project-bearing counts (Memories / Turns / Est. savings). Absent → the workspace-wide view.
+	// project-bearing counts (Memories / Turns / Tokens injected). Absent → the workspace-wide view.
 	const { scope } = useScope();
 
 	// ── view state (hydrated via useSwr — stale-while-revalidate, PRD-012b) ──
@@ -233,11 +233,20 @@ export function DashboardPage({ wire, pollinating = false, healthReasons = null 
 				{/* PRD-029 D-2 (render): the per-subsystem health strip, reading the /health reasons. */}
 				<HealthStrip reasons={healthReasons} />
 
-				{/* The four headline KPIs (038a-AC-2/AC-3) — corrected Turns/Est. savings/Team skills. */}
+				{/* The four headline KPIs (038a-AC-2/AC-3) — corrected Turns/Team skills. ISS-010: the third
+				    tile is the MEASURED "Tokens injected" figure (live cumulative recall/prime injections —
+				    `kpis.injectedTokens`); the old corpus-wide `estimatedSavings` estimate stays honest but
+				    SUBORDINATE as the tile's small caption, not the headline. */}
 				<div className="kpirow">
 					<Kpi label="Memories" value={kpis.memoryCount.toLocaleString()} accent="honey" />
 					<Kpi label="Turns" value={kpis.turnCount || kpis.sessionCount} accent="neutral" />
-					<Kpi label="Est. savings" value={kpis.estimatedSavings.toLocaleString()} unit="tok" accent="verified" />
+					<Kpi
+						label="Tokens injected"
+						value={kpis.injectedTokens.toLocaleString()}
+						unit="tok"
+						accent="verified"
+						caption={`corpus ~${kpis.estimatedSavings.toLocaleString()} tok`}
+					/>
 					<Kpi label="Team skills" value={kpis.teamSkillCount} accent="pollinate" />
 				</div>
 			</section>
