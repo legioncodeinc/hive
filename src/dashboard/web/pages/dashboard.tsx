@@ -24,7 +24,7 @@
 
 import React from "react";
 
-import { Badge, Button, Input, Kpi, MemoryCard } from "../primitives.js";
+import { Badge, Button, formatScore, Input, Kpi, MemoryCard } from "../primitives.js";
 import { LiveLog, RulesPanel, SessionsPanel, SkillSyncPanel } from "../panels.js";
 import { HarnessStrip } from "../harness-strip.js";
 import { HarnessConnectCard } from "../harness-connect-card.js";
@@ -248,7 +248,7 @@ export function DashboardPage({ wire, pollinating = false, healthReasons = null 
 		setRecalled(true);
 		setRecallDegraded(degraded);
 		setRecallNonce((n) => n + 1);
-		const top = memories.length > 0 ? ` · ${memories[0]?.score.toFixed(2)} top` : "";
+		const top = memories.length > 0 ? ` · ${formatScore(memories[0]?.score ?? 0)} top` : "";
 		pushNote(`recall    "${q}" → ${memories.length} hits${top}`);
 		setRecallBusy(false);
 	}, [query, recallBusy, wire, pushNote, scope.project]);
