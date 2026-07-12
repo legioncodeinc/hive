@@ -17,18 +17,19 @@
  *     to the real endpoint and showing an IN-FLIGHT state until the daemon's poll-convergent
  *     read-back confirms (no optimistic flip — a-AC-7). Demote is DISABLED when not the author
  *     (`authoredByMe`, parent OQ-4 — honest, never attempt-and-fail).
- *   - ACTIVITY (042c) — a recent-activity feed of sync events (publish/pull/tombstone) filtered from
- *     `/api/logs`, newest first, plus a per-scope summary (org/team `shared`, user `local`/`pulled`)
- *     derived from the SAME union view-model so the summary and the lists never disagree (c-AC-3).
+ *   - SUMMARY (042c) — a per-scope summary (org/team `shared`, user `local`/`pulled`) derived from
+ *     the SAME union view-model so the summary and the lists never disagree (c-AC-3). ISS-009: the
+ *     former `/api/logs`-tailed activity feed is gone — LiveLog belongs only on the Logs page
+ *     (`#/logs`); a "View logs →" link points there instead.
  *
- * Every visual value is an existing DS token + an existing primitive (`Badge`/`Button`/`Panel`/
- * `LiveLog`, the `SYNC_TONE` map). NO new dependency, NO CDN React, NO secret in the page (D-9).
+ * Every visual value is an existing DS token + an existing primitive (`Badge`/`Button`/`Panel`,
+ * the `SYNC_TONE` map). NO new dependency, NO CDN React, NO secret in the page (D-9).
  */
 
 import React from "react";
 
 import { Badge, Button, type BadgeTone } from "../primitives.js";
-import { LiveLog, Panel, SYNC_TONE } from "../panels.js";
+import { Panel, SYNC_TONE, ViewLogsLink } from "../panels.js";
 import type { PageProps } from "../page-frame.js";
 import { PageFrame } from "../page-frame.js";
 import { useScope } from "../scope-context.js";
@@ -39,11 +40,7 @@ import {
 	type AssetSyncViewWire,
 	EMPTY_ASSET_SYNC_VIEW,
 	ENDPOINTS,
-	formatLogLine,
-	isSyncActivityRecord,
-	syncActivityVerb,
 	swrKey,
-	type LogRecordWire,
 } from "../wire.js";
 
 /** The asset kind a view renders (the symmetry key — 042a vs 042b over one component family). */
@@ -51,8 +48,6 @@ type AssetKind = "skill" | "agent";
 
 /** How often the union view-model re-hydrates (ms) — light refresh, stopped on unmount. */
 const VIEW_POLL_MS = 5000;
-/** How many recent sync-event lines the activity feed keeps (the SSE-followed buffer cap). */
-const MAX_ACTIVITY_LINES = 12;
 
 /** A keyed in-flight map: `<assetType>:<name>` → the action currently running (for the spinner). */
 type InFlightMap = Readonly<Record<string, string>>;
@@ -332,39 +327,6 @@ function ScopeSummary({ view }: { view: AssetSyncViewWire }): React.JSX.Element 
 	);
 }
 
-/**
- * Build the activity feed lines from `/api/logs` records (042c c-AC-1 / c-AC-2). Filters to the
- * sync-relevant records (action POSTs under `/api/diagnostics/sync/`), newest first, and renders a
- * human line ("published · 200"). No record carries a secret (logger.ts), so the lines are safe.
- */
-export function buildActivityLines(records: readonly LogRecordWire[]): string[] {
-	return records
-		.filter(isSyncActivityRecord)
-		.slice(-MAX_ACTIVITY_LINES)
-		.reverse()
-		.map((r) => {
-			const base = formatLogLine(r);
-			const verb = syncActivityVerb(r);
-			return verb !== "" ? `${base}  · ${verb}` : base;
-		});
-}
-
-/**
- * Append one SSE-tailed record to the chronological (oldest-last) sync-activity buffer (042c c-AC-2).
- * Drops non-sync records (the feed shows only `/api/diagnostics/sync/*` events) and caps the buffer so
- * the follow tail can run unbounded without growing memory. Pure + exported so the page test can drive
- * the follow-handler deterministically (inject a record, assert it lands) without a live EventSource.
- */
-export function appendActivityRecord(
-	buffer: readonly LogRecordWire[],
-	record: LogRecordWire,
-): readonly LogRecordWire[] {
-	if (!isSyncActivityRecord(record)) return buffer;
-	const next = [...buffer, record];
-	// Keep only the most recent window (the lines render the last MAX_ACTIVITY_LINES anyway).
-	return next.length > MAX_ACTIVITY_LINES ? next.slice(-MAX_ACTIVITY_LINES) : next;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // The routed page.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -373,7 +335,7 @@ export function appendActivityRecord(
  * The Sync page (042a + 042b + 042c). Hydrates the union view-model from the shared wire, renders the
  * Skills / Agents tabs over ONE component family, dispatches the real actions with an
  * in-flight→converged lifecycle (re-reading the view after each action — no optimistic flip), and
- * shows the per-scope summary + the sync activity feed.
+ * shows the per-scope summary. ISS-009: no activity-feed tail — the Logs page owns the log experience.
  */
 export function SyncPage({ wire }: PageProps): React.JSX.Element {
 	// PRD-049e (49e-AC-2 / 49e-AC-5): the dashboard-selected project gates this page. With no project
@@ -392,39 +354,9 @@ export function SyncPage({ wire }: PageProps): React.JSX.Element {
 		async () => wire.assetsView(),
 		{ refreshInterval: VIEW_POLL_MS },
 	);
-	// The chronological (oldest-last) sync-activity buffer: BACKFILLED from the /api/logs snapshot, then
-	// EXTENDED by the /api/logs/stream SSE tail (042c c-AC-2). The LiveLog lines derive from it.
-	const [activityRecords, setActivityRecords] = React.useState<readonly LogRecordWire[]>([]);
 	const [tab, setTab] = React.useState<AssetKind>("skill");
 	const [openKey, setOpenKey] = React.useState<string | null>(null);
 	const [inFlight, setInFlight] = React.useState<InFlightMap>({});
-
-	// The activity feed FOLLOWS the SSE tail (042c c-AC-2): BACKFILL the recent records from the
-	// /api/logs snapshot ONCE, THEN subscribe to /api/logs/stream and append each NEW sync record as it
-	// lands — no client poll. The EventSource is closed on unmount via the returned unsubscribe. In a
-	// non-browser env (jsdom test) `wire.logsStream` is an inert no-op, so the feed degrades to the
-	// backfill snapshot and the test never crashes (the SSE-record handling is exercised directly via
-	// the injected handler). An `alive` guard prevents a late-resolving backfill from writing post-unmount.
-	React.useEffect(() => {
-		let alive = true;
-		void (async () => {
-			const records = await wire.logs(MAX_ACTIVITY_LINES * 6);
-			if (!alive) return;
-			// Seed the buffer with only the sync-relevant records (chronological, capped).
-			setActivityRecords(records.filter(isSyncActivityRecord).slice(-MAX_ACTIVITY_LINES));
-		})();
-		const unsubscribe = wire.logsStream((record) => {
-			if (!alive) return;
-			setActivityRecords((buf) => appendActivityRecord(buf, record));
-		});
-		return () => {
-			alive = false;
-			unsubscribe();
-		};
-	}, [wire]);
-
-	// Derive the rendered lines from the followed buffer (newest first, sync-only — pure helper).
-	const activity = React.useMemo(() => buildActivityLines(activityRecords), [activityRecords]);
 
 	const onToggle = React.useCallback((row: AssetSyncRowWire): void => {
 		const key = flightKey(row.assetType, row.name);
@@ -484,8 +416,8 @@ export function SyncPage({ wire }: PageProps): React.JSX.Element {
 			<AssetList kind={tab} rows={rows} openKey={openKey} inFlight={inFlight} onToggle={onToggle} onAction={onAction} />
 
 			<div style={{ height: 16 }} />
-			{/* The activity feed reuses the LiveLog panel (042c — filtered to sync events). */}
-			<LiveLog lines={activity} />
+			{/* ISS-009: the sync-activity tail is gone — the Logs page owns the log experience. */}
+			<ViewLogsLink />
 			</>
 			)}
 		</PageFrame>

@@ -1,31 +1,29 @@
 /**
  * The home page's HARNESS STRIP — PRD-038c (the third home area, below the recall center).
  *
- * An at-a-glance surface answering three dogfooder questions from the PRD-039 registry/telemetry
+ * An at-a-glance surface answering two dogfooder questions from the PRD-039 registry/telemetry
  * (the shared `wire.harnesses()` backbone — the REAL endpoint, not the OQ-1 log-inference fallback,
  * which has shipped):
  *   1. WIRED-IN CHIPS (c-AC-1) — one `Badge` chip per INSTALLED harness, toned active/idle from
  *      last-seen recency; an uninstalled harness renders NO chip.
- *   2. SHORT-TAIL LIVE STREAM (c-AC-2) — a tighter-capped reuse of the SAME `/api/logs` feed the
- *      Dashboard live log polls (`wire.logs`), rendered through the existing `LiveLog` panel. The
- *      records are `RequestLogRecord`s (method/path/status/mode/org — NO header/token/body), so no
- *      secret can leak (c-AC-5 / parent D-7). `/api/logs` carries no per-line harness field (c-OQ-3),
- *      so the home tail is labeled generically rather than per-harness.
- *   3. PER-HARNESS KPI TILES (c-AC-3) — produced by `installed.map(...)` over the resolved
+ *   2. PER-HARNESS KPI TILES (c-AC-3) — produced by `installed.map(...)` over the resolved
  *      installed set (turns-captured + last-seen). DYNAMIC by construction: there is NO literal
  *      six-harness array in the render path, so adding/removing a harness changes which tiles appear.
+ *
+ * ISS-009: the strip's former 5-line short-tail `/api/logs` stream is GONE — LiveLog belongs only
+ * on the Logs page (`#/logs`, PRD-043).
  *
  * This is the home STRIP only — the deep Harnesses page (`#/harnesses`, PRD-039) and the full Logs
  * page (`#/logs`, PRD-043) own the deep experiences. It reuses the shared `AGENT_DOT` palette and the
  * `relativeLastSeen` / `uiStatus` helpers from the Harnesses page (one source, no fork — jscpd),
- * composes only the existing `Panel` / `Badge` / `Kpi` / `LiveLog` primitives, and adds NO new daemon
+ * composes only the existing `Panel` / `Badge` / `Kpi` primitives, and adds NO new daemon
  * route, token, or design system (c-AC-5).
  */
 
 import React from "react";
 
 import { Badge, Kpi } from "./primitives.js";
-import { AGENT_DOT, AGENT_DOT_FALLBACK, LiveLog, Panel } from "./panels.js";
+import { AGENT_DOT, AGENT_DOT_FALLBACK, Panel } from "./panels.js";
 import { relativeLastSeen, uiStatus } from "./pages/harnesses.js";
 import type { HarnessStatusWire } from "./wire.js";
 
@@ -90,47 +88,41 @@ function HarnessTile({ h }: { h: HarnessStatusWire }): React.JSX.Element {
 	);
 }
 
-/** Props for {@link HarnessStrip}. The installed set + the short-tail feed are resolved by the page. */
+/** Props for {@link HarnessStrip}. The installed set is resolved by the page. */
 export interface HarnessStripProps {
 	/** The full six-harness telemetry rows from `wire.harnesses()` (the page filters to installed). */
 	readonly harnesses: readonly HarnessStatusWire[];
-	/** The short-tail, pre-formatted, secret-free log lines (a tighter `wire.logs` cap than the full log). */
-	readonly streamLines: readonly string[];
 }
 
 /**
- * The home harness area (c-AC-1/2/3). Filters the telemetry to the INSTALLED set, then renders the
- * wired-in chips, the per-harness KPI tiles, and the short-tail live stream. Every chip/tile derives
- * from `installed.map(...)` — uninstalled harnesses produce nothing (dynamic, no hardcoded list).
+ * The home harness area (c-AC-1/3). Filters the telemetry to the INSTALLED set, then renders the
+ * wired-in chips and the per-harness KPI tiles. Every chip/tile derives from `installed.map(...)` —
+ * uninstalled harnesses produce nothing (dynamic, no hardcoded list). ISS-009: no log tail here.
  */
-export function HarnessStrip({ harnesses, streamLines }: HarnessStripProps): React.JSX.Element {
+export function HarnessStrip({ harnesses }: HarnessStripProps): React.JSX.Element {
 	// The render path keys off the live installed subset only — no literal harness array (D-5).
 	const installed = React.useMemo(() => harnesses.filter((h) => h.installed), [harnesses]);
 
 	return (
-		<div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-			<Panel title="Harnesses" eyebrow={`${installed.length} wired in`}>
-				{installed.length === 0 ? (
-					<div style={{ padding: "10px 4px", fontSize: 13, color: "var(--text-tertiary)" }}>No harnesses wired in yet.</div>
-				) : (
-					<div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-						{/* Wired-in chips (c-AC-1) — installed only. */}
-						<div data-testid="harness-chips" style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-							{installed.map((h) => (
-								<HarnessChip key={h.name} h={h} />
-							))}
-						</div>
-						{/* Per-harness KPI tiles (c-AC-3) — dynamic over the installed set. */}
-						<div data-testid="harness-tiles" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
-							{installed.map((h) => (
-								<HarnessTile key={h.name} h={h} />
-							))}
-						</div>
+		<Panel title="Harnesses" eyebrow={`${installed.length} wired in`}>
+			{installed.length === 0 ? (
+				<div style={{ padding: "10px 4px", fontSize: 13, color: "var(--text-tertiary)" }}>No harnesses wired in yet.</div>
+			) : (
+				<div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+					{/* Wired-in chips (c-AC-1) — installed only. */}
+					<div data-testid="harness-chips" style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+						{installed.map((h) => (
+							<HarnessChip key={h.name} h={h} />
+						))}
 					</div>
-				)}
-			</Panel>
-			{/* Short-tail live stream (c-AC-2) — the SAME /api/logs feed, capped tighter; secret-free. */}
-			<LiveLog lines={streamLines} />
-		</div>
+					{/* Per-harness KPI tiles (c-AC-3) — dynamic over the installed set. */}
+					<div data-testid="harness-tiles" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+						{installed.map((h) => (
+							<HarnessTile key={h.name} h={h} />
+						))}
+					</div>
+				</div>
+			)}
+		</Panel>
 	);
 }

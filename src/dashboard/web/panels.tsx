@@ -19,6 +19,11 @@ import React from "react";
 import { BuildGraphButton } from "./build-graph-button.js";
 import { layout, neighborsOf } from "./graph-layout.js";
 import { Badge, type BadgeTone } from "./primitives.js";
+// ISS-009: the "View logs →" affordance navigates to the Logs route via the shared path router.
+// (`registry.js` imports the pages, which import this module — a render-time-only use of
+// `LOGS_ROUTE` keeps the cycle inert, exactly like `needs-project.tsx`'s `PROJECTS_ROUTE`.)
+import { LOGS_ROUTE } from "./registry.js";
+import { usePathRoute } from "./router.js";
 import { capGraphForRender, MAX_RENDER_NODES } from "./wire.js";
 import type { GraphWire, LogRecordWire, ProviderEntryWire, RuleRowWire, SessionRowWire, SettingValueWire, SkillRowWire, WireClient } from "./wire.js";
 
@@ -433,6 +438,36 @@ export function LiveLog({ lines }: { lines: readonly string[] }): React.JSX.Elem
 				)}
 			</div>
 		</Panel>
+	);
+}
+
+/**
+ * The compact "View logs →" affordance (ISS-009). LiveLog tails no longer sprawl across the
+ * dashboard/harnesses/sync/health pages — the full log experience lives on the Logs page
+ * (PRD-043) and the opt-in Watch panel on Memories. Where the removal left an obvious hole,
+ * this link points there instead of blank space. Navigates via the shared path router (a
+ * client-side swap, never a full reload).
+ */
+export function ViewLogsLink(): React.JSX.Element {
+	const { navigate } = usePathRoute();
+	return (
+		<button
+			type="button"
+			data-testid="view-logs-link"
+			onClick={() => navigate(LOGS_ROUTE)}
+			style={{
+				alignSelf: "flex-start",
+				background: "transparent",
+				border: "none",
+				padding: 0,
+				color: "var(--text-secondary)",
+				fontFamily: "var(--font-mono)",
+				fontSize: 12,
+				cursor: "pointer",
+			}}
+		>
+			View logs →
+		</button>
 	);
 }
 

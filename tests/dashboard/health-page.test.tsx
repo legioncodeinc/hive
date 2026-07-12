@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 /**
- * hive PRD-005b (per-service metrics + Deep Lake stats, rendered generically) and PRD-005c
- * (live log tail + verbosity filtering + bounded buffer). Exercises the REST-fallback path
- * (jsdom has no `EventSource`) since only the fallback carries no `logs`/metrics through the
- * pure hook tests already covering the SSE path directly.
+ * hive PRD-005b (per-service metrics + Deep Lake stats, rendered generically). Exercises the
+ * REST-fallback path (jsdom has no `EventSource`) since only the fallback carries no metrics
+ * through the pure hook tests already covering the SSE path directly. ISS-009: the PRD-005c
+ * live log tail was removed from this page — a compact "View logs →" link renders instead.
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 
 import { formatTelemetryFreshness, HealthPage } from "../../src/dashboard/web/pages/health.js";
 import type { PageProps } from "../../src/dashboard/web/page-frame.js";
@@ -92,18 +92,12 @@ describe("HealthPage with reachable fleet-status fallback", () => {
 		expect(screen.getByTestId("health-deeplake-honeycomb").textContent).toContain("not reported");
 	});
 
-	it("lg-AC-4: exposes a verbosity selector defaulting to info and shows the empty-logs state (fallback carries no logs)", async () => {
+	it("ISS-009: renders no live log tail — a compact 'View logs →' link points at the Logs page instead", async () => {
 		render(<HealthPage {...pageProps()} />);
-		await waitFor(() => expect(screen.getByTestId("log-verbosity-select")).toBeTruthy());
-		expect((screen.getByTestId("log-verbosity-select") as HTMLSelectElement).value).toBe("info");
-		expect(screen.getByTestId("health-logs-empty")).toBeTruthy();
-	});
-
-	it("lg-AC-5: changing verbosity updates the select value without a page reload", async () => {
-		render(<HealthPage {...pageProps()} />);
-		await waitFor(() => expect(screen.getByTestId("log-verbosity-select")).toBeTruthy());
-		fireEvent.change(screen.getByTestId("log-verbosity-select"), { target: { value: "error" } });
-		expect((screen.getByTestId("log-verbosity-select") as HTMLSelectElement).value).toBe("error");
+		await waitFor(() => expect(screen.getByTestId("view-logs-link")).toBeTruthy());
+		expect(screen.queryByTestId("log-verbosity-select")).toBeNull();
+		expect(screen.queryByTestId("health-logs-empty")).toBeNull();
+		expect(screen.queryByTestId("health-logs-list")).toBeNull();
 	});
 
 	// Health-page honesty (client-reported gap): the badges are doctor-RELAYED, not a live daemon
