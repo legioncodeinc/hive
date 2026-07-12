@@ -14,7 +14,14 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { MemoryFormationSection } from "../../src/dashboard/web/pages/settings.js";
-import type { StatusProbe, WireClient } from "../../src/dashboard/web/wire.js";
+import type { MemoryToggleAckWire, StatusProbe, WireClient } from "../../src/dashboard/web/wire.js";
+
+/** The live-reload daemon's honest ack (honeycomb #304): persisted AND actuated live. */
+const ACK_LIVE: MemoryToggleAckWire = { ok: true, enabled: true, persisted: true, appliedLive: true, appliesOnRestart: false };
+/** An OLD (persist-only) daemon's ack: saved, applies on the next restart (`appliedLive` catch-defaulted false). */
+const ACK_OLD_DAEMON: MemoryToggleAckWire = { ok: true, enabled: true, persisted: true, appliedLive: false, appliesOnRestart: true };
+/** A daemon that answered but did NOT persist (vault unavailable / rejected): must never render success. */
+const ACK_NOT_PERSISTED: MemoryToggleAckWire = { ok: true, enabled: true, persisted: false, appliedLive: false, appliesOnRestart: true };
 
 /**
  * Build a mock wire whose `/api/status` reports the given memory reason (or none), tracking setMemory
@@ -23,9 +30,9 @@ import type { StatusProbe, WireClient } from "../../src/dashboard/web/wire.js";
  */
 function mockWire(
 	memory: { enabled: boolean; provider: "configured" | "unconfigured" } | undefined,
-	opts: { setMemoryOk?: boolean } = {},
+	opts: { ack?: MemoryToggleAckWire | null } = {},
 ): { wire: WireClient; setMemory: ReturnType<typeof vi.fn>; restartDaemon: ReturnType<typeof vi.fn>; status: ReturnType<typeof vi.fn>; health: ReturnType<typeof vi.fn> } {
-	const setMemory = vi.fn(async () => opts.setMemoryOk ?? true);
+	const setMemory = vi.fn(async () => (opts.ack === undefined ? ACK_LIVE : opts.ack));
 	const restartDaemon = vi.fn(async () => true);
 	// hive's own `/health` is liveness only — NO reasons. If the control read this it would fail-close.
 	const health = vi.fn(async () => ({ up: true, reasons: null }));
@@ -81,15 +88,70 @@ describe("MemoryFormationSection", () => {
 		await waitFor(() => expect(setMemory).toHaveBeenCalledWith(false));
 	});
 
-	it("configured → surfaces the applies-on-restart honesty and a restart affordance", async () => {
-		const { wire, restartDaemon } = mockWire({ enabled: true, provider: "configured" });
+	// ── the W-3 toggle-ack honesty matrix: the note is derived from the daemon's ACK, never hardcoded ──
+
+	it("before any toggle → NO narrative note (the page cannot know whether the daemon applies changes live)", async () => {
+		const { wire } = mockWire({ enabled: true, provider: "configured" });
 		render(<MemoryFormationSection wire={wire} />);
+
+		await waitFor(() => expect(screen.getByTestId("memory-configured")).toBeTruthy());
+		expect(screen.queryByTestId("memory-restart-note")).toBeNull();
+		expect(screen.queryByTestId("memory-applied-live")).toBeNull();
+		expect(screen.queryByTestId("memory-save-failed")).toBeNull();
+	});
+
+	it("appliedLive ack (live-reload daemon, #304) → 'applied live' success copy and NO restart nag", async () => {
+		const { wire } = mockWire({ enabled: false, provider: "configured" }, { ack: ACK_LIVE });
+		render(<MemoryFormationSection wire={wire} />);
+
+		await waitFor(() => expect(screen.getByTestId("memory-toggle")).toBeTruthy());
+		fireEvent.click(screen.getByTestId("memory-toggle"));
+
+		await waitFor(() => expect(screen.getByTestId("memory-applied-live")).toBeTruthy());
+		expect(screen.getByTestId("memory-applied-live").textContent).toContain("applied live");
+		// The restart nag is SUPPRESSED — no note, no button (the change is already in force).
+		expect(screen.queryByTestId("memory-restart-note")).toBeNull();
+		expect(screen.queryByTestId("memory-restart-button")).toBeNull();
+		expect(screen.queryByTestId("memory-save-failed")).toBeNull();
+	});
+
+	it("persisted-only ack (OLD daemon, appliedLive=false) → the honest restart copy + a working restart affordance", async () => {
+		const { wire, restartDaemon } = mockWire({ enabled: false, provider: "configured" }, { ack: ACK_OLD_DAEMON });
+		render(<MemoryFormationSection wire={wire} />);
+
+		await waitFor(() => expect(screen.getByTestId("memory-toggle")).toBeTruthy());
+		fireEvent.click(screen.getByTestId("memory-toggle"));
 
 		await waitFor(() => expect(screen.getByTestId("memory-restart-note")).toBeTruthy());
 		expect(screen.getByTestId("memory-restart-note").textContent).toContain("next daemon restart");
+		expect(screen.queryByTestId("memory-applied-live")).toBeNull();
 
 		fireEvent.click(screen.getByTestId("memory-restart-button"));
 		await waitFor(() => expect(restartDaemon).toHaveBeenCalledTimes(1));
+	});
+
+	it("unpersisted ack (daemon rejected / vault unavailable) → honest FAILURE copy, never a success state", async () => {
+		const { wire } = mockWire({ enabled: false, provider: "configured" }, { ack: ACK_NOT_PERSISTED });
+		render(<MemoryFormationSection wire={wire} />);
+
+		await waitFor(() => expect(screen.getByTestId("memory-toggle")).toBeTruthy());
+		fireEvent.click(screen.getByTestId("memory-toggle"));
+
+		await waitFor(() => expect(screen.getByTestId("memory-save-failed")).toBeTruthy());
+		expect(screen.getByTestId("memory-save-failed").textContent).toContain("Not saved");
+		expect(screen.queryByTestId("memory-applied-live")).toBeNull();
+		expect(screen.queryByTestId("memory-restart-note")).toBeNull();
+	});
+
+	it("a null ack (non-2xx / network / malformed body) → the same honest FAILURE copy", async () => {
+		const { wire } = mockWire({ enabled: false, provider: "configured" }, { ack: null });
+		render(<MemoryFormationSection wire={wire} />);
+
+		await waitFor(() => expect(screen.getByTestId("memory-toggle")).toBeTruthy());
+		fireEvent.click(screen.getByTestId("memory-toggle"));
+
+		await waitFor(() => expect(screen.getByTestId("memory-save-failed")).toBeTruthy());
+		expect(screen.queryByTestId("memory-applied-live")).toBeNull();
 	});
 
 	it("a missing memory block (pre-memory daemon) degrades to the unconfigured prompt (fail-closed)", async () => {

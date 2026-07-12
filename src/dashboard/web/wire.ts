@@ -169,8 +169,9 @@ export const ENDPOINTS = Object.freeze({
 	actionsLogout: "/api/actions/logout",
 	actionsEmbeddings: "/api/actions/embeddings",
 	// Memory formation on/off (`POST /api/actions/memory` with `{ enabled }`) — the SIBLING of the
-	// embeddings action. Persists the `memory.enabled` preference; the ack echoes `appliesOnRestart:
-	// true` because (unlike embeddings) the choice takes effect on the NEXT daemon restart, not live.
+	// embeddings action. Persists the `memory.enabled` preference; a live-reload daemon (honeycomb
+	// #304) ALSO actuates it live and says so in the ack (`appliedLive: true`), while an older daemon
+	// only persists (`appliedLive` absent → false) and the change takes effect on the NEXT restart.
 	actionsMemory: "/api/actions/memory",
 	actionsRestart: "/api/actions/restart",
 	actionsUninstall: "/api/actions/uninstall",
@@ -1110,19 +1111,27 @@ export const ActionOkSchema = z.object({ ok: z.boolean().catch(false) });
 export const EmbeddingsActionSchema = z.object({ ok: z.boolean(), enabled: z.boolean() });
 
 /**
- * The `POST /api/actions/memory` ack: `{ ok, enabled, persisted, appliesOnRestart }` — the SIBLING of
- * {@link EmbeddingsActionSchema}. `ok` + `enabled` are STRICT (no `.catch`) for the same reason: a
- * malformed/partial body must FAIL the parse → `postJson` returns null → `setMemory` reports failure,
- * so a call can never falsely "succeed" against a response that never echoed the real state. `persisted`
- * and `appliesOnRestart` are honesty-render fields (the daemon always returns `appliesOnRestart: true`
- * because the memory toggle takes effect on the next restart, not live); they `.catch()` a safe default.
+ * The `POST /api/actions/memory` ack: `{ ok, enabled, persisted, appliedLive, appliesOnRestart }` —
+ * the SIBLING of {@link EmbeddingsActionSchema}. `ok` + `enabled` are STRICT (no `.catch`) for the same
+ * reason: a malformed/partial body must FAIL the parse → `postJson` returns null → `setMemory` reports
+ * failure, so a call can never falsely "succeed" against a response that never echoed the real state.
+ * The rest are honesty-render fields with back-compatible `.catch()` defaults:
+ *   · `persisted` — the daemon actually stored the preference. `.catch(false)`: an ack that does not
+ *     claim persistence must never render as saved.
+ *   · `appliedLive` (honeycomb #304, live config reload) — the toggle ACTUATED in the running daemon;
+ *     no restart is needed. `.catch(false)`: an OLD daemon omits it → the UI keeps the honest
+ *     "applies on next restart" narrative instead of falsely claiming a live change.
+ *   · `appliesOnRestart` — the pre-#304 narrative bit; a live-reload daemon sends `false`.
  */
 export const MemoryActionSchema = z.object({
 	ok: z.boolean(),
 	enabled: z.boolean(),
 	persisted: z.boolean().catch(false),
+	appliedLive: z.boolean().catch(false),
 	appliesOnRestart: z.boolean().catch(true),
 });
+/** The validated memory-toggle ack the settings page branches its honesty copy on. */
+export type MemoryToggleAckWire = z.infer<typeof MemoryActionSchema>;
 
 /** The `POST /api/actions/restart` ack: `{ ok, restarting }`. */
 export const RestartActionSchema = z.object({ ok: z.boolean().catch(false), restarting: z.boolean().catch(false) });
@@ -2194,12 +2203,14 @@ export interface WireClient {
 	setEmbeddings(enabled: boolean): Promise<boolean>;
 	/**
 	 * Dashboard actions — turn memory formation on/off (`POST /api/actions/memory` with `{ enabled }`).
-	 * The SIBLING of {@link setEmbeddings}: the daemon persists the `memory.enabled` preference. UNLIKE
-	 * embeddings, the choice takes effect on the NEXT daemon restart (the ack carries `appliesOnRestart:
-	 * true`), so the UI surfaces that honesty and re-reads {@link health} for the persisted truth. Returns
-	 * `true` iff accepted (2xx + echoed `enabled` matches the request); a non-2xx / network failure → false.
+	 * The SIBLING of {@link setEmbeddings}: the daemon persists the `memory.enabled` preference and — on
+	 * a live-reload daemon (honeycomb #304) — ALSO actuates it live, saying so in the ack. Returns the
+	 * validated ack so the UI can render the honest narrative: `appliedLive` → "applied live" (no restart
+	 * nag); `persisted && !appliedLive` (old daemon) → "applies on next restart"; `!persisted` → an honest
+	 * failure ("not saved"). Returns `null` when the call failed outright (non-2xx / network / malformed
+	 * body / echoed `enabled` mismatch) — the caller renders failure, never a success state.
 	 */
-	setMemory(enabled: boolean): Promise<boolean>;
+	setMemory(enabled: boolean): Promise<MemoryToggleAckWire | null>;
 	/**
 	 * Dashboard actions — restart the daemon (`POST /api/actions/restart`). The daemon spawns a
 	 * detached respawn helper, then gracefully shuts down; a fresh daemon comes back on the same port.
@@ -2954,15 +2965,17 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 			if (ok) invalidateSwr(ENDPOINTS.status, ENDPOINTS.settings);
 			return ok;
 		},
-		async setMemory(enabled: boolean): Promise<boolean> {
-			// POST the toggle (the SIBLING of setEmbeddings); the daemon PERSISTS the choice — it takes
-			// effect on the next restart (appliesOnRestart: true), not live. Success is a 2xx whose echoed
-			// `enabled` matches the request; a non-2xx / network failure → false (never a throw into React).
+		async setMemory(enabled: boolean): Promise<MemoryToggleAckWire | null> {
+			// POST the toggle (the SIBLING of setEmbeddings); the daemon persists the choice and — on a
+			// live-reload daemon (#304) — actuates it live (`appliedLive: true`). Return the validated ack
+			// so the UI branches its honesty copy on `appliedLive`/`persisted`; a non-2xx / network failure /
+			// malformed body / mismatched echo → null (failure, never a throw into React).
 			const ack = await postJson(fetchImpl, url(ENDPOINTS.actionsMemory), { enabled }, MemoryActionSchema);
-			const ok = ack?.ok === true && ack.enabled === enabled;
-			// PRD-012b: same invalidation set as setEmbeddings (mirrors proxy-cache).
-			if (ok) invalidateSwr(ENDPOINTS.status, ENDPOINTS.settings);
-			return ok;
+			if (ack === null || ack.ok !== true || ack.enabled !== enabled) return null;
+			// PRD-012b: same invalidation set as setEmbeddings (mirrors proxy-cache). Only a PERSISTED
+			// change can have moved the daemon-side truth the cached reads reflect.
+			if (ack.persisted) invalidateSwr(ENDPOINTS.status, ENDPOINTS.settings);
+			return ack;
 		},
 		async restartDaemon(): Promise<boolean> {
 			// POST the restart; the daemon respawns + shuts down. Success is a 2xx `{ restarting: true }`.
