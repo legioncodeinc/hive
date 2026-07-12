@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.9.0 — 2026-07-12
+
+Dashboard health chips now honestly surface new daemon states (Portkey no_model/unreachable status, embeddings suspect/unknown) and memory-formation counters, and the memory-formation toggle shows an accurate 'applied live', 'restart required', or 'failed' message based on the daemon's response.
+
 ## v0.8.1 — 2026-07-12
 
 The Settings dashboard now proactively warns when no model is set before enabling the Portkey gateway and clearly surfaces the daemon's rejection if you try to enable it anyway.
