@@ -527,8 +527,8 @@ function LifecycleConfigSection(): React.JSX.Element {
 // Embeddings on/off (dashboard action) — turn semantic recall on/off LIVE + persisted.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** The honest embeddings state (mirrors the daemon `reasons.embeddingsState`): off | warming | on | failed. */
-type EmbeddingsState = "off" | "warming" | "on" | "failed";
+/** The honest embeddings state (mirrors the daemon `reasons.embeddingsState`): off | warming | on | suspect | failed. */
+type EmbeddingsState = "off" | "warming" | "on" | "suspect" | "failed";
 
 /** How often {@link EmbeddingsSection} re-polls `/api/status` WHILE warming, so the badge auto-advances to on/failed. */
 const EMBED_WARMING_POLL_MS = 2500;
@@ -540,6 +540,10 @@ function embeddingsView(state: EmbeddingsState): { tone: "verified" | "neutral" 
 			return { tone: "verified", label: "on", enabled: true };
 		case "warming":
 			return { tone: "warning", label: "warming…", enabled: true };
+		case "suspect":
+			// honeycomb #301: a missed liveness probe — the embed daemon may be wedged; the supervisor is
+			// watching and will respawn it if it stays unresponsive. A WARNING, not yet a failure.
+			return { tone: "warning", label: "suspect", enabled: true };
 		case "failed":
 			return { tone: "critical", label: "failed", enabled: true };
 		default:
@@ -601,7 +605,9 @@ export function EmbeddingsSection({ wire }: { wire: PageProps["wire"] }): React.
 	const hint =
 		state === "warming"
 			? "Downloading + loading the local embedding model (~600 MB, one time). Recall is lexical until it is ready."
-			: state === "failed"
+			: state === "suspect"
+				? "The embedding daemon missed a liveness probe and may be wedged. It will be respawned automatically if it stays unresponsive; recall falls back to lexical meanwhile."
+				: state === "failed"
 				? "The embedding model could not load. Recall is lexical (BM25) only. Try toggling off then on, or check the daemon logs."
 				: "On runs the local embedding model for semantic search. Off falls back to lexical (BM25) recall only.";
 

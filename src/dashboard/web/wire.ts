@@ -1146,19 +1146,27 @@ export type UninstallResultWire = z.infer<typeof UninstallResultSchema>;
  * `/health` body carries this block; on a non-local public body it is absent (the strip
  * renders nothing — handled at the call site by a `null` reasons).
  *
- * Each field `.catch()`es to its HEALTHY value so a malformed/partial `reasons` degrades
- * to "looks ok" rather than throwing into React — the body crosses the untyped IO boundary
- * exactly like every other endpoint here. An UNKNOWN enum value (a future daemon adds a
- * state) also `.catch()`es to the healthy default, never a throw.
+ * Fail-soft, never a throw: a malformed/partial `reasons` degrades field-by-field — the body
+ * crosses the untyped IO boundary exactly like every other endpoint here. HONESTY RULE for the
+ * `.catch()` values (Wave-3 QA W-1/W-2): an UNKNOWN enum value must NEVER fold to a
+ * healthy-looking reading. The subsystem enums catch to a DISTINCT `"unknown"` presentation the
+ * chips render as non-healthy; only a field a legacy daemon legitimately OMITS keeps its legacy
+ * default (portkey absent → `"off"`, optional blocks → `undefined`), so old-daemon payloads
+ * parse to exactly the pre-Wave-3 behaviour.
  */
 export const HealthReasonsSchema = z.object({
 	storage: z.enum(["reachable", "unreachable"]).catch("reachable"),
-	embeddings: z.enum(["on", "off"]).catch("on"),
+	// The COARSE embeddings state. Post honeycomb #301 it mirrors the fine-grained live state
+	// (`off|warming|on|suspect|failed`), so hive parses the full enum. W-2 honesty: an unknown/garbage
+	// value catches to `"unknown"` (rendered non-healthy), NEVER `"on"` — a daemon reporting a state
+	// this build does not know must not render as healthy during, e.g., the wedge-suspicion window.
+	embeddings: z.enum(["on", "off", "warming", "suspect", "failed", "unknown"]).catch("unknown"),
 	// PRD-025 honesty: the ADDITIVE fine-grained embeddings state the daemon now emits alongside the
-	// coarse `embeddings` field. `off`/`warming`/`on`/`failed` — so the UI shows real feedback (the
-	// model is downloading vs actually working vs could-not-load) instead of a coarse `on` that only
-	// means "enabled". Optional: a pre-honesty daemon omits it → the UI falls back to `embeddings`.
-	embeddingsState: z.enum(["off", "warming", "on", "failed"]).optional().catch(undefined),
+	// coarse `embeddings` field. `off`/`warming`/`on`/`suspect`/`failed` (`suspect` = a missed liveness
+	// probe, honeycomb #301 — the daemon may be wedged and is being watched/respawned) — so the UI shows
+	// real feedback instead of a coarse `on` that only means "enabled". Optional: a pre-honesty daemon
+	// omits it → the UI falls back to `embeddings`.
+	embeddingsState: z.enum(["off", "warming", "on", "suspect", "failed"]).optional().catch(undefined),
 	// Memory formation (the SIBLING of `embeddings`): the daemon reports whether memory formation is
 	// enabled AND whether a model provider is configured (memory formation needs a provider to run).
 	// `provider` gates the UI: `unconfigured` → render the "configure a provider" prompt with the enable
@@ -1174,10 +1182,39 @@ export const HealthReasonsSchema = z.object({
 		.optional()
 		.catch(undefined),
 	schema: z.enum(["ok", "missing_table"]).catch("ok"),
-	// PRD-063b (b-AC-7): the Portkey gateway reason. `.catch("off")` so a pre-063b daemon (no
-	// `portkey` field) or an unknown future state degrades to "off" (Portkey not in force) rather
-	// than throwing — the field is purely additive render data, like every other reason here.
-	portkey: z.enum(["off", "ok", "unconfigured", "unreachable"]).catch("off"),
+	// PRD-063b (b-AC-7) + honeycomb #300 (ISS-005): the Portkey gateway reason. `no_model` = the
+	// gateway is ENABLED but no model is set — a misconfigured gateway, rendered DEGRADED (the exact
+	// false-healthy reading ISS-005 set out to kill). W-1 honesty split of the old `.catch("off")`:
+	//   · field ABSENT (a pre-063b daemon) → `"off"` (Portkey not in force — the legacy behaviour);
+	//   · field PRESENT but unknown/garbage → `"unknown"` (a distinct NON-healthy presentation),
+	//     never `"off"`'s healthy "not in force" reading.
+	portkey: z.preprocess(
+		(v) => (v === undefined ? "off" : v),
+		z.enum(["off", "ok", "unconfigured", "no_model", "unreachable", "unknown"]).catch("unknown"),
+	),
+	// honeycomb #300: the HTTP status of the most recent failed Portkey call — present ONLY while
+	// `portkey === "unreachable"`, so the chip can read `unreachable(401)` vs `unreachable(503)`.
+	// Additive + optional; any absent/garbage value degrades to undefined (plain `unreachable`).
+	portkeyUnreachableStatus: z.number().int().nonnegative().optional().catch(undefined),
+	// honeycomb #300 (ISS-005 extraction-failure visibility): the memory-formation counters block.
+	// `committedSinceBoot` beside `extractionErrorsSinceBoot` — 373 swallowed gateway failures used
+	// to be invisible ("jobs done, zero memories, health green"); now they read as a loud non-zero
+	// error count beside a zero commit count. OPTIONAL so a pre-#300 daemon parses cleanly (block
+	// absent → the strip renders nothing new). `.catch(undefined)` keeps the whole `reasons` block
+	// alive if the sub-object is malformed; inner fields degrade individually to safe zeros/absence.
+	// `lastExtractionError` is daemon-shaped TEXT (capped + key-free server-side) — rendered only as
+	// an escaped text/attribute child, never as markup.
+	memoryFormation: z
+		.object({
+			committedSinceBoot: z.number().int().nonnegative().catch(0),
+			lastCommittedAt: z.string().optional().catch(undefined),
+			lastAction: z.string().optional().catch(undefined),
+			extractionErrorsSinceBoot: z.number().int().nonnegative().catch(0),
+			lastExtractionError: z.string().optional().catch(undefined),
+			lastExtractionErrorAt: z.string().optional().catch(undefined),
+		})
+		.optional()
+		.catch(undefined),
 });
 export type HealthReasonsWire = z.infer<typeof HealthReasonsSchema>;
 

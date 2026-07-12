@@ -97,41 +97,142 @@ function LexicalFallbackBadge(): React.JSX.Element {
 	);
 }
 
+/** The chip tones {@link HealthStrip} uses — a subset of the kit's Badge tones, ranked by severity. */
+type ChipTone = "verified" | "neutral" | "warning" | "critical";
+
+/** What one subsystem chip renders: its severity tone, the state text, and an optional hover detail. */
+interface ChipView {
+	readonly tone: ChipTone;
+	readonly state: string;
+	/** Optional `title` hover detail (plain text — React escapes it; never markup). */
+	readonly detail?: string;
+}
+
 /**
- * The display label + degraded predicate + rendered state for one subsystem chip in {@link HealthStrip}.
- * `value` is optional (defaults to the coarse `reasons[key]`) — the `semantic` chip overrides it to the
- * HONEST fine-grained `embeddingsState` so it reads `warming`/`failed`, not a coarse `on`.
+ * The display label + per-state render for one subsystem chip in {@link HealthStrip}. Wave-3 QA
+ * W-1/W-2 honesty: every state maps to an EXPLICIT tone — healthy is `verified`, transitional is
+ * `neutral`, suspicious is `warning`, broken is `critical`, and the parse-layer `unknown` fallback
+ * is `neutral` with the literal text "unknown" (visibly NOT a healthy reading).
  */
 const SUBSYSTEMS: readonly {
-	readonly key: keyof HealthReasonsWire;
+	readonly key: string;
 	readonly label: string;
-	readonly degraded: (r: HealthReasonsWire) => boolean;
-	readonly value?: (r: HealthReasonsWire) => string;
+	readonly render: (r: HealthReasonsWire) => ChipView;
 }[] = [
-	{ key: "storage", label: "storage", degraded: (r) => r.storage === "unreachable" },
+	{ key: "storage", label: "storage", render: (r) => ({ tone: r.storage === "unreachable" ? "critical" : "verified", state: r.storage }) },
 	{
 		key: "embeddings",
 		label: "semantic",
-		// PRD-025 honesty: semantic is "up" only when embeddings are actually WARM (`on`). `off`/`warming`/
-		// `failed` all mean semantic recall is not working yet → degraded (recall is lexical meanwhile).
-		degraded: (r) => (r.embeddingsState ?? r.embeddings) !== "on",
-		value: (r) => String(r.embeddingsState ?? r.embeddings),
+		// PRD-025 honesty: semantic is "up" only when embeddings are actually WARM (`on`). The fine-grained
+		// `embeddingsState` wins over the coarse mirror; the full ladder (honeycomb #301):
+		//   on → verified · warming → neutral "warming…" (transitional, not broken) · suspect → warning
+		//   (missed liveness probe — may be wedged, respawn watching) · failed/off → critical (recall is
+		//   lexical) · unknown (unparseable future state) → neutral "unknown", never a healthy reading.
+		render: (r) => {
+			const state = r.embeddingsState ?? r.embeddings;
+			switch (state) {
+				case "on":
+					return { tone: "verified", state: "on" };
+				case "warming":
+					return { tone: "neutral", state: "warming…" };
+				case "suspect":
+					return { tone: "warning", state: "suspect", detail: "the embedding daemon missed a liveness probe and may be wedged — it will be respawned if it stays unresponsive" };
+				case "unknown":
+					return { tone: "neutral", state: "unknown", detail: "the daemon reported an embeddings state this dashboard does not recognize" };
+				default:
+					// "off" | "failed" — semantic recall is not working; recall is lexical meanwhile.
+					return { tone: "critical", state };
+			}
+		},
 	},
-	{ key: "schema", label: "schema", degraded: (r) => r.schema === "missing_table" },
-	// PRD-063b (b-AC-7): the Portkey gateway chip. `unconfigured` (on but no key) + `unreachable`
-	// (a real call failed) are the DOWN states → critical; `off` (not in force) + `ok` are healthy.
-	{ key: "portkey", label: "portkey", degraded: (r) => r.portkey === "unconfigured" || r.portkey === "unreachable" },
+	{ key: "schema", label: "schema", render: (r) => ({ tone: r.schema === "missing_table" ? "critical" : "verified", state: r.schema }) },
+	// PRD-063b (b-AC-7) + honeycomb #300 (ISS-005): the Portkey gateway chip.
+	//   off/ok → healthy · unconfigured (on but no key) → critical · no_model (on but NO MODEL set —
+	//   the misconfigured gateway that used to render healthy, W-1) → warning "no model set" pointing
+	//   at Settings · unreachable → critical, carrying the last HTTP status as `unreachable(401)` when
+	//   the daemon reported one · unknown (unparseable future state) → neutral "unknown", never healthy.
+	{
+		key: "portkey",
+		label: "portkey",
+		render: (r) => {
+			switch (r.portkey) {
+				case "no_model":
+					return { tone: "warning", state: "no model set", detail: "the Portkey gateway is enabled but no model is set — set one in Settings → Portkey gateway" };
+				case "unreachable":
+					return {
+						tone: "critical",
+						state: r.portkeyUnreachableStatus !== undefined ? `unreachable(${r.portkeyUnreachableStatus})` : "unreachable",
+					};
+				case "unconfigured":
+					return { tone: "critical", state: "unconfigured" };
+				case "unknown":
+					return { tone: "neutral", state: "unknown", detail: "the daemon reported a Portkey state this dashboard does not recognize" };
+				default:
+					// "off" | "ok" — Portkey not in force / healthy.
+					return { tone: "verified", state: r.portkey };
+			}
+		},
+	},
 ];
+
+/** Cap daemon-shaped detail text for display. The daemon already caps `lastExtractionError` at 200
+ * chars server-side; cap again here so a misbehaving daemon can never balloon a tooltip. */
+const MAX_DETAIL_CHARS = 200;
+
+/**
+ * The memory-formation chips (honeycomb #300, ISS-005 extraction-failure visibility — plan item 4's
+ * hive half). Rendered ONLY when the daemon emits `reasons.memoryFormation` (a pre-#300 daemon omits
+ * it → nothing new renders, back-compat):
+ *   · an always-on informational chip `memory: N formed` (committed since boot, with the last commit
+ *     time/action as hover detail) — the honest heartbeat of the pipeline;
+ *   · a WARNING chip `N extraction error(s)` when `extractionErrorsSinceBoot > 0`, carrying the
+ *     capped, key-free `lastExtractionError` as hover detail. The error text is daemon-shaped TEXT —
+ *     rendered exclusively through React's default escaping (text/attribute), never as markup.
+ */
+function MemoryFormationChips({ mf }: { mf: NonNullable<HealthReasonsWire["memoryFormation"]> }): React.JSX.Element {
+	const committedDetail = [
+		mf.lastAction !== undefined ? `last action: ${mf.lastAction}` : null,
+		mf.lastCommittedAt !== undefined ? `last commit: ${mf.lastCommittedAt}` : null,
+	]
+		.filter((s): s is string => s !== null)
+		.join(" · ");
+	const errors = mf.extractionErrorsSinceBoot;
+	const errorDetail = [
+		mf.lastExtractionError !== undefined ? mf.lastExtractionError.slice(0, MAX_DETAIL_CHARS) : null,
+		mf.lastExtractionErrorAt !== undefined ? `at ${mf.lastExtractionErrorAt}` : null,
+	]
+		.filter((s): s is string => s !== null)
+		.join(" · ");
+	return (
+		<>
+			<span title={committedDetail === "" ? undefined : committedDetail} style={{ display: "inline-flex" }} data-testid="memory-formation-chip">
+				<Badge tone="neutral" mono dot>
+					memory: {mf.committedSinceBoot} formed
+				</Badge>
+			</span>
+			{errors > 0 ? (
+				<span title={errorDetail === "" ? undefined : errorDetail} style={{ display: "inline-flex" }} data-testid="extraction-errors-chip">
+					<Badge tone="warning" mono dot>
+						{errors} extraction {errors === 1 ? "error" : "errors"}
+					</Badge>
+				</span>
+			) : null}
+		</>
+	);
+}
 
 /**
  * The PRD-029 per-subsystem health strip (D-2 render). Reads the `/health` `reasons` block and renders
- * one small chip per subsystem — `storage`, `semantic` (embeddings), `schema` — tinting a degraded one
- * `critical` and a healthy one `verified`. When `reasons` is `null` (the mode-gated public body, which
- * the LOCAL dashboard never gets — defensive) the whole strip renders NOTHING.
+ * one small chip per subsystem — `storage`, `semantic` (embeddings), `schema`, `portkey`, plus the
+ * memory-formation counters when the daemon emits them — tinting each state by severity (verified /
+ * neutral / warning / critical, see {@link SUBSYSTEMS}). When `reasons` is `null` (the mode-gated
+ * public body, which the LOCAL dashboard never gets — defensive) the whole strip renders NOTHING.
  *
- * AC-5: every chip renders a subsystem NAME + a closed-enum STATE only — no token/org/endpoint/header.
+ * AC-5: every chip renders a subsystem NAME + a closed-enum STATE (plus, for memory formation,
+ * bounded counters and the daemon's capped key-free error text as a hover detail) — no
+ * token/org/endpoint/header.
  */
-function HealthStrip({ reasons }: { reasons: HealthReasonsWire | null }): React.JSX.Element | null {
+export function HealthStrip({ reasons }: { reasons: HealthReasonsWire | null }): React.JSX.Element | null {
 	if (reasons === null) return null;
 	return (
 		<div data-testid="health-strip" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
@@ -139,14 +240,17 @@ function HealthStrip({ reasons }: { reasons: HealthReasonsWire | null }): React.
 				subsystems
 			</span>
 			{SUBSYSTEMS.map((s) => {
-				const down = s.degraded(reasons);
-				const state = s.value !== undefined ? s.value(reasons) : String(reasons[s.key]);
+				const view = s.render(reasons);
 				return (
-					<Badge key={s.key} tone={down ? "critical" : "verified"} mono dot>
-						{s.label}: {state}
-					</Badge>
+					<span key={s.key} title={view.detail} style={{ display: "inline-flex" }}>
+						<Badge tone={view.tone} mono dot>
+							{s.label}: {view.state}
+						</Badge>
+					</span>
 				);
 			})}
+			{/* honeycomb #300: the memory-formation counters (rendered only when the daemon emits them). */}
+			{reasons.memoryFormation !== undefined ? <MemoryFormationChips mf={reasons.memoryFormation} /> : null}
 		</div>
 	);
 }
