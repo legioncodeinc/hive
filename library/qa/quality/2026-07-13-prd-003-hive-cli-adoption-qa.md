@@ -88,7 +88,7 @@ None.
 | AC-e3 | Pass | `scripts/verify-packed-cli.mjs`; alias/unit tests | Installed tarball passes Hive matrix and deprecated aliases remain tested |
 | AC-e4 | N/A | Nectar | Not a Hive criterion |
 | AC-e5 | Pass | `CHANGELOG.md`; migration note; rewritten active runbook | Repository documentation is internally consistent |
-| AC-e6 | Pending current-revision CI | `.github/workflows/ci.yaml:47-99` | Three-OS test/build/packed job is configured; PR run 29237688148 passed on prior revision `b63d530`, while `0f865b1` has complete local evidence and awaits its pushed CI rerun |
+| AC-e6 | Pass | `.github/workflows/ci.yaml:47-99`; PR run 29238911214 | Ubuntu, macOS, and Windows passed test, build, packed conformance, and pack sanity on evidence-only descendant `2c74ee1`; audited production source matches `0f865b1` |
 | AC-e7 | N/A | suite-level repository | Fleet-wide four-package job is outside Hive-local adoption |
 | AC-e8 | Pass (Hive) | handler tests, packed conformance, registry/log isolation tests | No silent stubs or wrong-product delegation |
 | AC-e9 | Pass | shared command matrix plus Hive migration/runbook links | Normative suite semantics are linked consistently |
@@ -107,7 +107,7 @@ None.
 | `npm run test:packed-cli` | PASS: packed install and CLI conformance |
 | `npm audit --audit-level=high` | PASS: 0 vulnerabilities |
 | `git diff --check` | PASS (line-ending warnings only) |
-| Native CI | Configured for Ubuntu/macOS/Windows; pending push/run evidence |
+| Native CI | PASS - run 29238911214 completed successfully on Ubuntu, macOS, and Windows |
 
 ## Live Dogfood Lifecycle Addendum
 

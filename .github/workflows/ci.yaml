@@ -58,7 +58,7 @@ jobs:
       # (zizmor artipacked hardening). This gate only reads the repo; it
       # never pushes.
       - name: Checkout
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
 
