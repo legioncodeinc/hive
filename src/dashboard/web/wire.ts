@@ -529,6 +529,10 @@ export const RecallHitSchema = z.object({
 	memoryId: z.string().optional().catch(undefined),
 	ref: z.string().optional().catch(undefined),
 	type: z.string().optional().catch(undefined),
+	// QA W-1 (round-2 report): the LIVE daemon contract spells the badge field `memoryType`
+	// (recall.ts forwards it verbatim); `type` is kept for other vintages. Readers must
+	// prefer `memoryType ?? type` or every search-hit card badges as the "fact" fallback.
+	memoryType: z.string().optional().catch(undefined),
 });
 export type RecallHitWire = z.infer<typeof RecallHitSchema>;
 
@@ -2579,7 +2583,8 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 					// source+id) so a memories-source hit renders as the SAME interactive card as the
 					// browse list; `null` (sessions/summaries) keeps the legacy inert presentation.
 					memoryId: memoryIdFromHit(h),
-					type: h.type ?? "",
+					// QA W-1: the live daemon spells it `memoryType`; older vintages may say `type`.
+					type: h.memoryType ?? h.type ?? "",
 				}));
 				return { memories, degraded: parsed.data.degraded };
 			} catch {
