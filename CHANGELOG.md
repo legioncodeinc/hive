@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.11.0 — 2026-07-13
+
+The dashboard's Add Memory form now includes an explicit destination-project selector (defaulting to the currently viewed project, with Inbox always available) so new memories are filed exactly where you intend.
+
 ## v0.10.1 — 2026-07-12
 
 Search results in the dashboard's memory browser now render as the same interactive, clickable cards as the browse list, complete with relevance score and working edit/forget actions, instead of a separate inert display.
