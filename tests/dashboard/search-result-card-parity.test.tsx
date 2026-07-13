@@ -239,6 +239,39 @@ describe("search-result render matrix (ISS-006: one interactive result type)", (
 		const row = await screen.findByTestId("memory-row");
 		expect(row.getAttribute("data-memory-id")).toBe("mem_old");
 	});
+
+	it("QA W-1: the LIVE daemon spells the badge field memoryType — it must win over the fallback", async () => {
+		// Contract fixture mirroring the deployed honeycomb hit shape verbatim (recall.ts forwards
+		// memoryType, NOT type). Regression: hive read only `type`, so every search card badged as
+		// the "fact" fallback regardless of the real type.
+		const fetchImpl = vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
+			const path = String(input);
+			const ok = (body: unknown): Response => ({ ok: true, status: 200, json: async () => body }) as unknown as Response;
+			if (path.includes("/api/memories/recall")) {
+				return ok({
+					hits: [
+						{
+							source: "memories",
+							id: "mem_live",
+							memoryId: "mem_live",
+							memoryType: "gotcha",
+							text: "the embed daemon wedges under load",
+							score: 0.0161,
+							kind: "memory",
+							secondary: false,
+						},
+					],
+					sources: ["memories"],
+					degraded: false,
+				});
+			}
+			if (path.includes("/api/memories?")) return ok({ memories: [] });
+			return { ok: false, status: 404, json: async () => ({}) } as unknown as Response;
+		});
+		const wire = createWireClient({ fetchImpl: fetchImpl as unknown as typeof fetch });
+		const result = await wire.recall("wedge", undefined);
+		expect(result.memories[0]?.type).toBe("gotcha");
+	});
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
