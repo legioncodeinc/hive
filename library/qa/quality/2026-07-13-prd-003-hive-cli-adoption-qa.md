@@ -1,14 +1,15 @@
 # QA Report: PRD-003 Hive CLI Adoption
 
-**Plan document:** `C:/Users/mario/GitHub/the-apiary/cli-kit/library/requirements/backlog/prd-003-apiary-cli-interface-standard/`
+**Plan document:** `library/requirements/backlog/prd-003-apiary-cli-interface-standard/` in the `cli-kit` repository
 **Audit date:** 2026-07-13
 **Base branch:** `main`
-**Head:** `legion/prd-003-cli-standard-hive` (dirty, unpushed working tree)
+**Audited revision:** `0f865b135f9a8c078dfd12bd5f09d742137e55e6` on `legion/prd-003-cli-standard-hive`
+**Evidence classification:** Local feature-branch validation of the immutable audited revision; not published-release evidence
 **Auditor:** quality-worker-bee
 
 ## Summary
 
-The Hive-local PRD-003 adoption is implementation-complete and receives a final clean QA PASS after security's final PASS. Process identity now requires exact CLI-path plus adjacent `daemon` tokens and is revalidated immediately before every SIGTERM after service-manager stop; service-unit writes use no-follow descriptor checks before truncation. The full 834/834-test suite, packed-tarball conformance, and repeated live Windows `0.11.1` PID replacement all pass with no remaining finding.
+The Hive-local PRD-003 adoption is implementation-complete and receives a final clean QA PASS after security's final PASS. Process identity now requires exact CLI-path plus adjacent `daemon` tokens and is revalidated immediately before every SIGTERM after service-manager stop; service-unit writes use no-follow descriptor checks before truncation. Registry deletion now performs its absence check under the shared registry lock. The full 835/835-test suite, packed-tarball conformance, and repeated live Windows `0.11.1` PID replacement all pass with no remaining finding.
 
 ## Scorecard
 
@@ -87,7 +88,7 @@ None.
 | AC-e3 | Pass | `scripts/verify-packed-cli.mjs`; alias/unit tests | Installed tarball passes Hive matrix and deprecated aliases remain tested |
 | AC-e4 | N/A | Nectar | Not a Hive criterion |
 | AC-e5 | Pass | `CHANGELOG.md`; migration note; rewritten active runbook | Repository documentation is internally consistent |
-| AC-e6 | Pending ship evidence | `.github/workflows/ci.yaml:47-99` | Three-OS test/build/packed job configured; no run claimed for unpushed tree |
+| AC-e6 | Pending current-revision CI | `.github/workflows/ci.yaml:47-99` | Three-OS test/build/packed job is configured; PR run 29237688148 passed on prior revision `b63d530`, while `0f865b1` has complete local evidence and awaits its pushed CI rerun |
 | AC-e7 | N/A | suite-level repository | Fleet-wide four-package job is outside Hive-local adoption |
 | AC-e8 | Pass (Hive) | handler tests, packed conformance, registry/log isolation tests | No silent stubs or wrong-product delegation |
 | AC-e9 | Pass | shared command matrix plus Hive migration/runbook links | Normative suite semantics are linked consistently |
@@ -99,7 +100,7 @@ None.
 |---|---|
 | Final security re-review | PASS; no open Critical, High, or Medium finding |
 | Focused PRD-003 tests | PASS: 11 files, 119 tests |
-| Full `npm test` | PASS on rerun: 97 files, 834 tests; first run had one unrelated onboarding timeout and its isolated rerun passed 6/6 |
+| Full `npm test` | PASS on audited revision: 97 files, 835 tests |
 | Test-stability delta | PASS: 10s Vitest ceiling, hidden-first visibility fixture, and hermetic unauthenticated funnel seam affect tests only; no production path changed |
 | `npm run typecheck` | PASS |
 | `npm run build` | PASS |
@@ -120,7 +121,7 @@ The dogfood evidence matches the corrected lifecycle transaction:
 - Unit tests prove an orphan is signaled after a successful manager stop, a stuck orphan returns exit `1` after the exact configured bound, and restart never starts a replacement until the prior PID is gone.
 - Final dogfood security verdict is **PASS**: exact tokenized identity, immediate pre-signal revalidation, and descriptor-based unit-file protection close both prior Medium findings.
 
-Final delta gates: local identity/lifecycle/service focused suite 3 files/54 tests passed; security focused suite 4 files/68 tests passed; full suite rerun 97 files/834 tests passed; typecheck, build, packed conformance, audit, and diff check passed.
+Final delta gates: local identity/lifecycle/service focused suite 3 files/54 tests passed; security focused suite 4 files/68 tests passed; registry focused suite 13/13 passed; full suite on audited revision `0f865b1` passed 97 files/835 tests; typecheck, build, packed conformance, audit, and diff check passed.
 
 ## Prior Blocker Closure
 
@@ -139,6 +140,6 @@ Final delta gates: local identity/lifecycle/service focused suite 3 files/54 tes
 - `package.json`, `package-lock.json` (M), add cli-kit and packed-test script.
 - `scripts/verify-packed-cli.mjs` (A), bounded installed-tarball conformance verification.
 - CLI, lifecycle, registry, observability, updater, service wrapper/template, terminal, and path sources under `src/` (A/M), implement Hive adoption and security boundaries.
-- Corresponding `tests/` files (A/M), include exact-token identity, post-stop revalidation, orphan convergence, bounded failure, and descriptor/symlink cases and contribute to the 834-test green suite.
+- Corresponding `tests/` files (A/M), include exact-token identity, post-stop revalidation, orphan convergence, bounded failure, descriptor/symlink cases, and locked registry deletion and contribute to the 835-test green suite.
 - `vitest.config.ts` (M), raises the per-test timeout to 10 seconds for parallel CI load without changing runtime code.
 - Security and quality reports under `library/qa/` (A), record final independent review evidence.

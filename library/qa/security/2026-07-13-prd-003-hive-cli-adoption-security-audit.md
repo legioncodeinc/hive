@@ -2,15 +2,15 @@
 
 **Audit date:** 2026-07-13
 **Auditor:** security-worker-bee
-**Scope:** All uncommitted PRD-003 adoption files, with focused review of CLI dispatch, lifecycle/uninstall, service adapters/templates/wrapper, updater, registry, status/logs/telemetry, shared paths, tests, package metadata, and migration documentation
+**Scope:** Immutable feature-branch revision `0f865b135f9a8c078dfd12bd5f09d742137e55e6`, with focused review of CLI dispatch, lifecycle/uninstall, service adapters/templates/wrapper, updater, registry, status/logs/telemetry, shared paths, tests, package metadata, and migration documentation
 **Node requirement:** >=22
 **`npm audit` result:** 0 vulnerabilities
 **OpenClaw bundle scan:** Not applicable; Hive ships no OpenClaw bundle/audit script
-**CVE catalog:** Security Stinger catalog refreshed 2026-04-25 (current)
+**CVE catalog:** Security Stinger catalog refreshed 2026-04-25; coverage is limited to that snapshot and is not represented as current through the 2026-07-13 audit date
 
 ## Executive Summary
 
-Scope note: Hive's native service managers, local registry, dashboard daemon, and npm updater are outside the Stinger's Hivemind-specific Deep Lake catalog; universal command execution, filesystem, credential, terminal, network-bound, and supply-chain controls were applied. Three High findings were fixed: service logs could follow a planted symlink, existing logs and registry replacement files could retain permissive modes, and untrusted service/environment text could inject terminal control sequences. Follow-up reviews removed launchd/systemd's direct log opening and closed the prior Medium registry finding with owner-aware locking plus fail-closed malformed-document handling. A quality report was produced before this final security re-review and is stale; quality must rerun after these changes. The PRD-003 security gate is **PASS**.
+Scope note: Hive's native service managers, local registry, dashboard daemon, and npm updater are outside the Stinger's Hivemind-specific Deep Lake catalog; universal command execution, filesystem, credential, terminal, network-bound, and supply-chain controls were applied. Three High findings were fixed: service logs could follow a planted symlink, existing logs and registry replacement files could retain permissive modes, and untrusted service/environment text could inject terminal control sequences. Follow-up reviews removed launchd/systemd's direct log opening and closed the prior Medium registry finding with owner-aware locking plus fail-closed malformed-document handling. The post-security quality report and this audit now reference the same immutable revision and 835-test validation run. The PRD-003 security gate is **PASS**.
 
 ## Scorecard
 
@@ -70,10 +70,11 @@ None detected.
 | `npm run build` | PASS |
 | `npm audit --audit-level=high` | PASS - 0 vulnerabilities |
 | `git diff --check` | PASS |
-| Full `npm test` (final security run) | 821/822 passed; one unrelated onboarding gate test hit its five-second timeout |
+| Full `npm test` (commit-consistent final run) | PASS - 97 files, 835 tests on `0f865b1` |
+| Focused registry tests | PASS - 13 tests, including locked initially-absent deletion |
 | `npm run test:packed-cli` | PASS - packed install and CLI conformance, with bounded fixed-argv subprocesses and cleanup |
 
-The single full-suite timeout did not touch the PRD-003 files or security remediations; focused and packed suites are deterministic and green. Quality must rerun after this final security pass because its existing report predates the owner-aware lock changes.
+The commit-consistent full suite, focused registry suite, and packed artifact checks are green. The QA report records the same audited revision and test count.
 
 ## Files Changed by Security Review
 
@@ -92,7 +93,7 @@ The single full-suite timeout did not touch the PRD-003 files or security remedi
 
 ## Security Gate Verdict
 
-**PASS.** No Critical, High, or Medium security finding remains open in the Hive PRD-003 adoption. The final dogfood addendum below records and closes the lifecycle-convergence follow-ups. Quality must include this addendum in its rerun.
+**PASS.** No Critical, High, or Medium security finding remains open in the Hive PRD-003 adoption. The final dogfood addendum below records and closes the lifecycle-convergence follow-ups, and the final QA report incorporates this evidence.
 
 ## Dogfood Lifecycle Convergence Addendum - 2026-07-13
 
