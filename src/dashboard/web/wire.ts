@@ -1803,11 +1803,12 @@ async function postJson<T>(
 	url: string,
 	body: unknown,
 	schema: z.ZodType<T>,
+	headers: Record<string, string> = {},
 ): Promise<T | null> {
 	try {
 		const res = await fetchImpl(url, {
 			method: "POST",
-			headers: { "content-type": "application/json", accept: "application/json", ...DASHBOARD_SESSION_HEADERS },
+			headers: { "content-type": "application/json", accept: "application/json", ...DASHBOARD_SESSION_HEADERS, ...headers },
 			body: JSON.stringify(body),
 		});
 		if (!res.ok) return null;
@@ -2062,7 +2063,7 @@ export interface WireClient {
 	 * `null` on a non-2xx / network failure (the caller surfaces "save failed" and re-reads). The
 	 * page never optimistically renders the input — it re-lists after the ack.
 	 */
-	addMemory(input: { content: string; type?: string; agentId?: string }): Promise<StoreAckWire | null>;
+	addMemory(input: { content: string; type?: string; agentId?: string; projectId?: string }): Promise<StoreAckWire | null>;
 	/**
 	 * PRD-040b — edit a memory (`POST /api/memories/:id/modify`, version-bumped + reason-gated).
 	 * The `reason` is REQUIRED (the daemon rejects an empty one). Returns the `{ id, action,
@@ -2598,13 +2599,15 @@ export function createWireClient(options: WireClientOptions = {}): WireClient {
 			const v = await getJson(fetchImpl, url(`${ENDPOINTS.memories}/${encodeURIComponent(id)}`), MemoryGetResponseSchema);
 			return v?.memory ?? null;
 		},
-		async addMemory(input: { content: string; type?: string; agentId?: string }): Promise<StoreAckWire | null> {
+		async addMemory(input: { content: string; type?: string; agentId?: string; projectId?: string }): Promise<StoreAckWire | null> {
 			// POST the store body (content + optional type/agent); the daemon's zod is the source of
 			// truth (a 400 → null here, surfaced as "save failed"). The caller re-LISTS after a 201.
+			// ISS-006: stamp the selected project so a dashboard-added memory lands in the project the
+			// user is viewing instead of the __unsorted__ inbox (no header when no project selected).
 			const body: Record<string, string> = { content: input.content };
 			if (input.type !== undefined) body.type = input.type;
 			if (input.agentId !== undefined) body.agentId = input.agentId;
-			const ack = await postJson(fetchImpl, url(ENDPOINTS.memories), body, StoreAckSchema);
+			const ack = await postJson(fetchImpl, url(ENDPOINTS.memories), body, StoreAckSchema, projectHeader(input.projectId));
 			// PRD-012b: invalidate the memories list + kpis after a successful store (mirrors proxy-cache).
 			if (ack !== null) invalidateSwr(ENDPOINTS.memories, ENDPOINTS.kpis);
 			return ack;
