@@ -31,7 +31,7 @@ import React from "react";
 import { Badge, Button, formatScore, Input, MemoryCard } from "../primitives.js";
 import { LifecycleHealthPanel } from "./lifecycle-panel.js";
 import { isTabHidden, PageFrame, type PageProps } from "../page-frame.js";
-import { useScope } from "../scope-context.js";
+import { useScope, useScopeSwitcher } from "../scope-context.js";
 import { useSwr } from "../use-swr.js";
 import { NeedsProjectSelection } from "../needs-project.js";
 import {
@@ -394,15 +394,32 @@ const ADD_FIELD_STYLE: React.CSSProperties = {
 };
 
 /**
- * The ADD form (040b-AC-1): content (required) + a CLOSED-taxonomy `type` dropdown. On 201,
- * the parent re-lists. The `type` field is a `<select>` of the single-sourced {@link MEMORY_TYPES}
+ * The ADD form (040b-AC-1): content (required) + a CLOSED-taxonomy `type` dropdown + an EXPLICIT
+ * destination-project dropdown (ISS-006 follow-up, user decision 2026-07-12). On 201, the parent
+ * re-lists. The `type` field is a `<select>` of the single-sourced {@link MEMORY_TYPES}
  * (default {@link DEFAULT_MEMORY_TYPE}) — never free text — so a user can only submit one of the
- * six the daemon's enum gate accepts; each option's description rides as the `title` hint. The
- * chosen token is passed verbatim to the existing submit path (`onAdd` → `wire.addMemory`).
+ * six the daemon's enum gate accepts; each option's description rides as the `title` hint.
+ *
+ * DESTINATION is deliberately EXPLICIT, never implicit: the project switcher is a VIEW FILTER
+ * (SP-4 — view-only controls must not gain durable write side effects), so the form shows a
+ * visible "project" select that merely DEFAULTS to the viewed project (Inbox when unscoped).
+ * The user can retarget before submitting, and the success note names the destination.
  */
-function AddForm({ onAdd }: { onAdd: (content: string, type: string) => Promise<string | null> }): React.JSX.Element {
+export function AddForm({
+	onAdd,
+	projects,
+	viewedProject,
+}: {
+	onAdd: (content: string, type: string, projectId: string | undefined) => Promise<string | null>;
+	projects: readonly { readonly projectId: string; readonly name: string }[];
+	viewedProject: string | undefined;
+}): React.JSX.Element {
 	const [content, setContent] = React.useState("");
 	const [type, setType] = React.useState<string>(DEFAULT_MEMORY_TYPE);
+	// "" = the workspace Inbox (__unsorted__); anything else = an explicit project id.
+	const [dest, setDest] = React.useState<string>(viewedProject ?? "");
+	// Follow the VIEW default while the user browses (they have not committed a choice mid-form).
+	React.useEffect(() => setDest(viewedProject ?? ""), [viewedProject]);
 	const [busy, setBusy] = React.useState(false);
 	const [note, setNote] = React.useState("");
 
@@ -411,7 +428,7 @@ function AddForm({ onAdd }: { onAdd: (content: string, type: string) => Promise<
 		if (busy || empty) return;
 		setBusy(true);
 		setNote("");
-		const result = await onAdd(content, type);
+		const result = await onAdd(content, type, dest === "" ? undefined : dest);
 		setBusy(false);
 		if (result === null) {
 			setNote("Add failed — nothing was stored.");
@@ -422,6 +439,8 @@ function AddForm({ onAdd }: { onAdd: (content: string, type: string) => Promise<
 		setType(DEFAULT_MEMORY_TYPE);
 		setNote(result);
 	};
+
+	const selectableProjects = projects.filter((p) => p.projectId !== "__unsorted__");
 
 	return (
 		<div style={{ ...SURFACE, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -457,6 +476,21 @@ function AddForm({ onAdd }: { onAdd: (content: string, type: string) => Promise<
 					{MEMORY_TYPES.map((t) => (
 						<option key={t} value={t} title={MEMORY_TYPE_DESCRIPTIONS[t]}>
 							{t === DEFAULT_MEMORY_TYPE ? `${t} (default)` : t}
+						</option>
+					))}
+				</select>
+				<select
+					aria-label="destination project"
+					data-testid="add-project"
+					value={dest}
+					onChange={(e) => setDest(e.target.value)}
+					title="where the memory is filed — defaults to the project you are viewing"
+					style={{ ...ADD_FIELD_STYLE, width: 200, cursor: "pointer" }}
+				>
+					<option value="">Inbox (unsorted)</option>
+					{selectableProjects.map((p) => (
+						<option key={p.projectId} value={p.projectId}>
+							{p.name !== "" ? p.name : p.projectId}
 						</option>
 					))}
 				</select>
@@ -617,6 +651,7 @@ export function MemoriesPage({ wire, pollinating = false }: PageProps): React.JS
 	// PRD-049e (49e-AC-2): the dashboard-selected project. Threaded into the list + recall fetchers so
 	// the page shows ONLY that project's memories; `undefined` → the needs-selection state (49e-AC-5).
 	const { scope } = useScope();
+	const { projects: workspaceProjects } = useScopeSwitcher();
 	const project = scope.project;
 	// ── browse list (040a) — via useSwr (PRD-012b). The key encodes both the limit (Load more) and the
 	// selected project (re-scope on switch). `undefined` project disables the hook (no fetch, no
@@ -783,22 +818,23 @@ export function MemoriesPage({ wire, pollinating = false }: PageProps): React.JS
 		[wire, closeDetail, reList],
 	);
 
-	// ── add (040b-AC-1) ──
+	// ── add (040b-AC-1 + ISS-006 explicit destination) ──
 	const onAdd = React.useCallback(
-		async (content: string, type: string): Promise<string | null> => {
-			// ISS-006: stamp the currently VIEWED project so the added memory is findable where the
-			// user is looking (unstamped adds landed in the __unsorted__ inbox).
+		async (content: string, type: string, projectId: string | undefined): Promise<string | null> => {
+			// The destination is the form's EXPLICIT choice (defaulted to the viewed project by the
+			// form itself) — never an implicit side effect of the view filter (SP-4).
 			const ack = await wire.addMemory({
 				content,
 				...(type !== "" ? { type } : {}),
-				...(project !== undefined ? { projectId: project } : {}),
+				...(projectId !== undefined ? { projectId } : {}),
 			});
 			if (ack === null) return null;
 			// RE-READ, never optimistic: re-list so the new memory appears from the daemon's truth.
 			await reList();
-			return ack.id !== null ? `stored · ${ack.id}` : `stored · ${ack.action || "ok"}`;
+			const dest = projectId ?? "inbox";
+			return ack.id !== null ? `stored · ${ack.id} → ${dest}` : `stored · ${ack.action || "ok"} → ${dest}`;
 		},
-		[wire, reList, project],
+		[wire, reList],
 	);
 
 	// ── compact + pollinate (040c) ──
@@ -929,7 +965,7 @@ export function MemoriesPage({ wire, pollinating = false }: PageProps): React.JS
 
 					{/* ── ADD (040b) + LIFECYCLE (040c) — below the browse area ── */}
 					<div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-						<AddForm onAdd={onAdd} />
+						<AddForm onAdd={onAdd} projects={workspaceProjects} viewedProject={project} />
 						{/* PRD-058d: the lifecycle HEALTH panel (H badge, conflicts+resolve, stale-refs, calibration). */}
 						<LifecycleHealthPanel wire={wire} />
 						<LifecyclePanel
