@@ -98,7 +98,9 @@ describe("useSwr", () => {
 	});
 
 	it("revalidateOnFocus: fires a revalidate on visibilitychange→visible; skips while hidden", async () => {
-		setVisibility("visible");
+		// Start hidden so an interval deadline cannot race the transition under test.
+		// Initial SWR hydration is unconditional, so the mount fetch still runs.
+		setVisibility("hidden");
 
 		let calls = 0;
 		const { result } = renderHook(() =>
@@ -112,7 +114,6 @@ describe("useSwr", () => {
 		await waitFor(() => expect(result.current.data).toBe("r1"));
 
 		// Background the tab — interval ticks should NOT fire a fetch.
-		setVisibility("hidden");
 		await act(async () => {
 			await new Promise((r) => setTimeout(r, 120));
 		});

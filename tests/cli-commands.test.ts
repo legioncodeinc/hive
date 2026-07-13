@@ -3,8 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  runDaemonCommand,
+  runInstallCommand,
   runInstallServiceCommand,
   runRegisterCommand,
+  runRestartCommand,
   runStartCommand,
   runStopCommand,
   runUninstallCommand,
@@ -44,6 +47,7 @@ function resolveServiceResult<T>(value: T | (() => Promise<T>) | undefined, fall
 function createFakeService(
   overrides: {
     install?: ServiceResult | (() => Promise<ServiceResult>);
+    start?: ServiceResult | (() => Promise<ServiceResult>);
     stop?: ServiceResult | (() => Promise<ServiceResult>);
     uninstall?: ServiceUninstallResult | (() => Promise<ServiceUninstallResult>);
     isRegistered?: () => Promise<boolean>;
@@ -51,6 +55,7 @@ function createFakeService(
 ): ServiceModule {
   return {
     install: () => resolveServiceResult(overrides.install, { ok: true, message: "installed" }),
+    start: () => resolveServiceResult(overrides.start, { ok: true, message: "started" }),
     stop: () => resolveServiceResult(overrides.stop, { ok: true, message: "stopped" }),
     uninstall: () =>
       resolveServiceResult(overrides.uninstall, { ok: true, alreadyAbsent: false, message: "uninstalled" }),
@@ -82,8 +87,8 @@ function telemetryDeps(dir: string, recorder: FetchRecorder, overrides: Partial<
 
 const silentOut = (): void => {};
 
-describe("install-service firing point", () => {
-  it("fires hive_installed after a successful install, once per machine", () => {
+describe("install and service-install firing points", () => {
+  it("fires hive_installed after a successful full install, once per machine", () => {
     return withTempDir(async (dir) => {
       const recorder = createFetchRecorder();
       const deps = {
@@ -93,12 +98,12 @@ describe("install-service firing point", () => {
         out: silentOut
       };
 
-      const code = await runInstallServiceCommand("/tmp/cli.js", deps);
+      const code = await runInstallCommand("/tmp/cli.js", deps);
       expect(code).toBe(0);
       expect(recorder.calls.map((call) => call.body["event"])).toEqual(["hive_installed"]);
 
       // Re-install on the same machine: the ledger dedupes, no second event.
-      const again = await runInstallServiceCommand("/tmp/cli.js", deps);
+      const again = await runInstallCommand("/tmp/cli.js", deps);
       expect(again).toBe(0);
       expect(recorder.calls).toHaveLength(1);
     });
@@ -107,7 +112,7 @@ describe("install-service firing point", () => {
   it("does not fire on a failed install and keeps the failure exit code", () => {
     return withTempDir(async (dir) => {
       const recorder = createFetchRecorder();
-      const code = await runInstallServiceCommand("/tmp/cli.js", {
+      const code = await runInstallCommand("/tmp/cli.js", {
         service: createFakeService({ install: { ok: false, message: "boom" } }),
         registry: { registryPath: join(dir, "doctor.daemons.json") },
         telemetry: telemetryDeps(dir, recorder),
@@ -121,7 +126,7 @@ describe("install-service firing point", () => {
   it("a telemetry failure does not change the install exit code", () => {
     return withTempDir(async (dir) => {
       const throwing = createFetchRecorder(() => Promise.reject(new Error("network down")));
-      const code = await runInstallServiceCommand("/tmp/cli.js", {
+      const code = await runInstallCommand("/tmp/cli.js", {
         service: createFakeService(),
         registry: { registryPath: join(dir, "doctor.daemons.json") },
         telemetry: telemetryDeps(dir, throwing),
@@ -130,10 +135,24 @@ describe("install-service firing point", () => {
       expect(code).toBe(0);
     });
   });
+
+  it("service-install only reconciles the OS service and emits no lifecycle telemetry", () => {
+    return withTempDir(async (dir) => {
+      const recorder = createFetchRecorder();
+      const code = await runInstallServiceCommand("/tmp/cli.js", {
+        service: createFakeService(),
+        telemetry: telemetryDeps(dir, recorder),
+        out: silentOut
+      });
+      expect(code).toBe(0);
+      expect(recorder.calls).toEqual([]);
+    });
+  });
+
 });
 
-describe("uninstall-service firing point", () => {
-  it("fires hive_uninstalled (undeduped) and keeps the verb exit code", () => {
+describe("service-uninstall firing point", () => {
+  it("removes only the OS service and emits no lifecycle telemetry", () => {
     return withTempDir(async (dir) => {
       const recorder = createFetchRecorder();
       const deps = {
@@ -143,15 +162,15 @@ describe("uninstall-service firing point", () => {
       };
       const code = await runUninstallServiceCommand("/tmp/cli.js", deps);
       expect(code).toBe(0);
-      expect(recorder.calls.map((call) => call.body["event"])).toEqual(["hive_uninstalled"]);
+      expect(recorder.calls).toEqual([]);
 
       // A reinstall/uninstall cycle fires it again (no dedupe on uninstall).
       await runUninstallServiceCommand("/tmp/cli.js", deps);
-      expect(recorder.calls).toHaveLength(2);
+      expect(recorder.calls).toHaveLength(0);
     });
   });
 
-  it("fires even when teardown reports a failure, and the failure code is preserved", () => {
+  it("preserves a teardown failure without emitting telemetry", () => {
     return withTempDir(async (dir) => {
       const recorder = createFetchRecorder();
       const code = await runUninstallServiceCommand("/tmp/cli.js", {
@@ -162,7 +181,7 @@ describe("uninstall-service firing point", () => {
         out: silentOut
       });
       expect(code).toBe(1);
-      expect(recorder.calls.map((call) => call.body["event"])).toEqual(["hive_uninstalled"]);
+      expect(recorder.calls).toEqual([]);
     });
   });
 
@@ -181,7 +200,7 @@ describe("uninstall-service firing point", () => {
         out: silentOut
       });
       expect(code).toBe(0);
-      expect(recorder.calls.map((call) => call.body["event"])).toEqual(["hive_uninstalled"]);
+      expect(recorder.calls).toEqual([]);
     });
   });
 
@@ -198,7 +217,7 @@ describe("uninstall-service firing point", () => {
   });
 });
 
-describe("start firing points (first_run + updated)", () => {
+describe("daemon firing points (first_run + updated)", () => {
   interface FakeServer {
     close(callback?: (error?: Error) => void): void;
   }
@@ -231,7 +250,7 @@ describe("start firing points (first_run + updated)", () => {
   it("fires hive_first_run on the first successful start, once per machine", () => {
     return withTempDir(async (dir) => {
       const recorder = createFetchRecorder();
-      const code = await runStartCommand(startDeps(dir, recorder));
+      const code = await runDaemonCommand(startDeps(dir, recorder));
       expect(code).toBe(0);
       expect(recorder.calls.map((call) => call.body["event"])).toEqual(["hive_first_run"]);
       expect(loadLedger(join(dir, "state")).lastSeenVersion).toBe("1.0.0");
@@ -241,18 +260,18 @@ describe("start firing points (first_run + updated)", () => {
   it("fires hive_updated when the persisted version differs from the current one", () => {
     return withTempDir(async (dir) => {
       const recorder = createFetchRecorder();
-      const first = await runStartCommand(startDeps(dir, recorder, { version: "1.0.0" }));
+      const first = await runDaemonCommand(startDeps(dir, recorder, { version: "1.0.0" }));
       expect(first).toBe(0);
       rmSync(join(dir, "locks"), { recursive: true, force: true });
 
-      const upgraded = await runStartCommand(startDeps(dir, recorder, { version: "1.1.0" }));
+      const upgraded = await runDaemonCommand(startDeps(dir, recorder, { version: "1.1.0" }));
       expect(upgraded).toBe(0);
       expect(recorder.calls.map((call) => call.body["event"])).toEqual(["hive_first_run", "hive_updated"]);
       expect(loadLedger(join(dir, "state")).lastSeenVersion).toBe("1.1.0");
 
       // Same version again: nothing further fires.
       rmSync(join(dir, "locks"), { recursive: true, force: true });
-      await runStartCommand(startDeps(dir, recorder, { version: "1.1.0" }));
+      await runDaemonCommand(startDeps(dir, recorder, { version: "1.1.0" }));
       expect(recorder.calls).toHaveLength(2);
     });
   });
@@ -260,7 +279,7 @@ describe("start firing points (first_run + updated)", () => {
   it("a telemetry failure does not change the start exit code", () => {
     return withTempDir(async (dir) => {
       const throwing = createFetchRecorder(() => Promise.reject(new Error("no network")));
-      const code = await runStartCommand(startDeps(dir, throwing));
+      const code = await runDaemonCommand(startDeps(dir, throwing));
       expect(code).toBe(0);
     });
   });
@@ -297,13 +316,16 @@ describe("stop verb", () => {
   it("b-AC-1 sends SIGTERM to a live pid when no service is registered", async () => {
     const lines: string[] = [];
     const killed: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    let alive = true;
     const code = await runStopCommand("/tmp/cli.js", {
       service: createFakeService({ isRegistered: async () => false }),
       pidPath: "/tmp/hive.pid",
       readPid: () => 4242,
-      isPidAlive: () => true,
+      isPidAlive: () => alive,
+      isOwnedHiveProcess: async () => true,
       kill: (pid, signal) => {
         killed.push({ pid, signal });
+        alive = false;
       },
       out: (text) => {
         lines.push(text);
@@ -312,6 +334,72 @@ describe("stop verb", () => {
     expect(code).toBe(0);
     expect(killed).toEqual([{ pid: 4242, signal: "SIGTERM" }]);
     expect(lines.join("")).toContain("SIGTERM");
+  });
+
+  it("converges an orphaned daemon when the service manager reports a successful stop", async () => {
+    const lines: string[] = [];
+    const killed: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    let alive = true;
+    const code = await runStopCommand("/tmp/cli.js", {
+      service: createFakeService({
+        isRegistered: async () => true,
+        stop: { ok: true, message: "hive service stopped (schtasks)." }
+      }),
+      pidPath: "/tmp/hive.pid",
+      readPid: () => 4242,
+      isPidAlive: () => alive,
+      isOwnedHiveProcess: async () => true,
+      kill: (pid, signal) => {
+        killed.push({ pid, signal });
+        alive = false;
+      },
+      out: (text) => lines.push(text)
+    });
+
+    expect(code).toBe(0);
+    expect(killed).toEqual([{ pid: 4242, signal: "SIGTERM" }]);
+    expect(lines.join("")).toContain("left the hive daemon running");
+  });
+
+  it("rechecks daemon identity after the service-manager stop before signaling", async () => {
+    const kill = vi.fn();
+    const identity = vi.fn()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    const code = await runStopCommand("/tmp/cli.js", {
+      service: createFakeService({ isRegistered: async () => true }),
+      readPid: () => 4242,
+      isPidAlive: () => true,
+      isOwnedHiveProcess: identity,
+      kill,
+      out: silentOut
+    });
+
+    expect(code).toBe(1);
+    expect(identity).toHaveBeenCalledTimes(2);
+    expect(kill).not.toHaveBeenCalled();
+  });
+
+  it("fails within the configured bound when an orphan ignores SIGTERM", async () => {
+    const kill = vi.fn();
+    const delay = vi.fn(async () => {});
+    const lines: string[] = [];
+    const code = await runStopCommand("/tmp/cli.js", {
+      service: createFakeService({ isRegistered: async () => false }),
+      readPid: () => 4242,
+      isPidAlive: () => true,
+      isOwnedHiveProcess: async () => true,
+      kill,
+      stopAttempts: 3,
+      stopDelayMs: 1,
+      delay,
+      out: (text) => lines.push(text)
+    });
+
+    expect(code).toBe(1);
+    expect(kill).toHaveBeenCalledOnce();
+    expect(delay).toHaveBeenCalledTimes(2);
+    expect(lines.join("")).toContain("remained running after SIGTERM");
   });
 
   it("b-AC-1 stops through the service manager when registered", async () => {
@@ -327,6 +415,23 @@ describe("stop verb", () => {
     });
     expect(code).toBe(0);
     expect(lines.join("")).toContain("stopped");
+  });
+
+  it("refuses to signal a live pid that does not identify the expected hive daemon", async () => {
+    const kill = vi.fn();
+    const lines: string[] = [];
+    const code = await runStopCommand("/tmp/cli.js", {
+      service: createFakeService({ isRegistered: async () => false }),
+      readPid: () => 4242,
+      isPidAlive: () => true,
+      isOwnedHiveProcess: async () => false,
+      kill,
+      out: (text) => lines.push(text)
+    });
+
+    expect(code).toBe(1);
+    expect(kill).not.toHaveBeenCalled();
+    expect(lines.join("")).toContain("does not identify the expected hive daemon");
   });
 
   it("AC-9 a genuine stop failure with the daemon still running exits 1 with the error", async () => {
@@ -349,6 +454,105 @@ describe("stop verb", () => {
     expect(code).toBe(1);
     expect(lines.join("")).toContain("Access denied.");
     expect(lines.join("")).not.toContain("not running");
+  });
+});
+
+describe("start and restart service verbs", () => {
+  it("start delegates to the installed service instead of launching a foreground daemon", async () => {
+    const lines: string[] = [];
+    const code = await runStartCommand("/tmp/cli.js", {
+      service: createFakeService({ start: { ok: true, message: "hive service started (systemd)." } }),
+      out: (text) => lines.push(text)
+    });
+    expect(code).toBe(0);
+    expect(lines.join("")).toContain("service started");
+  });
+
+  it("restart stops, starts, and succeeds only after bounded health verification", async () => {
+    const healthFetch = vi.fn()
+      .mockRejectedValueOnce(new Error("not ready"))
+      .mockResolvedValueOnce({ ok: true, status: 200 });
+    const delay = vi.fn(async () => {});
+    const code = await runRestartCommand("/tmp/cli.js", {
+      service: createFakeService({ isRegistered: async () => true }),
+      healthFetch,
+      healthAttempts: 3,
+      healthDelayMs: 1,
+      delay,
+      out: silentOut
+    });
+    expect(code).toBe(0);
+    expect(healthFetch).toHaveBeenCalledTimes(2);
+    expect(delay).toHaveBeenCalledTimes(1);
+  });
+
+  it("restart terminates a service-manager orphan before starting the replacement", async () => {
+    const events: string[] = [];
+    let alive = true;
+    const service = createFakeService({
+      isRegistered: async () => true,
+      stop: async () => {
+        events.push("service-stop");
+        return { ok: true, message: "stopped" };
+      },
+      start: async () => {
+        events.push("service-start");
+        return { ok: true, message: "started" };
+      }
+    });
+    const code = await runRestartCommand("/tmp/cli.js", {
+      service,
+      pidPath: "/tmp/hive.pid",
+      readPid: () => 4242,
+      isPidAlive: () => alive,
+      isOwnedHiveProcess: async () => true,
+      kill: () => {
+        events.push("sigterm");
+        alive = false;
+      },
+      healthFetch: async () => ({ ok: true, status: 200 }),
+      out: silentOut
+    });
+
+    expect(code).toBe(0);
+    expect(events).toEqual(["service-stop", "sigterm", "service-start"]);
+  });
+
+  it("restart never starts a replacement while the prior owned pid remains alive", async () => {
+    const start = vi.fn(async () => ({ ok: true, message: "started" }));
+    const code = await runRestartCommand("/tmp/cli.js", {
+      service: createFakeService({ isRegistered: async () => true, start }),
+      readPid: () => 4242,
+      isPidAlive: () => true,
+      isOwnedHiveProcess: async () => true,
+      kill: vi.fn(),
+      stopAttempts: 2,
+      stopDelayMs: 0,
+      delay: async () => {},
+      healthFetch: async () => ({ ok: true, status: 200 }),
+      out: silentOut
+    });
+
+    expect(code).toBe(1);
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("restart fails after the exact configured number of health attempts", async () => {
+    const healthFetch = vi.fn(async () => ({ ok: false, status: 503 }));
+    const delay = vi.fn(async () => {});
+    const lines: string[] = [];
+    const code = await runRestartCommand("/tmp/cli.js", {
+      service: createFakeService({ isRegistered: async () => true }),
+      healthFetch,
+      healthAttempts: 3,
+      healthDelayMs: 1,
+      delay,
+      out: (text) => lines.push(text)
+    });
+    expect(code).toBe(1);
+    expect(healthFetch).toHaveBeenCalledTimes(3);
+    expect(delay).toHaveBeenCalledTimes(2);
+    expect(lines.join("")).toContain("did not become healthy");
   });
 });
 

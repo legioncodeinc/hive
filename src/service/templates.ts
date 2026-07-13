@@ -1,9 +1,10 @@
 import { join } from "node:path";
 
 import { WINDOWS_TASK_NAME, type ServicePlan } from "./platform.js";
-import { resolveFleetRoot, resolveLaunchdLogPaths } from "../shared/apiary-root.js";
+import { resolveFleetRoot } from "../shared/apiary-root.js";
 
-export const HIVE_START_COMMAND = "start" as const;
+/** Internal service wrapper. Canonical `start` controls the installed service. */
+export const HIVE_START_COMMAND = "service-daemon" as const;
 export const RESTART_SEC = 5 as const;
 export const WINDOWS_RESTART_INTERVAL = "PT1M" as const;
 /**
@@ -42,9 +43,6 @@ export function renderLaunchdPlist(plan: ServicePlan, env: NodeJS.ProcessEnv = p
   const node = escapeXml(process.execPath);
   const exec = escapeXml(plan.execPath);
   const label = escapeXml(plan.label);
-  const logs = resolveLaunchdLogPaths({ home: plan.home, env });
-  const stdoutPath = escapeXml(logs.out);
-  const stderrPath = escapeXml(logs.err);
   const pin = apiaryHomePin(plan, env);
   const environmentBlock =
     pin === null
@@ -75,10 +73,6 @@ ${environmentBlock}	<key>Label</key>
 	<integer>${RESTART_SEC}</integer>
 	<key>ProcessType</key>
 	<string>Background</string>
-	<key>StandardOutPath</key>
-	<string>${stdoutPath}</string>
-	<key>StandardErrorPath</key>
-	<string>${stderrPath}</string>
 </dict>
 </plist>
 `;

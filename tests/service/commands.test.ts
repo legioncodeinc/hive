@@ -1,6 +1,7 @@
 import {
   launchdDomainTarget,
   launchdServiceTarget,
+  startCommands,
   stopCommands,
   uninstallCommands
 } from "../../src/service/commands.js";
@@ -34,5 +35,23 @@ describe("service stop commands", () => {
     const plan = resolveServicePlan(fixedEnv({ platform: "win32", home: "C:\\Users\\t" }));
     expect(stopCommands(plan, 0)).toEqual([{ command: "schtasks", args: ["/End", "/TN", WINDOWS_TASK_NAME] }]);
     expect(uninstallCommands(plan, 0)[0]?.args).toEqual(["/Delete", "/TN", WINDOWS_TASK_NAME, "/F"]);
+  });
+});
+
+describe("service start commands", () => {
+  it("uses fixed product-owned argv on all platforms", () => {
+    const launchd = resolveServicePlan(fixedEnv({ platform: "darwin", home: "/home/t" }));
+    const systemd = resolveServicePlan(fixedEnv({ platform: "linux", home: "/home/t" }));
+    const windows = resolveServicePlan(fixedEnv({ platform: "win32", home: "C:\\Users\\t" }));
+
+    expect(startCommands(launchd, 501)).toEqual([
+      { command: "launchctl", args: ["kickstart", launchdServiceTarget(launchd, 501)] }
+    ]);
+    expect(startCommands(systemd, 1000)).toEqual([
+      { command: "systemctl", args: ["--user", "start", SYSTEMD_UNIT_NAME] }
+    ]);
+    expect(startCommands(windows, 0)).toEqual([
+      { command: "schtasks", args: ["/Run", "/TN", WINDOWS_TASK_NAME] }
+    ]);
   });
 });

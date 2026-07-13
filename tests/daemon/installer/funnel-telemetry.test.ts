@@ -69,6 +69,9 @@ function telemetryHarness(extra: Parameters<typeof makeHarness>[0] = {}) {
   const harness = makeHarness({
     ...extra,
     overrides: {
+      // Keep unrelated funnel tests hermetic: the default harness may observe a live/local
+      // authenticated setup state and asynchronously inject login_completed into their recorder.
+      setupAuthFetch: unauthenticatedSetupFetch,
       funnelEmitDeps: deps,
       funnelStateDir: join(dir, "state"),
       ...extra.overrides

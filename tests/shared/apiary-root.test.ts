@@ -62,7 +62,7 @@ describe("resolveFleetRoot (rr-AC-1..4)", () => {
     expect(resolveHiveLockPath(deps)).toBe(join(root, "hive", "hive.lock"));
     expect(resolveSharedInstallIdPath(deps)).toBe(join(root, "install-id"));
     expect(resolveStagedWindowsTaskPath(deps)).toBe(join(root, "hive", "hive-task.xml"));
-    expect(resolveLaunchdLogPaths(deps).out).toBe(join(root, "hive", "launchd.out.log"));
+    expect(resolveLaunchdLogPaths(deps).out).toBe(join(root, "hive", "service.log"));
   });
 
   it("rr-AC-1 production default uses os.homedir()", () => {

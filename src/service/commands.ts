@@ -48,6 +48,18 @@ export function stopCommands(plan: ServicePlan, uid: number): readonly ServiceCo
   }
 }
 
+/** Start an already-installed service without rewriting or re-registering its unit. */
+export function startCommands(plan: ServicePlan, uid: number): readonly ServiceCommand[] {
+  switch (plan.manager) {
+    case "launchd":
+      return [{ command: "launchctl", args: ["kickstart", launchdServiceTarget(plan, uid)] }];
+    case "systemd":
+      return [{ command: "systemctl", args: ["--user", "start", SYSTEMD_UNIT_NAME] }];
+    case "schtasks":
+      return [{ command: "schtasks", args: ["/Run", "/TN", WINDOWS_TASK_NAME] }];
+  }
+}
+
 export function uninstallCommands(plan: ServicePlan, uid: number): readonly ServiceCommand[] {
   switch (plan.manager) {
     case "launchd":

@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — PRD-003 CLI interface adoption
+
+Hive now follows the shared Apiary CLI contract. The canonical operational surface is `start`, `stop`, `restart`, `install`, `uninstall`, `service-install`, `service-uninstall`, `update`, `status`, `register`, `logs`, and `telemetry`, with `--help`, `--version`, `--json`, and `--no-color`; `daemon` remains Hive's product-specific foreground command.
+
+This is an operator-visible semantic migration:
+
+- `hive start` now starts the already-installed OS service. Use `hive daemon` to run the portal in the foreground.
+- `hive install` owns onboarding, service reconciliation, and Doctor registration. `hive service-install` owns only the OS service definition.
+- `hive service-uninstall` removes only the service definition and preserves Hive state and Doctor registration. `hive uninstall` performs full Hive removal within Hive-owned boundaries.
+- `install-service` and `uninstall-service` remain deprecated compatibility aliases for a migration window; primary help advertises only `service-install` and `service-uninstall`.
+- Baseline commands support stable `--json` envelopes. Success/idempotent results exit `0`, runtime/service failures exit `1`, and usage/unknown-command failures exit `2`.
+- `status`, Hive-isolated `logs`, and read-only `telemetry` provide the common Apiary observability surface. Help includes Hive-specific ASCII branding, `HIVE`, and the exact credit `Legion Code Inc. x Activeloop`.
+
+Automation that previously used `hive start` as a long-running foreground process must switch to `hive daemon`. Scripts should adopt the canonical service verb names, stop treating every nonzero result as the same failure class, and use `--json` instead of parsing human output. See [the migration note](library/knowledge/private/operations/prd-003-cli-migration.md).
+
 ## v0.11.1 — 2026-07-13
 
 Fixed search-result badges so hits from the live daemon correctly display their memory type (e.g. 'gotcha') instead of always falling back to 'fact'.

@@ -76,13 +76,18 @@ export function resolveStagedWindowsTaskPath(deps: FleetRootDeps = {}): string {
   return join(resolveHiveStateDir(deps), "hive-task.xml");
 }
 
-export function resolveLaunchdLogPaths(deps: FleetRootDeps = {}): { readonly out: string; readonly err: string } {
+/** Authoritative Hive service logs on every platform. */
+export function resolveServiceLogPaths(deps: FleetRootDeps = {}): { readonly out: string; readonly err: string } {
   const stateDir = resolveHiveStateDir(deps);
+  const path = join(stateDir, "service.log");
   return {
-    out: join(stateDir, "launchd.out.log"),
-    err: join(stateDir, "launchd.err.log")
+    out: path,
+    err: path
   };
 }
+
+/** @deprecated Use resolveServiceLogPaths; retained for source compatibility. */
+export const resolveLaunchdLogPaths = resolveServiceLogPaths;
 
 /** Absolute pidPath written into hive's registry entry (ADR Resolved decision 4). */
 export function resolveHiveRegistryPidPath(deps: FleetRootDeps = {}): string {

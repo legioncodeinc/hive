@@ -86,6 +86,9 @@ jobs:
       - name: Build (tsc + esbuild bundles)
         run: npm run build
 
+      - name: Packed CLI conformance
+        run: npm run test:packed-cli
+
       # Packaging sanity: prove `npm pack` assembles the publishable tarball
       # (the `files: ["dist"]` allowlist plus package.json/README/LICENSE)
       # without error on each OS. `--dry-run` builds the tarball in memory

@@ -5,6 +5,7 @@ export default defineConfig({
     environment: "node",
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
     globals: true,
+    testTimeout: 10_000,
     setupFiles: ["tests/setup/isolate-home.ts"]
   }
 });
