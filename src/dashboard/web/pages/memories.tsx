@@ -786,13 +786,19 @@ export function MemoriesPage({ wire, pollinating = false }: PageProps): React.JS
 	// ── add (040b-AC-1) ──
 	const onAdd = React.useCallback(
 		async (content: string, type: string): Promise<string | null> => {
-			const ack = await wire.addMemory({ content, ...(type !== "" ? { type } : {}) });
+			// ISS-006: stamp the currently VIEWED project so the added memory is findable where the
+			// user is looking (unstamped adds landed in the __unsorted__ inbox).
+			const ack = await wire.addMemory({
+				content,
+				...(type !== "" ? { type } : {}),
+				...(project !== undefined ? { projectId: project } : {}),
+			});
 			if (ack === null) return null;
 			// RE-READ, never optimistic: re-list so the new memory appears from the daemon's truth.
 			await reList();
 			return ack.id !== null ? `stored · ${ack.id}` : `stored · ${ack.action || "ok"}`;
 		},
-		[wire, reList],
+		[wire, reList, project],
 	);
 
 	// ── compact + pollinate (040c) ──
