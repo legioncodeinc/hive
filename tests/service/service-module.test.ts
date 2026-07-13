@@ -3,6 +3,56 @@ import { resolveStagedWindowsTaskPath } from "../../src/shared/apiary-root.js";
 import { fixedEnv, createMemoryFs, createRecordingRunner } from "./helpers.js";
 
 describe("hive service module", () => {
+  it("reconciles an existing Unix unit so CLI migrations replace stale actions", async () => {
+    const runner = createRecordingRunner();
+    const fs = createMemoryFs();
+    const unitPath = "/home/t/.config/systemd/user/hive.service";
+    fs.files.set(unitPath, "ExecStart=node /opt/hive/dist/cli.js start\n");
+    let migrated = 0;
+    const service = createServiceModule({
+      execPath: "/opt/hive/dist/cli.js",
+      runner,
+      fs,
+      environment: fixedEnv({ platform: "linux", home: "/home/t", execPath: "/opt/hive/dist/cli.js" }),
+      migrateState: () => {
+        migrated += 1;
+      }
+    });
+
+    const result = await service.install();
+
+    expect(result.ok).toBe(true);
+    expect(migrated).toBe(1);
+    expect(fs.files.get(unitPath)).toContain(`"/opt/hive/dist/cli.js" service-daemon`);
+    expect(runner.calls).toContainEqual({
+      command: "systemctl",
+      args: ["--user", "enable", "--now", "hive.service"]
+    });
+  });
+
+  it("refuses to rewrite a symlinked service unit", async () => {
+    const runner = createRecordingRunner();
+    const fs = createMemoryFs();
+    const unitPath = "/home/t/.config/systemd/user/hive.service";
+    fs.symlinks.add(unitPath);
+    const service = createServiceModule({
+      execPath: "/opt/hive/dist/cli.js",
+      runner,
+      fs,
+      environment: fixedEnv({ platform: "linux", home: "/home/t", execPath: "/opt/hive/dist/cli.js" }),
+      migrateState: () => {}
+    });
+
+    const result = await service.install();
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("refusing to replace a symlinked service unit");
+    expect(runner.calls).not.toContainEqual({
+      command: "systemctl",
+      args: ["--user", "enable", "--now", "hive.service"]
+    });
+  });
+
   it("d-AC-1 writes Linux unit content before systemctl enable", async () => {
     const runner = createRecordingRunner();
     const fs = createMemoryFs();
@@ -26,7 +76,7 @@ describe("hive service module", () => {
     expect(migrated).toBe(1);
     expect(fs.files.has(unitPath)).toBe(true);
     expect(fs.files.get(unitPath)).toContain("Restart=always");
-    expect(fs.files.get(unitPath)).toContain(`"/opt/hive/dist/cli.js" start`);
+    expect(fs.files.get(unitPath)).toContain(`"/opt/hive/dist/cli.js" service-daemon`);
     // Decision #32 migration: the legacy `thehive` unit is deregistered (and its
     // file removed) first, then the new unit is enabled.
     expect(runner.calls[0]).toEqual({

@@ -1,5 +1,16 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  ftruncateSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  rmSync,
+  writeFileSync
+} from "node:fs";
 import { dirname } from "node:path";
 
 import { resolveStagedWindowsTaskPath } from "../shared/apiary-root.js";
@@ -7,6 +18,7 @@ import { migrateHiveState } from "../shared/state-migration.js";
 import {
   installCommands,
   legacyUninstallCommands,
+  startCommands,
   stopCommands,
   uninstallCommands,
   type ServiceCommand
@@ -42,6 +54,7 @@ export interface ServiceFs {
   writeFile(path: string, content: string): void;
   removeFile(path: string): void;
   fileExists(path: string): boolean;
+  isSymbolicLink(path: string): boolean;
 }
 
 export interface ServiceResult {
@@ -73,6 +86,7 @@ export interface ServiceUninstallResult extends ServiceResult {
 
 export interface ServiceModule {
   install(): Promise<ServiceResult>;
+  start(): Promise<ServiceResult>;
   stop(): Promise<ServiceResult>;
   uninstall(): Promise<ServiceUninstallResult>;
   isRegistered(): Promise<boolean>;
@@ -129,13 +143,29 @@ export function createNodeServiceFs(): ServiceFs {
       mkdirSync(path, { recursive: true });
     },
     writeFile(path: string, content: string): void {
-      writeFileSync(path, content, "utf8");
+      const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
+      const fd = openSync(path, constants.O_CREAT | constants.O_WRONLY | noFollow, 0o600);
+      try {
+        if (!fstatSync(fd).isFile()) throw new Error("refusing non-file service unit");
+        ftruncateSync(fd, 0);
+        writeFileSync(fd, content, "utf8");
+      } finally {
+        closeSync(fd);
+      }
     },
     removeFile(path: string): void {
       rmSync(path, { force: true });
     },
     fileExists(path: string): boolean {
       return existsSync(path);
+    },
+    isSymbolicLink(path: string): boolean {
+      try {
+        return lstatSync(path).isSymbolicLink();
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+        throw error;
+      }
     }
   };
 }
@@ -290,19 +320,25 @@ export function createServiceModule(deps: ServiceModuleDeps): ServiceModule {
     return resolveServicePlan(environment);
   }
 
-  async function isRegisteredForPlan(resolvedPlan: ServicePlan): Promise<boolean> {
+  async function isCurrentRegisteredForPlan(resolvedPlan: ServicePlan): Promise<boolean> {
     if (resolvedPlan.manager === "schtasks") {
       const current = await runner.run("schtasks", ["/Query", "/TN", WINDOWS_TASK_NAME], {
         timeoutMs: SERVICE_COMMAND_TIMEOUT_MS
       });
-      if (current.ok) return true;
+      return current.ok;
+    }
+    return resolvedPlan.unitPath !== "" && fs.fileExists(resolvedPlan.unitPath);
+  }
+
+  async function isRegisteredForPlan(resolvedPlan: ServicePlan): Promise<boolean> {
+    if (await isCurrentRegisteredForPlan(resolvedPlan)) return true;
+    if (resolvedPlan.manager === "schtasks") {
       const legacy = await runner.run("schtasks", ["/Query", "/TN", LEGACY_WINDOWS_TASK_NAME], {
         timeoutMs: SERVICE_COMMAND_TIMEOUT_MS
       });
       return legacy.ok;
     }
 
-    if (resolvedPlan.unitPath !== "" && fs.fileExists(resolvedPlan.unitPath)) return true;
     const legacyPath = legacyUnitPath(resolvedPlan);
     return legacyPath !== "" && fs.fileExists(legacyPath);
   }
@@ -345,6 +381,9 @@ export function createServiceModule(deps: ServiceModuleDeps): ServiceModule {
       if (needsUnitFile) {
         try {
           fs.mkdirp(dirname(resolvedPlan.unitPath));
+          if (fs.isSymbolicLink(resolvedPlan.unitPath)) {
+            throw new Error("refusing to replace a symlinked service unit");
+          }
           const windowsUserId = resolvedPlan.manager === "schtasks" ? await resolveWindowsUserId() : null;
           fs.writeFile(resolvedPlan.unitPath, renderUnit(resolvedPlan, process.env, windowsUserId));
         } catch (error) {
@@ -371,6 +410,37 @@ export function createServiceModule(deps: ServiceModuleDeps): ServiceModule {
         ok: true,
         message: `hive registered as a ${scopePhrase(resolvedPlan)} service and started. It will restart on crash and start on boot/login.`
       };
+    },
+
+    async start(): Promise<ServiceResult> {
+      let resolvedPlan: ServicePlan;
+      try {
+        resolvedPlan = withResolvedUnitPath(plan());
+        if (!(await isCurrentRegisteredForPlan(resolvedPlan))) {
+          return {
+            ok: false,
+            message: "hive service is not installed; run 'hive service-install' first."
+          };
+        }
+      } catch (error) {
+        return {
+          ok: false,
+          message: `Could not start hive service: ${error instanceof Error ? error.message : "unknown error"}.`
+        };
+      }
+
+      const { allOk, firstFailure, firstFailureResult } = await runAll(
+        runner,
+        startCommands(resolvedPlan, uid),
+        { isNonFatalFailure: (_command, result) => isAlreadyRunningTaskFailure(result) }
+      );
+      if (!allOk) {
+        return {
+          ok: false,
+          message: `A service-manager start command (${firstFailure?.command ?? "unknown"}) reported an error: ${describeFailure(firstFailureResult)}.`
+        };
+      }
+      return { ok: true, message: `hive service started (${scopePhrase(resolvedPlan)}).` };
     },
 
     async stop(): Promise<ServiceResult> {

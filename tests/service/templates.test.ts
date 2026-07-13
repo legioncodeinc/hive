@@ -1,5 +1,4 @@
 import { resolveServicePlan } from "../../src/service/platform.js";
-import { resolveLaunchdLogPaths } from "../../src/shared/apiary-root.js";
 import {
   apiaryHomePin,
   quoteSystemdToken,
@@ -15,6 +14,17 @@ import {
 import { fixedEnv } from "./helpers.js";
 
 describe("hive service templates", () => {
+  it("AC-b9 pins every platform to the fixed service-daemon logging boundary", () => {
+    const launchd = renderLaunchdPlist(resolveServicePlan(fixedEnv({ platform: "darwin", execPath: "/opt/hive/dist/cli.js" })));
+    const systemd = renderSystemdUnit(resolveServicePlan(fixedEnv({ platform: "linux", execPath: "/opt/hive/dist/cli.js" })));
+    const windows = renderScheduledTaskXml(resolveServicePlan(fixedEnv({ platform: "win32", execPath: "C:\\hive\\dist\\cli.js" })));
+
+    expect(launchd).toContain(`<string>${HIVE_START_COMMAND}</string>`);
+    expect(systemd).toContain(` ${HIVE_START_COMMAND}\n`);
+    expect(windows).toContain(` ${HIVE_START_COMMAND}</Arguments>`);
+    expect(`${launchd}\n${systemd}`).not.toMatch(/StandardOut(?:Path|put)|StandardErr(?:orPath|or)/);
+  });
+
   it("rr-AC-10 pins APIARY_HOME into the launchd EnvironmentVariables dict when an override root is active", () => {
     const plan = resolveServicePlan(fixedEnv({ platform: "darwin", home: "/Users/t", execPath: "/opt/hive/dist/cli.js" }));
     const xml = renderLaunchdPlist(plan, { APIARY_HOME: "/custom/fleet-root" });
@@ -22,9 +32,8 @@ describe("hive service templates", () => {
     expect(xml).toContain("<key>EnvironmentVariables</key>");
     expect(xml).toContain("<key>APIARY_HOME</key>");
     expect(xml).toContain("<string>/custom/fleet-root</string>");
-    // The unit's log paths and the pinned root agree (the W-1 coherence requirement).
-    const logs = resolveLaunchdLogPaths({ home: "/Users/t", env: { APIARY_HOME: "/custom/fleet-root" } });
-    expect(xml).toContain(`<string>${logs.out}</string>`);
+    // The service wrapper receives the same pinned root and owns symlink-safe log opening.
+    expect(xml).toContain(`<string>${HIVE_START_COMMAND}</string>`);
   });
 
   it("rr-AC-10 XML-escapes a metacharacter-bearing pinned root in the launchd plist", () => {
@@ -51,13 +60,13 @@ describe("hive service templates", () => {
     expect(apiaryHomePin(darwinPlan, {})).toBeNull();
   });
 
-  it("rr-AC-9 renders launchd log paths under the fleet hive state dir", () => {
+  it("rr-AC-9 delegates log ownership to the cross-platform service wrapper", () => {
     const plan = resolveServicePlan(fixedEnv({ platform: "darwin", home: "/Users/t", execPath: "/opt/hive/dist/cli.js" }));
     const xml = renderLaunchdPlist(plan);
-    const logs = resolveLaunchdLogPaths({ home: "/Users/t", env: process.env });
 
-    expect(xml).toContain(`<string>${logs.out}</string>`);
-    expect(xml).toContain(`<string>${logs.err}</string>`);
+    expect(xml).toContain(`<string>${HIVE_START_COMMAND}</string>`);
+    expect(xml).not.toContain("StandardOutPath");
+    expect(xml).not.toContain("StandardErrorPath");
   });
 
   it("d-AC-2/d-AC-3 renders launchd boot+restart settings", () => {
@@ -79,6 +88,8 @@ describe("hive service templates", () => {
     expect(unit).toContain("WantedBy=default.target");
     expect(unit).toContain(quoteSystemdToken(process.execPath));
     expect(unit).toContain(`${quoteSystemdToken("/opt/hive/dist/cli.js")} ${HIVE_START_COMMAND}`);
+    expect(unit).not.toContain("StandardOutput=");
+    expect(unit).not.toContain("StandardError=");
   });
 
   it("d-AC-2/d-AC-3 renders schtasks restart-on-failure + logon trigger", () => {

@@ -58,7 +58,7 @@ jobs:
       # (zizmor artipacked hardening). This gate only reads the repo; it
       # never pushes.
       - name: Checkout
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
 
@@ -85,6 +85,9 @@ jobs:
       # win32 but exercised).
       - name: Build (tsc + esbuild bundles)
         run: npm run build
+
+      - name: Packed CLI conformance
+        run: npm run test:packed-cli
 
       # Packaging sanity: prove `npm pack` assembles the publishable tarball
       # (the `files: ["dist"]` allowlist plus package.json/README/LICENSE)

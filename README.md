@@ -131,7 +131,7 @@ cd hive
 npm install
 npm run build        # tsc + esbuild → dist/cli.js
 
-npm start            # runs `node dist/cli.js start`, binds :3853
+node dist/cli.js daemon  # foreground development process, binds :3853
 npm run typecheck    # tsc --noEmit
 npm test             # vitest run
 ```
@@ -153,18 +153,35 @@ Open `http://127.0.0.1:3853` and the shell renders immediately, even on a cold b
 
 ## ⌨️ Using the CLI
 
-The `hive` binary keeps a deliberately small surface. It's a portal daemon, not a Swiss Army knife:
+The `hive` binary now follows the shared Apiary operational contract. Bare invocation and `--help` show Hive's ASCII identity, `HIVE`, the package version, grouped commands, and the exact credit `Legion Code Inc. x Activeloop`.
 
 ```bash
-hive start                # run the portal daemon on :3853 (the default verb)
-hive stop                 # stop the portal daemon (service manager or direct SIGTERM)
-hive install-service      # install the OS service unit (launchd / systemd / schtasks)
-hive uninstall-service    # remove the service unit
-hive uninstall            # stop, remove service, registry entry, and hive state dir
-hive register             # append Hive to Doctor's daemon registry
+hive start                # start the already-installed OS service
+hive stop                 # stop the installed OS service
+hive restart              # stop, start, and wait for Hive health
+hive install              # onboard Hive: reconcile the service and Doctor registration
+hive uninstall            # full product removal; only Hive-owned state is eligible
+hive service-install      # install or reconcile only the OS service definition
+hive service-uninstall    # remove only the OS service; preserve state and registration
+hive update               # update through Hive's approved package channel and verify health
+hive status               # show service, process, health, registration, version, and paths
+hive register             # idempotently upsert Hive in Doctor's registry
+hive logs                 # tail only Hive's configured service logs
+hive telemetry            # read-only telemetry state and delivery-health summary
+hive daemon               # run Hive in the foreground on 127.0.0.1:3853
+hive --help               # branded, grouped command reference
+hive --version            # exactly: hive v<package-version>
 ```
 
-That's the whole list, on purpose. Day to day you never touch it; the installer wires the service unit and registration, Doctor keeps the process alive, and you live in the browser.
+`start` no longer means "run the foreground process." It controls the installed service and fails with guidance to run `hive service-install` when no service exists. Use `hive daemon` for foreground development, containers, or direct process supervision.
+
+`install` and `service-install` intentionally own different transactions. `install` performs Hive onboarding and Doctor registration; `service-install` touches only the OS service definition. Likewise, `service-uninstall` preserves Hive state and Doctor registration, while `uninstall` performs the full product-removal transaction. The old `install-service` and `uninstall-service` spellings remain temporary deprecated aliases, but new scripts and documentation must use `service-install` and `service-uninstall`.
+
+Every baseline operational command accepts `--json`. JSON mode emits one stable object with `product`, `command`, `ok`, and `message` (plus command-specific details), one trailing newline, and no banner, color, credit, prompt, or extra prose. Success and already-satisfied idempotent operations exit `0`; service/runtime failures exit `1`; unknown commands and usage errors exit `2`. Automation should branch on the exit code and JSON fields rather than on a human sentence or stream.
+
+`logs` is hard-bound to Hive's own service identity and log destination. It defaults to the last 100 lines plus follow mode and supports `--lines <n>`, `--no-follow`, and `--since <duration-or-timestamp>`. `status` is a bounded snapshot and does not start Hive. Bare `telemetry` is read-only, reports the controlling opt-out setting and available delivery state, and never prints credentials.
+
+For the full migration and automation checklist, see [PRD-003 CLI migration](library/knowledge/private/operations/prd-003-cli-migration.md).
 
 Two behaviors worth knowing:
 

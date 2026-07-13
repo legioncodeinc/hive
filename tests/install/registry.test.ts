@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -6,6 +6,7 @@ import {
   buildHiveRegistryEntry,
   createNodeRegistryFs,
   deleteHiveFromDoctor,
+  RegistryDocumentError,
   registerHiveWithDoctor,
   registryContainsHiveEntry,
   resolveRegistryWritePath,
@@ -69,6 +70,7 @@ describe("hive registry writer", () => {
       const hive = parsed.daemons.find((entry) => entry["name"] === "hive");
       expect(hive).toEqual(buildHiveRegistryEntry());
       expect(hive?.["pidPath"]).toBe(resolveHiveRegistryPidPath());
+      if (process.platform !== "win32") expect(statSync(registryPath).mode & 0o777).toBe(0o600);
     });
   });
 
@@ -165,6 +167,78 @@ describe("hive registry writer", () => {
     });
   });
 
+  it("fails closed on malformed registry JSON without discarding peer data", () => {
+    return withTempDir((dir) => {
+      const registryPath = join(dir, "registry.json");
+      const malformed = '{"daemons":[{"name":"honeycomb"}],';
+      writeFileSync(registryPath, malformed, "utf8");
+
+      expect(() => registerHiveWithDoctor({ registryPath })).toThrow(RegistryDocumentError);
+      expect(() => deleteHiveFromDoctor({ registryPath })).toThrow(RegistryDocumentError);
+      expect(readFileSync(registryPath, "utf8")).toBe(malformed);
+      expect(readdirSync(dir).some((name) => name.includes(".tmp-") || name.endsWith(".lock"))).toBe(false);
+    });
+  });
+
+  it("performs the complete read-modify-rename transaction while holding the registry lock", () => {
+    const registryPath = "/virtual/registry.json";
+    const base = createMemoryRegistryFs({
+      [registryPath]: JSON.stringify({ daemons: [{ name: "honeycomb" }] })
+    });
+    let lockDepth = 0;
+    const fs: RegistryFs = {
+      ...base,
+      readFile(path) {
+        expect(lockDepth).toBe(1);
+        return base.readFile(path);
+      },
+      rename(from, to) {
+        expect(lockDepth).toBe(1);
+        base.rename(from, to);
+      },
+      withLock(_path, operation) {
+        expect(lockDepth).toBe(0);
+        lockDepth += 1;
+        try { return operation(); } finally { lockDepth -= 1; }
+      }
+    };
+
+    registerHiveWithDoctor({ registryPath, fs });
+    expect(lockDepth).toBe(0);
+    expect(JSON.parse(base.files.get(registryPath) ?? "{}").daemons).toEqual([
+      { name: "honeycomb" },
+      buildHiveRegistryEntry()
+    ]);
+  });
+
+  it("reclaims an old lock only when its recorded owner is dead", () => {
+    return withTempDir((dir) => {
+      const registryPath = join(dir, "registry.json");
+      const lockPath = `${registryPath}.lock`;
+      writeFileSync(lockPath, JSON.stringify({ pid: 2_147_483_647, token: "dead", createdAt: 0 }));
+      const old = new Date(Date.now() - 60_000);
+      utimesSync(lockPath, old, old);
+
+      expect(registerHiveWithDoctor({ registryPath }).updatedExistingEntry).toBe(false);
+      expect(readdirSync(dir).some((name) => name.endsWith(".lock"))).toBe(false);
+      expect(JSON.parse(readFileSync(registryPath, "utf8")).daemons).toContainEqual(buildHiveRegistryEntry());
+    });
+  });
+
+  it("does not reclaim an old lock whose recorded owner is still alive", () => {
+    return withTempDir((dir) => {
+      const registryPath = join(dir, "registry.json");
+      const lockPath = `${registryPath}.lock`;
+      const content = JSON.stringify({ pid: process.pid, token: "live", createdAt: 0 });
+      writeFileSync(lockPath, content);
+      const old = new Date(Date.now() - 60_000);
+      utimesSync(lockPath, old, old);
+
+      expect(() => registerHiveWithDoctor({ registryPath })).toThrow("Timed out waiting for Doctor registry lock");
+      expect(readFileSync(lockPath, "utf8")).toBe(content);
+    });
+  }, 5_000);
+
   it("b-AC-3 deleteHiveFromDoctor removes hive and preserves other entries", () => {
     return withTempDir((dir) => {
       const registryPath = join(dir, "registry.json");
@@ -197,6 +271,26 @@ describe("hive registry writer", () => {
       const registryPath = join(dir, "missing.json");
       expect(deleteHiveFromDoctor({ registryPath })).toEqual({ removed: false, registryPaths: [] });
     });
+  });
+
+  it("acquires the registry lock before deciding an initially absent entry is missing", () => {
+    const registryPath = "/virtual/registry.json";
+    const base = createMemoryRegistryFs({});
+    let lockAcquired = false;
+    const fs: RegistryFs = {
+      ...base,
+      withLock(_path, operation) {
+        lockAcquired = true;
+        base.files.set(registryPath, JSON.stringify({ daemons: [buildHiveRegistryEntry()] }));
+        return operation();
+      }
+    };
+
+    const result = deleteHiveFromDoctor({ registryPath, fs });
+
+    expect(lockAcquired).toBe(true);
+    expect(result).toEqual({ removed: true, registryPaths: [registryPath] });
+    expect(JSON.parse(base.files.get(registryPath) ?? "{}").daemons).toEqual([]);
   });
 
   it("b-AC-3 default delete fans out over the write, fleet, and legacy registry paths", () => {
