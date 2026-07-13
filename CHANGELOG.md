@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.11.1 — 2026-07-13
+
+Fixed search-result badges so hits from the live daemon correctly display their memory type (e.g. 'gotcha') instead of always falling back to 'fact'.
+
 ## v0.11.0 — 2026-07-13
 
 The dashboard's Add Memory form now includes an explicit destination-project selector (defaulting to the currently viewed project, with Inbox always available) so new memories are filed exactly where you intend.
