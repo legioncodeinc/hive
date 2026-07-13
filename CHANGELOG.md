@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.10.1 — 2026-07-12
+
+Search results in the dashboard's memory browser now render as the same interactive, clickable cards as the browse list, complete with relevance score and working edit/forget actions, instead of a separate inert display.
+
 ## v0.10.0 — 2026-07-12
 
 The Memory Graph dashboard page now explains why the graph is empty (persistence off, no entities extracted yet, or a query error) and lets you enable graph persistence directly from the page, plus a new Memory graph toggle in Settings.
