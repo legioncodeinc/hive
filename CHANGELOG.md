@@ -2,10 +2,6 @@
 
 ## v0.12.0 — 2026-07-13
 
-Standardize Hive on the Apiary CLI contract with branded help, canonical lifecycle verbs, JSON output, service logs, status, telemetry, and safe update support. `start` now controls the installed service; use `hive daemon` for foreground execution. The old `install-service` and `uninstall-service` spellings remain as deprecated aliases during the migration window.
-
-## Unreleased — PRD-003 CLI interface adoption
-
 Hive now follows the shared Apiary CLI contract. The canonical operational surface is `start`, `stop`, `restart`, `install`, `uninstall`, `service-install`, `service-uninstall`, `update`, `status`, `register`, `logs`, and `telemetry`, with `--help`, `--version`, `--json`, and `--no-color`; `daemon` remains Hive's product-specific foreground command.
 
 This is an operator-visible semantic migration:

@@ -273,6 +273,26 @@ describe("hive registry writer", () => {
     });
   });
 
+  it("acquires the registry lock before deciding an initially absent entry is missing", () => {
+    const registryPath = "/virtual/registry.json";
+    const base = createMemoryRegistryFs({});
+    let lockAcquired = false;
+    const fs: RegistryFs = {
+      ...base,
+      withLock(_path, operation) {
+        lockAcquired = true;
+        base.files.set(registryPath, JSON.stringify({ daemons: [buildHiveRegistryEntry()] }));
+        return operation();
+      }
+    };
+
+    const result = deleteHiveFromDoctor({ registryPath, fs });
+
+    expect(lockAcquired).toBe(true);
+    expect(result).toEqual({ removed: true, registryPaths: [registryPath] });
+    expect(JSON.parse(base.files.get(registryPath) ?? "{}").daemons).toEqual([]);
+  });
+
   it("b-AC-3 default delete fans out over the write, fleet, and legacy registry paths", () => {
     // No registryPath override: exercises the real candidate chain
     // [resolveRegistryWritePath(), resolveFleetRegistryPath(), resolveLegacyDoctorRegistryPath()]

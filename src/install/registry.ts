@@ -252,12 +252,6 @@ function registryHasHiveEntry(path: string, fs: RegistryFs): boolean {
 }
 
 function deleteHiveEntryAtPath(path: string, fs: RegistryFs): boolean {
-  try {
-    fs.readFile(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
   fs.mkdirp(dirname(path));
   return withRegistryLock(path, fs, () => {
     const parsed = readRegistryDocument(path, fs);
